@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY vividora ./vividora
 COPY presets ./presets
 COPY fonts ./fonts
+COPY starter ./starter
 # make the Devanagari font visible to libass
 RUN mkdir -p /usr/local/share/fonts/vividora && cp fonts/*.ttf /usr/local/share/fonts/vividora/ && fc-cache -f
 

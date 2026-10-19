@@ -55,6 +55,8 @@ def create_app() -> Starlette:
     settings.media_root.mkdir(parents=True, exist_ok=True)
     db.init()
     ensure_admin()
+    from .bootstrap import ensure_starter
+    ensure_starter()
 
     api_routes = [Route("/health", health), *auth.routes, *projects.routes, *uploads.routes, *workers.routes, *library.routes, *publish.routes, *plan.routes, *analytics.routes, *channels.routes]
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]

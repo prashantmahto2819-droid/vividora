@@ -25,3 +25,16 @@ def ensure_admin() -> None:
     log.warning("पहला admin बनाया: %s — login के बाद password ज़रूर बदलें", settings.admin_email)
     if settings.admin_password == "change-me-now":
         log.warning("ADMIN_PASSWORD .env में सेट नहीं है — default password इस्तेमाल हो रहा है")
+
+
+def ensure_starter() -> None:
+    """Fill an empty library with the bundled starter pack (music, SFX, stickers, frames, LUTs…)."""
+    from .api.library import install_starter
+    for ws in db.rows(db.conn().execute("SELECT id FROM workspaces")):
+        has = db.conn().execute("SELECT COUNT(*) FROM library WHERE workspace_id = ? AND source = 'starter'", (ws["id"],)).fetchone()[0]
+        if not has:
+            try:
+                n = install_starter(ws["id"])
+                log.info("starter pack: %s items added", n)
+            except Exception as e:  # noqa: BLE001
+                log.warning("starter pack failed: %s", e)

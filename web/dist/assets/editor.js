@@ -554,7 +554,9 @@ function renderPanel() {
   } else if (t === "media" || t === "audio" || t === "overlay") {
     const kinds = t === "media" ? ["broll", "image", "sticker"] : t === "audio" ? ["music", "sfx"] : ["logo", "frame", "lut"];
     if (!kinds.includes(E.libKind)) E.libKind = kinds[0];
-    const items = (E.lib || []).filter((x) => x.kind === E.libKind);
+    const subTags = { sticker: ["", "popup", "emoji", "social", "shape"], music: ["", "motivational", "emotional", "lofi", "upbeat", "cinematic", "story", "energetic", "news"], frame: ["", "vertical", "horizontal"], broll: ["", "background", "overlay"] }[E.libKind] || [];
+    const lq = (E.libQ || "").toLowerCase();
+    const items = (E.lib || []).filter((x) => x.kind === E.libKind && (!E.libTag || (`,${x.tags},`).includes(`,${E.libTag},`)) && (!lq || x.name.toLowerCase().includes(lq) || (x.tags || "").includes(lq)));
     const music = fx.music, wm = fx.watermark;
     const pclips = E.p.assets.filter((a) => a.kind === "clip").sort((a, b) => (a.meta?.order || 0) - (b.meta?.order || 0));
     const clipBox = t === "media" && !E.montage ? `<div class="box"><div class="row between"><b>Project clips · ${pclips.length || 1}</b>${E.canEdit ? `<label class="btn small">+ clip जोड़ें<input type="file" id="clip-file" accept="video/*,.mkv,.mts" multiple hidden></label>` : ""}</div>
@@ -565,6 +567,8 @@ function renderPanel() {
       <div class="seg">${kinds.map((k) => `<button data-kind="${k}" class="${E.libKind === k ? "on" : ""}">${LIB_KINDS.find((x) => x[0] === k)[1]}</button>`).join("")}</div>
       <label class="drop small ${dis ? "off" : ""}"><input type="file" id="lib-file" multiple hidden ${dis}>${ICON.plus} ${E.libKind} upload करें <span class="muted">(${{ music: "mp3/wav", sfx: "mp3/wav", broll: "mp4/mov", image: "png/jpg", sticker: "png (transparent)", logo: "png", frame: "png 1080×1920/1920×1080 transparent", lut: ".cube" }[E.libKind]})</span></label>
       <div id="lib-progress"></div>
+      <div class="irow"><input id="lib-q" placeholder="खोजें…" value="${esc(E.libQ || "")}" style="flex:1"><a class="btn small quiet" href="#/library" title="पूरी library">⤢</a></div>
+      ${subTags.length ? `<div class="seg wrap" style="flex-wrap:wrap;margin:.3rem 0">${subTags.map((tg) => `<button data-ltag="${tg}" class="${(E.libTag || "") === tg ? "on" : ""}">${tg || "सब"}</button>`).join("")}</div>` : ""}
       ${t === "audio" && E.libKind === "music" ? `<div class="box"><b>Background music</b>${music.id ? `<p class="small">${esc(libItem(music.id)?.name || music.id)}</p>` : `<p class="small muted">library से “लगाएँ” दबाएँ</p>`}
         <div class="irow">${field("आवाज़", `<input type="range" id="mus-vol" min="0" max="0.6" step="0.02" value="${music.volume}" ${dis}>`)}<label class="chk small"><input type="checkbox" id="mus-duck" ${music.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा (duck)</label></div>
         ${music.id ? `<button class="btn small quiet" id="mus-clear">हटाएँ</button>` : ""}</div>` : ""}
@@ -576,7 +580,7 @@ function renderPanel() {
         ${field("opacity", `<input type="range" id="frm-op" min="0.2" max="1" step="0.05" value="${fx.frame?.opacity ?? 1}" ${dis}>`)}${fx.frame?.id ? `<button class="btn small quiet" id="frm-clear">हटाएँ</button>` : ""}</div>` : ""}
       ${t === "overlay" && E.libKind === "lut" ? `<p class="small muted">LUT (.cube) लगाने पर Effects का look बदल जाता है। अभी: <b>${fx.look?.startsWith("lut:") ? esc(libItem(fx.look.slice(4))?.name || "LUT") : "कोई नहीं"}</b></p>` : ""}
       <ul class="lib">${E.lib === null ? `<li class="muted small">लोड हो रहा…</li>` : items.map((x) => `<li data-lib="${x.id}">
-        ${["image", "logo", "sticker", "frame"].includes(x.kind) ? `<img src="${x.url}" alt="">` : x.kind === "broll" ? `<video src="${x.url}#t=0.5" muted preload="metadata"></video>` : `<i class="libicon">${ICON.audio}</i>`}
+        ${["image", "logo", "sticker", "frame"].includes(x.kind) ? `<img src="${x.url}" alt="" loading="lazy" style="object-fit:contain;background:repeating-conic-gradient(#1a2130 0 25%,#222b3b 0 50%) 50%/10px 10px">` : x.kind === "broll" ? `<video src="${x.url}#t=0.5" muted preload="metadata"></video>` : `<i class="libicon">${ICON.audio}</i>`}
         <div class="grow"><b class="small">${esc(x.name)}</b><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}${x.meta?.width ? ` · ${x.meta.width}×${x.meta.height}` : ""}</span></div>
         ${x.kind === "music" || x.kind === "sfx" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
         <button class="btn small primary" data-add="${x.id}" ${dis}>${{ music: "लगाएँ", logo: "लगाएँ", lut: "लगाएँ", frame: "लगाएँ" }[x.kind] || "+ जोड़ें"}</button>
@@ -705,7 +709,9 @@ function bindPanel() {
   $$("[data-clipdel]", panel).forEach((b) => (b.onclick = async () => { if (!confirm("clip हटाएँ? बाद में “दोबारा जोड़ें” दबाएँ।")) return; await api("DELETE", `/projects/${E.pid}/clips/${b.dataset.clipdel}`); E.p.assets = E.p.assets.filter((a) => a.id !== b.dataset.clipdel); renderPanel(); }));
   on("#clip-rebuild", "onclick", async () => { try { await api("POST", `/projects/${E.pid}/start`); toast("clips जुड़ रहे हैं"); const ctx = E.ctx; unmount(); await ctx.load(); ctx.render(); } catch (err) { toast(err.message); } });
   // library
-  $$("[data-kind]", panel).forEach((b) => (b.onclick = () => { E.libKind = b.dataset.kind; renderPanel(); }));
+  $$("[data-kind]", panel).forEach((b) => (b.onclick = () => { E.libKind = b.dataset.kind; E.libTag = ""; renderPanel(); }));
+  $$("[data-ltag]", panel).forEach((b) => (b.onclick = () => { E.libTag = b.dataset.ltag; renderPanel(); }));
+  on("#lib-q", "oninput", (e) => { E.libQ = e.target.value; const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; const i = $("#lib-q", panel); i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
   on("#lib-file", "onchange", async (e) => { for (const f of e.target.files) await libUpload(E.libKind, f); renderPanel(); });
   $$("[data-prev]", panel).forEach((b) => (b.onclick = () => { const x = libItem(b.dataset.prev); if (E.audio) { E.audio.pause(); if (E.audio.src === x.url) { E.audio = null; return; } } E.audio = new Audio(x.url); E.audio.play(); }));
   $$("[data-add]", panel).forEach((b) => (b.onclick = () => libAdd(libItem(b.dataset.add))));

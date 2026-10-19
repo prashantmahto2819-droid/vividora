@@ -185,3 +185,22 @@ th { color: var(--muted); font-weight: 500; }
 .chgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem; }
 .chcard { border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 10px; padding: .6rem .8rem; cursor: pointer; display: flex; flex-direction: column; background: var(--panel); }
 .chcard.on { outline: 2px solid var(--amber); } .chcard:hover { border-color: var(--muted); }
+
+/* library */
+.libtabs { display: flex; gap: .4rem; margin: .5rem 0 1rem; } .libtabs button { background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: .4rem .9rem; cursor: pointer; }
+.libtabs button.on { color: var(--text); border-color: var(--amber); }
+.libbar { display: flex; gap: .5rem; margin-bottom: .6rem; flex-wrap: wrap; } .libbar input { flex: 1; min-width: 200px; } .libbar input, .libbar select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .5rem .7rem; color: var(--text); }
+.libcats { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .8rem; } .libcats button { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: .35rem .65rem; cursor: pointer; font-size: .85rem; }
+.libcats button.on { background: rgba(242,179,61,.15); border-color: var(--amber); } .libcats i { font-style: normal; color: var(--muted); font-size: .75rem; margin-left: .2rem; }
+.libcats.moods button { font-size: .78rem; padding: .25rem .55rem; }
+.lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .6rem; }
+.lcard { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.lcard:hover { border-color: #3b4858; } .lcard .ldel { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,.55); color: #fff; width: 24px; height: 24px; display: none; }
+.lcard:hover .ldel { display: flex; }
+.lprev { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: #0d1117; overflow: hidden; }
+.lprev.chk { background: repeating-conic-gradient(#1a2130 0 25%, #222b3b 0 50%) 50% / 18px 18px; }
+.lprev img, .lprev video { max-width: 100%; max-height: 100%; object-fit: contain; } .lprev video { width: 100%; height: 100%; object-fit: cover; }
+.lprev.aud { flex-direction: column; gap: .3rem; aspect-ratio: 2/1; }
+.lbody { padding: .4rem .5rem; display: flex; flex-direction: column; min-width: 0; } .lbody b { font-size: .8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lbody span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .72rem; }
+.lcard select, .lcard > .btn { margin: 0 .5rem .4rem; }

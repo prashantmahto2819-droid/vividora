@@ -29,7 +29,7 @@ function logout() { S.token = null; S.user = null; localStorage.removeItem("vivi
 function toast(msg, ms = 2600) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
 
 // ---------- routing ----------
-function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
+function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
 function go(path) { location.hash = path; }
 window.addEventListener("hashchange", () => { S.route = parseRoute(); load().then(render); });
 
@@ -47,6 +47,7 @@ async function load() {
   if (S.route.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (S.route.kind === "users") S.users = await api("GET", "/users").catch(() => []);
   if (S.route.kind === "plan") { const [t, i, n, r] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = r; }
+  if (S.route.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
   if (S.route.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
   if (S.route.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); }
   schedulePoll();
@@ -85,13 +86,13 @@ function render() {
       ${S.channels.length ? `<div class="chsw"><select id="ch-switch" title="channel">${S.channels.map((c) => `<option value="${c.id}" ${c.id === S.channel ? "selected" : ""}>${esc(c.name)}${c.handle ? " · " + esc(c.handle) : ""}</option>`).join("")}</select>${S.user.role === "admin" ? `<a class="ibtn" href="#/settings" title="channels manage">⚙</a>` : ""}</div>` : ""}
       <div class="rail-list">${S.projects.length ? S.projects.map(projRow).join("") : `<p class="muted" style="padding:1rem">अभी कोई project नहीं। "+ नया" से पहली recording डालें।</p>`}</div>
       <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
-        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/analytics">analytics</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
+        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/library">library</a><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/analytics">analytics</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
     </aside>
-    <main class="main ${r.kind === "home" ? "wide" : ""}">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : r.kind === "analytics" ? analyticsView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
+    <main class="main ${r.kind === "home" ? "wide" : ""}">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : r.kind === "analytics" ? analyticsView() : r.kind === "library" ? libraryView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
   </div>`;
   $("#logout").onclick = logout;
   const chs = $("#ch-switch"); if (chs) chs.onchange = () => { S.channel = chs.value; localStorage.setItem("vividora_channel", S.channel); load().then(render); };
-  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics();
+  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics(); if (r.kind === "library") bindLibrary();
   if (detail && S.project) bindProject(S.project);
 }
 
@@ -470,6 +471,67 @@ function bindPlan() {
   const drop = $("#idea-drop"); if (drop) drop.onclick = async () => { if (confirm("यह idea हटाएँ?")) { await api("PATCH", `/ideas/${id}`, { status: "dropped" }); S.ideaOpen = null; load().then(render); } };
   const sc = $("#idea-script"); if (sc) sc.onclick = async () => { sc.disabled = true; sc.textContent = "लिख रहा है…"; await api("PATCH", `/ideas/${id}`, collect()); try { const r = await api("POST", `/ideas/${id}/script`, { seconds: $("#script-secs").value || null }); toast(r.source === "llm" ? "script तैयार" : "template बना (AI key नहीं)"); } catch (e) { toast(e.message); } load().then(render); };
   $("#idea-status").onchange = async () => { await api("PATCH", `/ideas/${id}`, { status: $("#idea-status").value }); load().then(render); };
+}
+
+// ---------- library ----------
+const LIBCATS = [
+  ["all", "सब", null], ["music", "🎵 Music", { kind: "music" }], ["sfx", "🔊 SFX", { kind: "sfx" }], ["popup", "📣 Popups & CTA", { tag: "popup" }],
+  ["emoji", "😀 Emoji", { tag: "emoji" }], ["social", "📱 Social icons", { tag: "social" }], ["shape", "➡️ Arrows & shapes", { tag: "shape" }],
+  ["frame", "🖼 Frames", { kind: "frame" }], ["broll", "🎬 B-roll & backgrounds", { kind: "broll" }], ["image", "🏞 Images", { kind: "image" }],
+  ["lut", "🎨 LUTs", { kind: "lut" }], ["logo", "🔖 Logos", { kind: "logo" }], ["mine", "⬆ मेरे uploads", { source: "upload" }],
+];
+const MOODS = ["motivational", "emotional", "lofi", "upbeat", "cinematic", "story", "energetic", "news"];
+function libFilter(x) {
+  const c = LIBCATS.find((k) => k[0] === (S.libCat || "all"))?.[2]; const q = (S.libQ || "").toLowerCase();
+  if (c?.kind && x.kind !== c.kind) return false; if (c?.tag && !(`,${x.tags},`).includes(`,${c.tag},`)) return false; if (c?.source && x.source !== c.source) return false;
+  if (S.libMood && !(x.tags || "").includes(S.libMood)) return false;
+  return !q || x.name.toLowerCase().includes(q) || (x.tags || "").toLowerCase().includes(q);
+}
+function libCard(x) {
+  const img = ["sticker", "image", "logo", "frame"].includes(x.kind); const vid = x.kind === "broll"; const aud = ["music", "sfx", "voice"].includes(x.kind);
+  return `<div class="lcard" data-id="${x.id}">${img ? `<div class="lprev chk"><img src="${x.url}" loading="lazy" alt=""></div>` : vid ? `<div class="lprev"><video src="${x.url}#t=0.5" muted preload="metadata" loop></video></div>` : aud ? `<div class="lprev aud"><button class="btn small" data-play="${x.id}">▶</button><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}</span></div>` : `<div class="lprev aud">🎨 .cube</div>`}
+    <div class="lbody"><b title="${esc(x.name)}">${esc(x.name)}</b><span class="small muted" title="${esc(x.license || "")}">${esc((x.tags || "").split(",").filter((t) => t && t !== "starter").slice(0, 3).join(" · "))}</span></div>
+    ${S.user.role !== "viewer" ? `<button class="ibtn ldel" data-del="${x.id}" title="हटाएँ">✕</button>` : ""}</div>`;
+}
+function libraryView() {
+  const all = S.lib || []; const items = all.filter(libFilter); const canEdit = S.user.role !== "viewer";
+  const counts = Object.fromEntries(LIBCATS.map(([k, , c]) => [k, all.filter((x) => !c || ((!c.kind || x.kind === c.kind) && (!c.tag || (`,${x.tags},`).includes(`,${c.tag},`)) && (!c.source || x.source === c.source))).length]));
+  return `<div class="row between"><h1>Library</h1><span class="row">${S.user.role === "admin" ? `<button class="btn small quiet" id="lib-starter" title="starter pack दोबारा जोड़ें (जो नहीं है)">⟳ starter pack</button>` : ""}${canEdit ? `<label class="btn small primary">⬆ upload<input type="file" id="lib-up" multiple hidden></label>` : ""}</span></div>
+    <p class="muted small">हर project और autopilot यहीं से music, SFX, stickers, frames, LUTs लेता है। सब free / licence-safe — हर item पर licence लिखा है। Starter pack Vividora ने खुद बनाया है (CC0) + Noto Emoji (Apache) + Simple Icons (CC0)।</p>
+    <div class="libtabs"><button class="${S.libMode !== "web" ? "on" : ""}" data-lm="mine">मेरी library · ${all.length}</button><button class="${S.libMode === "web" ? "on" : ""}" data-lm="web">🌐 Free online खोजें</button></div>
+    ${S.libMode === "web" ? libWebView() : `<div class="libbar"><input id="lib-q" placeholder="खोजें… (fire, subscribe, whoosh, frame)" value="${esc(S.libQ || "")}">
+      ${canEdit ? `<select id="lib-upkind" title="upload किस category में">${["music", "sfx", "sticker", "image", "broll", "frame", "logo", "lut", "voice"].map((k) => `<option ${S.libUpKind === k ? "selected" : ""}>${k}</option>`).join("")}</select>` : ""}</div>
+    <div class="libcats">${LIBCATS.map(([k, l]) => `<button class="${(S.libCat || "all") === k ? "on" : ""}" data-cat="${k}">${l} <i>${counts[k]}</i></button>`).join("")}</div>
+    ${(S.libCat === "music") ? `<div class="libcats moods">${["", ...MOODS].map((m) => `<button class="${(S.libMood || "") === m ? "on" : ""}" data-mood="${m}">${m || "सभी moods"}</button>`).join("")}</div>` : ""}
+    <div class="lgrid">${items.map(libCard).join("") || `<p class="muted">कुछ नहीं मिला।</p>`}</div>`}`;
+}
+function libWebView() {
+  const r = S.libWeb || [];
+  return `<div class="libbar"><select id="lw-src"><option value="openverse-audio" ${S.lwSrc === "openverse-audio" ? "selected" : ""}>🎵 Music/SFX — Openverse (CC, no key)</option><option value="openverse-image" ${S.lwSrc === "openverse-image" ? "selected" : ""}>🏞 Images — Openverse (CC, no key)</option><option value="pixabay-video" ${S.lwSrc === "pixabay-video" ? "selected" : ""}>🎬 B-roll videos — Pixabay (key)</option><option value="pixabay-image" ${S.lwSrc === "pixabay-image" ? "selected" : ""}>🏞 Images/PNG — Pixabay (key)</option><option value="jamendo" ${S.lwSrc === "jamendo" ? "selected" : ""}>🎵 Music — Jamendo (key)</option></select>
+    <input id="lw-q" placeholder="जैसे: motivational piano, sunrise, city timelapse" value="${esc(S.lwQ || "")}"><button class="btn primary small" id="lw-go">खोजें</button></div>
+    <p class="small muted">सिर्फ़ commercial-safe licences दिखते हैं (CC0, CC-BY, CC-BY-SA, Pixabay licence)। CC-BY वाले में credit description में डालना ज़रूरी — import के समय credit item पर save होता है। YouTube Audio Library का API नहीं है: वहाँ से download करके ऊपर "upload" से डालें।</p>
+    <div class="lgrid">${r.map((x, i) => `<div class="lcard">${x.kind === "image" ? `<div class="lprev chk"><img src="${esc(x.preview)}" loading="lazy" alt=""></div>` : x.kind === "broll" ? `<div class="lprev"><img src="${esc(x.preview)}" alt=""></div>` : `<div class="lprev aud"><button class="btn small" data-wplay="${i}">▶</button><span class="small muted">${x.duration ? fmt(x.duration) : ""}</span></div>`}
+      <div class="lbody"><b title="${esc(x.title)}">${esc(x.title)}</b><span class="small muted">${esc(x.license)} · ${esc(x.creator || "")}</span></div>
+      <select class="lw-kind small" data-i="${i}">${(x.kind === "music" ? ["music", "sfx"] : x.kind === "broll" ? ["broll"] : ["image", "sticker", "frame"]).map((k) => `<option>${k}</option>`).join("")}</select><button class="btn small" data-wimp="${i}">+ library</button></div>`).join("") || `<p class="muted small">ऊपर से खोजें।</p>`}</div>`;
+}
+let libAudio = null;
+function bindLibrary() {
+  document.querySelectorAll("[data-lm]").forEach((b) => (b.onclick = () => { S.libMode = b.dataset.lm; render(); }));
+  document.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { S.libCat = b.dataset.cat; S.libMood = ""; render(); }));
+  document.querySelectorAll("[data-mood]").forEach((b) => (b.onclick = () => { S.libMood = b.dataset.mood; render(); }));
+  const q = $("#lib-q"); if (q) q.oninput = () => { S.libQ = q.value; const grid = document.querySelector(".lgrid"); grid.innerHTML = (S.lib || []).filter(libFilter).map(libCard).join("") || `<p class="muted">कुछ नहीं मिला।</p>`; bindLibCards(); };
+  const uk = $("#lib-upkind"); if (uk) uk.onchange = () => (S.libUpKind = uk.value);
+  const up = $("#lib-up"); if (up) up.onchange = async () => { const kind = $("#lib-upkind")?.value || "sticker"; for (const f of up.files) { try { const r = await fetch(`/api/library?kind=${kind}&filename=${encodeURIComponent(f.name)}&channel=`, { method: "PUT", headers: { authorization: "Bearer " + S.token, "content-type": "application/octet-stream" }, body: f }); const d = await r.json(); if (!r.ok) throw new Error(d.error); toast(`${f.name} जुड़ा`); } catch (e) { toast(e.message); } } load().then(render); };
+  const st = $("#lib-starter"); if (st) st.onclick = async () => { st.disabled = true; const r = await api("POST", "/library/starter"); toast(`${r.added} नए items`); load().then(render); };
+  const go = $("#lw-go"); if (go) { const run = async () => { S.lwSrc = $("#lw-src").value; S.lwQ = $("#lw-q").value; go.disabled = true; go.textContent = "खोज रहा…"; try { S.libWeb = await api("GET", `/library/search?source=${S.lwSrc}&q=${encodeURIComponent(S.lwQ)}`); } catch (e) { toast(e.message); S.libWeb = []; } render(); }; go.onclick = run; $("#lw-q").onkeydown = (e) => { if (e.key === "Enter") run(); }; }
+  document.querySelectorAll("[data-wplay]").forEach((b) => (b.onclick = () => { const x = S.libWeb[+b.dataset.wplay]; if (libAudio) { libAudio.pause(); if (libAudio.dataset.u === x.url) { libAudio = null; return; } } libAudio = new Audio(x.preview || x.url); libAudio.dataset.u = x.url; libAudio.play(); }));
+  document.querySelectorAll("[data-wimp]").forEach((b) => (b.onclick = async () => { const i = +b.dataset.wimp; const x = S.libWeb[i]; const kind = document.querySelector(`.lw-kind[data-i="${i}"]`).value; b.disabled = true; b.textContent = "…"; try { await api("POST", "/library/import", { ...x, kind, channel_id: null }); b.textContent = "✓ जुड़ा"; } catch (e) { toast(e.message); b.disabled = false; b.textContent = "+ library"; } }));
+  bindLibCards();
+}
+function bindLibCards() {
+  document.querySelectorAll("[data-play]").forEach((b) => (b.onclick = () => { const x = S.lib.find((y) => y.id === b.dataset.play); if (libAudio) { libAudio.pause(); if (libAudio.dataset.u === x.url) { libAudio = null; b.textContent = "▶"; return; } } libAudio = new Audio(x.url); libAudio.dataset.u = x.url; libAudio.play(); b.textContent = "⏸"; libAudio.onended = () => (b.textContent = "▶"); }));
+  document.querySelectorAll(".lcard video").forEach((v) => { v.onmouseenter = () => v.play().catch(() => {}); v.onmouseleave = () => v.pause(); });
+  document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); if (!confirm("library से हटाएँ?")) return; await api("DELETE", `/library/${b.dataset.del}`); S.lib = S.lib.filter((x) => x.id !== b.dataset.del); b.closest(".lcard").remove(); }));
 }
 
 // ---------- analytics ----------

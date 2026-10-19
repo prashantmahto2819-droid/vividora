@@ -1,0 +1,1 @@
+Noto Emoji images — Apache License 2.0, Copyright Google LLC. https://github.com/googlefonts/noto-emoji
