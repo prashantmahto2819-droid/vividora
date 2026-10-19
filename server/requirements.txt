@@ -7,3 +7,5 @@ faster-whisper>=1.1.0
 # pin the hub client: newer releases break ctranslate2 model downloads (metadata_errors)
 huggingface_hub>=0.25,<1.0
 hf_xet<2
+# PyAV 15+ removed av.open(metadata_errors=...) which faster-whisper still uses
+av<15
