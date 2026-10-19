@@ -1,0 +1,4 @@
+faster-whisper>=1.1.0
+# CUDA runtime libraries used by ctranslate2 on Windows (no system CUDA install needed)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

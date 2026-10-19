@@ -1,0 +1,18 @@
+{
+  "id": "yt-short",
+  "label": "YouTube Shorts",
+  "platform": "youtube",
+  "width": 1080,
+  "height": 1920,
+  "fit": "crop",
+  "max_seconds": 180,
+  "loop_friendly_seconds": 60,
+  "burn_captions": true,
+  "sidecar_srt": false,
+  "caption_margin_v": 0.22,
+  "caption_scale": 1.0,
+  "safe_zone": {"width": 1080, "height": 1350},
+  "video": {"crf": 20, "preset": "medium", "fps_max": 60},
+  "audio": {"loudness": -14, "true_peak": -1.5},
+  "notes": "Keep text inside the centre 1080x1350 safe zone."
+}

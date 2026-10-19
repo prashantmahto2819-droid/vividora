@@ -1,0 +1,23 @@
+{
+  "id": "yt-long",
+  "label": "YouTube (लंबा वीडियो)",
+  "platform": "youtube",
+  "width": 1920,
+  "height": 1080,
+  "fit": "blur",
+  "max_seconds": null,
+  "burn_captions": false,
+  "sidecar_srt": true,
+  "caption_margin_v": 0.06,
+  "caption_scale": 0.8,
+  "video": {
+    "crf": 20,
+    "preset": "medium",
+    "fps_max": 60
+  },
+  "audio": {
+    "loudness": -14,
+    "true_peak": -1.5
+  },
+  "notes": "Captions go as a separate SRT file (viewers can switch them on/off; YouTube indexes them)."
+}

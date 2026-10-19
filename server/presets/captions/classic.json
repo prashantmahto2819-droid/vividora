@@ -1,0 +1,19 @@
+{
+  "id": "classic",
+  "label": "क्लासिक",
+  "description": "सफ़ेद अक्षर, काली बॉर्डर — हर वीडियो पर साफ़ पढ़ने लायक",
+  "mode": "line",
+  "font": "Noto Sans Devanagari",
+  "bold": true,
+  "size": 0.062,
+  "primary": "#FFFFFF",
+  "highlight": "#FFFFFF",
+  "outline_color": "#000000",
+  "outline": 0.0055,
+  "shadow": 0.002,
+  "box": false,
+  "max_words": 7,
+  "max_chars": 24,
+  "max_lines": 2,
+  "size_note": "size, outline, shadow are fractions of the short side of the video (1080 for both 9:16 and 16:9)"
+}

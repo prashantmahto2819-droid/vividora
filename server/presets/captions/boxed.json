@@ -1,0 +1,21 @@
+{
+  "id": "boxed",
+  "label": "बॉक्स",
+  "description": "काले पारदर्शी बॉक्स में सफ़ेद अक्षर — भीड़-भाड़ वाले बैकग्राउंड पर",
+  "mode": "line",
+  "font": "Noto Sans Devanagari",
+  "bold": true,
+  "size": 0.058,
+  "primary": "#FFFFFF",
+  "highlight": "#FFFFFF",
+  "outline_color": "#000000",
+  "outline": 0.014,
+  "shadow": 0,
+  "box": true,
+  "box_color": "#000000",
+  "box_alpha": 0.55,
+  "max_words": 7,
+  "max_chars": 24,
+  "max_lines": 2,
+  "size_note": "size, outline, shadow are fractions of the short side of the video (1080 for both 9:16 and 16:9)"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "ig-reel",
+  "label": "Instagram Reels",
+  "platform": "instagram",
+  "width": 1080,
+  "height": 1920,
+  "fit": "crop",
+  "max_seconds": 180,
+  "recommended_seconds": 90,
+  "burn_captions": true,
+  "sidecar_srt": false,
+  "caption_margin_v": 0.25,
+  "caption_scale": 1.0,
+  "safe_zone": {"width": 1010, "height": 1440},
+  "video": {"crf": 20, "preset": "medium", "fps_max": 30},
+  "audio": {"loudness": -14, "true_peak": -1.5},
+  "notes": "Instagram's bottom bar is taller, so captions sit higher. No other app's watermark."
+}

@@ -1,0 +1,46 @@
+# Vividora — one file runs everything on the Ubuntu VM.
+#   cp .env.example .env   (fill it in)
+#   docker compose up -d --build
+services:
+  api:
+    build: ./server
+    image: vividora/server
+    restart: always
+    env_file: .env
+    environment:
+      DATA_ROOT: /data
+      MEDIA_ROOT: /media
+      ARCHIVE_ROOT: /archive
+    volumes:
+      - ${DATA_DIR:-/srv/studio/data}:/data
+      - ${MEDIA_DIR:-/srv/studio/media}:/media
+      - ${ARCHIVE_DIR:-/srv/studio/archive}:/archive
+      - ./web/dist:/app/web-dist:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    image: vividora/server
+    restart: always
+    env_file: .env
+    environment:
+      API_URL: http://api:8000
+      WORKER_NAME: cpu@docker
+      # TRANSCRIBE_LOCAL: "1"   # CPU transcription when the GPU PC is off (slow)
+    command: ["python", "-m", "vividora.worker.cpu"]
+    depends_on:
+      api:
+        condition: service_healthy
+    # keep WhatsApp gateway / other containers responsive while rendering
+    cpus: ${WORKER_CPUS:-12}
+    mem_limit: ${WORKER_MEM:-16g}
+    volumes:
+      - worker-tmp:/tmp
+
+volumes:
+  worker-tmp:

@@ -1,0 +1,14 @@
+.env
+gpu-worker/gpu-worker.env
+gpu-worker/.venv/
+gpu-worker/lib/
+gpu-worker/models/
+server/data/
+server/media/
+server/web-dist/
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

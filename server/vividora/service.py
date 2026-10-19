@@ -1,0 +1,192 @@
+"""Project workflow: what happens between jobs.
+
+uploading → preparing → transcribing → cutting → review_cuts → rendering
+→ review_output → approved        (any step can land in failed)
+"""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+from typing import Any
+
+from . import db, queue, storage
+from .config import settings
+from .engine import autocut
+from .engine.presets import caption_styles, platforms
+
+DEFAULT_RENDER = {
+    "presets": ["yt-long", "yt-short"],
+    "caption_style": "karaoke",
+    "burn_captions": True,
+    "focus_x": 0.5,
+    "focus_y": 0.5,
+    "hook": {"text": "", "seconds": 3},
+}
+
+
+def log(c, workspace_id: str, action: str, *, user_id: str | None = None,
+        project_id: str | None = None, detail: dict | None = None) -> None:
+    db.insert(c, "activity", {"workspace_id": workspace_id, "user_id": user_id,
+                              "project_id": project_id, "action": action,
+                              "detail": detail or {}, "created_at": db.now()})
+
+
+def set_status(c, project_id: str, status: str, note: str | None = None) -> None:
+    db.update(c, "projects", project_id, {"status": status, "status_note": note,
+                                          "updated_at": db.now()})
+
+
+def add_asset(c, project_id: str, kind: str, rel_path: str, *, label: str | None = None,
+              mime: str | None = None, meta: dict | None = None) -> dict:
+    a = {"id": db.new_id(), "project_id": project_id, "kind": kind, "label": label,
+         "path": rel_path, "size": storage.file_size(rel_path),
+         "mime": mime or storage.guess_mime(rel_path), "meta": meta or {},
+         "archived": False, "created_at": db.now()}
+    db.insert(c, "assets", a)
+    return a
+
+
+def replace_assets(c, project_id: str, kind: str, label: str | None = None,
+                   keep_path: str | None = None) -> None:
+    """Drop older files of this kind (e.g. a previous render for the same preset).
+    A file at `keep_path` is the one being added — never delete it from disk."""
+    q = "SELECT * FROM assets WHERE project_id = ? AND kind = ?"
+    args: list[Any] = [project_id, kind]
+    if label:
+        q += " AND label = ?"
+        args.append(label)
+    for a in db.rows(c.execute(q, args)):
+        if a["path"] != keep_path:
+            try:
+                storage.abs_path(a["path"]).unlink(missing_ok=True)
+            except (ValueError, OSError):
+                pass
+        c.execute("DELETE FROM assets WHERE id = ?", (a["id"],))
+
+
+def asset_of(project_id: str, kind: str, label: str | None = None) -> dict | None:
+    q = "SELECT * FROM assets WHERE project_id = ? AND kind = ?"
+    args: list[Any] = [project_id, kind]
+    if label:
+        q += " AND label = ?"
+        args.append(label)
+    return db.row(db.conn().execute(q + " ORDER BY created_at DESC LIMIT 1", args).fetchone())
+
+
+def start_pipeline(c, project: dict) -> dict:
+    """Called when the upload finished: inspect, clean audio, make preview."""
+    set_status(c, project["id"], "preparing", "फ़ाइल जाँची जा रही है")
+    return queue.enqueue(c, project["id"], "prepare")
+
+
+def after_job(c, job: dict, result: dict) -> None:
+    """Move the project to its next step once a job reports success."""
+    pid = job["project_id"]
+    project = db.get("projects", pid)
+    if project is None:
+        return
+    kind = job["kind"]
+
+    if kind == "prepare":
+        meta = {**project.get("meta", {}), **result.get("meta", {})}
+        db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now()})
+        for f in result.get("files", []):
+            replace_assets(c, pid, f["kind"], keep_path=f["path"])
+            add_asset(c, pid, f["kind"], f["path"], mime=f.get("mime"), meta=f.get("meta"))
+        if meta.get("has_audio"):
+            set_status(c, pid, "transcribing", "transcript बन रहा है (GPU worker)")
+            queue.enqueue(c, pid, "transcribe", {"language": project.get("language", "hi")})
+        else:
+            # no speech → nothing to cut or caption; go straight to review
+            db.update(c, "projects", pid, {"transcript": {"segments": [], "text": ""},
+                                           "edl": autocut.build_edl({"segments": []}, meta["duration"]),
+                                           "updated_at": db.now()})
+            set_status(c, pid, "review_cuts", "कोई आवाज़ नहीं मिली — सीधे render करें")
+
+    elif kind == "transcribe":
+        db.update(c, "projects", pid, {"transcript": result.get("transcript"), "updated_at": db.now()})
+        set_status(c, pid, "cutting", "कट ढूँढे जा रहे हैं")
+        queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {})})
+
+    elif kind == "autocut":
+        db.update(c, "projects", pid, {"edl": result.get("edl"), "updated_at": db.now()})
+        st = result.get("edl", {}).get("stats", {})
+        set_status(c, pid, "review_cuts",
+                   f"{st.get('cuts', 0)} कट सुझाए, {st.get('removed_seconds', 0)}s हटेंगे — जाँचें")
+
+    elif kind == "render":
+        for f in result.get("files", []):
+            replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
+            add_asset(c, pid, f["kind"], f["path"], label=f.get("label"), mime=f.get("mime"),
+                      meta=f.get("meta"))
+        # when every render job of this round is finished, ask for review
+        pending = c.execute(
+            "SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'render' "
+            "AND status IN ('queued','running')", (pid,)).fetchone()[0]
+        if pending == 0:
+            warns = result.get("warnings") or []
+            set_status(c, pid, "review_output", " · ".join(warns) if warns else "render तैयार — देखें और मंज़ूरी दें")
+
+
+def fail_job(c, job: dict, error: str) -> None:
+    pid = job["project_id"]
+    db.update(c, "jobs", job["id"], {"status": "failed", "error": error[:4000],
+                                     "finished_at": db.now()})
+    set_status(c, pid, "failed", f"{job['kind']}: {error.splitlines()[-1][:200] if error else 'error'}")
+
+
+def request_render(c, project: dict, settings_in: dict) -> list[dict]:
+    """Validate render settings, store them, queue one render job per preset."""
+    pid = project["id"]
+    opts = {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {}), **settings_in}
+    unknown = [p for p in opts["presets"] if p not in platforms()]
+    if unknown:
+        raise ValueError(f"unknown preset: {', '.join(unknown)}")
+    if not opts["presets"]:
+        raise ValueError("कम से कम एक platform चुनें")
+    if opts["caption_style"] not in caption_styles():
+        raise ValueError("unknown caption style")
+    new_settings = {**project.get("settings", {}), "render": opts}
+    db.update(c, "projects", pid, {"settings": new_settings, "updated_at": db.now()})
+    # cancel renders still waiting from an earlier click
+    c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? "
+              "AND kind='render' AND status='queued'", (db.now(), pid))
+    set_status(c, pid, "rendering", f"{len(opts['presets'])} वीडियो render हो रहे हैं")
+    return [queue.enqueue(c, pid, "render", {"preset": p, **{k: v for k, v in opts.items() if k != 'presets'}})
+            for p in opts["presets"]]
+
+
+def delete_project(c, project: dict) -> None:
+    c.execute("DELETE FROM projects WHERE id = ?", (project["id"],))
+    storage.remove_project_files(project["workspace_id"], project["id"])
+
+
+def archive_raw(c, project: dict) -> int:
+    """Move raw + work files of an approved project to the archive drive."""
+    if not settings.archive_root:
+        return 0
+    moved = 0
+    for a in db.rows(c.execute(
+            "SELECT * FROM assets WHERE project_id = ? AND archived = 0 AND kind IN "
+            "('raw','audio_asr','audio_clean')", (project["id"],))):
+        src = storage.abs_path(a["path"])
+        if not src.exists():
+            continue
+        dst = settings.archive_root / a["path"]
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        db.update(c, "assets", a["id"], {"archived": True})
+        moved += 1
+    return moved
+
+
+def project_view(project: dict) -> dict:
+    """What the dashboard sees: project + its assets + latest job per kind."""
+    cn = db.conn()
+    assets = db.rows(cn.execute("SELECT * FROM assets WHERE project_id = ? ORDER BY created_at",
+                                (project["id"],)))
+    jobs = db.rows(cn.execute("SELECT * FROM jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 20",
+                              (project["id"],)))
+    return {**project, "assets": [{k: v for k, v in a.items() if k != "path"} for a in assets],
+            "jobs": jobs, "render_defaults": {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})}}
