@@ -55,6 +55,13 @@ class Settings:
         default_factory=lambda: [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
     )
     debug: bool = field(default_factory=lambda: _bool("DEBUG"))
+    # Publishing. PUBLIC_URL is how Google/Meta reach us (your Cloudflare Tunnel hostname).
+    public_url: str = field(default_factory=lambda: os.getenv("PUBLIC_URL", "").rstrip("/"))
+    yt_client_id: str = field(default_factory=lambda: os.getenv("YT_CLIENT_ID", ""))
+    yt_client_secret: str = field(default_factory=lambda: os.getenv("YT_CLIENT_SECRET", ""))
+    meta_app_id: str = field(default_factory=lambda: os.getenv("META_APP_ID", ""))
+    meta_app_secret: str = field(default_factory=lambda: os.getenv("META_APP_SECRET", ""))
+    publish_dry_run: bool = field(default_factory=lambda: _bool("PUBLISH_DRY_RUN"))
 
 
 settings = Settings()

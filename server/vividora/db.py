@@ -18,7 +18,7 @@ from typing import Any, Iterator
 
 from .config import settings
 
-JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info"}
+JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info", "secrets"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS library (
   kind TEXT NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
   mime TEXT, meta TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS library_ws ON library(workspace_id, kind);
+CREATE TABLE IF NOT EXISTS connections (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL, name TEXT NOT NULL, external_id TEXT, secrets TEXT NOT NULL DEFAULT '{}',
+  meta TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS publications (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL, connection_id TEXT NOT NULL, platform TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued', payload TEXT NOT NULL DEFAULT '{}', remote_id TEXT, url TEXT,
+  error TEXT, created_by TEXT, created_at TEXT NOT NULL, finished_at TEXT);
+CREATE INDEX IF NOT EXISTS publications_project ON publications(project_id, created_at);
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);

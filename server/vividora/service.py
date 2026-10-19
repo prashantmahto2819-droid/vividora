@@ -137,6 +137,18 @@ def after_job(c, job: dict, result: dict) -> None:
         db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now(),
                                        "status_note": f"{len(meta['shorts'])} Shorts सुझाए — Shorts tab में देखें"})
 
+    elif kind == "publish":
+        pub_id = job["payload"].get("publication_id")
+        if pub_id:
+            db.update(c, "publications", pub_id, {"status": "done", "remote_id": result.get("remote_id"),
+                                                  "url": result.get("url"), "error": result.get("warning"),
+                                                  "finished_at": db.now()})
+        if result.get("secrets"):  # refreshed OAuth tokens
+            conn_id = db.get("publications", pub_id)["connection_id"] if pub_id else None
+            if conn_id:
+                db.update(c, "connections", conn_id, {"secrets": result["secrets"], "updated_at": db.now()})
+        db.update(c, "projects", pid, {"status_note": f"{job['payload'].get('platform')} पर publish हुआ", "updated_at": db.now()})
+
     elif kind == "render":
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
@@ -155,6 +167,14 @@ def fail_job(c, job: dict, error: str) -> None:
     pid = job["project_id"]
     db.update(c, "jobs", job["id"], {"status": "failed", "error": error[:4000],
                                      "finished_at": db.now()})
+    if job["kind"] in ("publish", "shorts_plan"):
+        # side jobs never take the project out of its editing state
+        if job["kind"] == "publish" and job["payload"].get("publication_id"):
+            db.update(c, "publications", job["payload"]["publication_id"],
+                      {"status": "failed", "error": error[-500:], "finished_at": db.now()})
+        db.update(c, "projects", pid, {"status_note": f"{job['kind']} असफल: {error.splitlines()[-1][:160] if error else 'error'}",
+                                       "updated_at": db.now()})
+        return
     set_status(c, pid, "failed", f"{job['kind']}: {error.splitlines()[-1][:200] if error else 'error'}")
 
 

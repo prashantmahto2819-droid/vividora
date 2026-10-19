@@ -135,3 +135,4 @@
   .ed-viewport { min-height: 50vh; }
   .ed-title #ed-name { max-width: 30vw; }
 }
+.pubrow { margin-top: .3rem; } .pubrow.done a { color: var(--green); } .pubrow.failed { color: var(--rose); }

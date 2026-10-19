@@ -108,7 +108,7 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
             err = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-1500:]}"
             log.error("job %s failed: %s", job["id"], e)
             try:
-                client.failed(job["id"], err, retry=not isinstance(e, ValueError))
+                client.failed(job["id"], err, retry=not isinstance(e, ValueError) and not getattr(e, "no_retry", False))
             except Exception as e2:
                 log.error("could not report failure: %s", e2)
         if once:

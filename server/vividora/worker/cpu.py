@@ -125,6 +125,28 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                               "meta": {**f.get("meta", {}), "title": p.get("title")}})
             return {"files": files, "duration": out["duration"], "warnings": out["warnings"]}
 
+        if kind == "publish":
+            from .. import publish as pubmod
+            p = job["payload"]
+            video = thumb = None
+            if p["platform"] == "youtube" and not p.get("dry_run"):
+                video = client.download(p["asset_id"], tmp / "upload.mp4")
+                if p.get("thumb_asset_id"):
+                    try:
+                        thumb = client.download(p["thumb_asset_id"], tmp / "thumb.jpg")
+                    except Exception:
+                        thumb = None
+            prog = _progress(client, job["id"])
+            try:
+                r = pubmod.run(p["platform"], p.get("secrets") or {}, p.get("payload") or {}, video=video,
+                               public_url=p.get("public_url"), thumb=thumb, dry_run=bool(p.get("dry_run")),
+                               on_progress=lambda f: prog(f, "upload हो रहा है"))
+            except pubmod.PublishError as e:
+                err = RuntimeError(str(e))
+                err.no_retry = not e.retry
+                raise err from None
+            return r
+
         if kind == "shorts_plan":
             o = job["payload"].get("options") or {}
             clips = shorts.plan(project.get("transcript") or {}, float(project["meta"].get("duration") or 0),
@@ -146,7 +168,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render", "shorts_plan"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish"]
     if os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes"):
         kinds.append("transcribe")
     client = ApiClient(base, token, name)

@@ -28,7 +28,7 @@ function logout() { S.token = null; S.user = null; localStorage.removeItem("vivi
 function toast(msg, ms = 2600) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
 
 // ---------- routing ----------
-function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
+function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
 function go(path) { location.hash = path; }
 window.addEventListener("hashchange", () => { S.route = parseRoute(); load().then(render); });
 
@@ -42,6 +42,7 @@ async function load() {
   } else S.project = null;
   if (S.route.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (S.route.kind === "users") S.users = await api("GET", "/users").catch(() => []);
+  if (S.route.kind === "settings") S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} }));
   schedulePoll();
 }
 function schedulePoll() {
@@ -72,12 +73,12 @@ function render() {
         ${S.user.role !== "viewer" ? `<a class="btn primary" href="#/new">+ नया</a>` : ""}</div>
       <div class="rail-list">${S.projects.length ? S.projects.map(projRow).join("") : `<p class="muted" style="padding:1rem">अभी कोई project नहीं। "+ नया" से पहली recording डालें।</p>`}</div>
       <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
-        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/status">status</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
+        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
     </aside>
-    <main class="main">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
+    <main class="main">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
   </div>`;
   $("#logout").onclick = logout;
-  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers();
+  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings();
   if (detail && S.project) bindProject(S.project);
 }
 
@@ -321,6 +322,26 @@ function statusView() {
     <div class="section"><h2>queue</h2><p>${Object.entries(st.jobs).map(([k, v]) => `${k}: <b>${v}</b>`).join(" · ") || "खाली"}</p></div>
     <div class="section"><h2>disk</h2>${Object.entries(st.disk).map(([k, d]) => `<p>${k}: ${gb(d.used)} / ${gb(d.total)} <span class="muted">(${gb(d.free)} खाली)</span></p><div class="progress"><i style="width:${(d.used / d.total * 100).toFixed(0)}%"></i></div>`).join("")}</div>
     <div class="section"><h2>हाल की गतिविधि</h2><table>${(S.activity || []).slice(0, 40).map((a) => `<tr><td class="small muted">${new Date(a.created_at).toLocaleString("hi-IN")}</td><td class="small">${esc(a.user_name || "system")}</td><td class="small">${esc(a.action)} ${esc(a.detail?.title || a.detail?.email || a.detail?.file || (a.detail?.presets || []).join(",") || "")}</td></tr>`).join("")}</table></div>`;
+}
+
+// ---------- settings / connections ----------
+const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" };
+function settingsView() {
+  const c = S.conns || { connections: [], setup: {} }; const st = c.setup || {}; const admin = S.user.role === "admin";
+  return `<h1>Channels</h1><p class="muted">जिन channels/pages पर Vividora publish करेगा। हर upload से पहले आपकी मंज़ूरी ज़रूरी है — connection सिर्फ़ रास्ता खोलता है।</p>
+    ${st.dry_run ? `<div class="note">PUBLISH_DRY_RUN चालू है — publish असली नहीं होगा (test mode)।</div>` : ""}
+    ${!st.public_url ? `<div class="note err">.env में <b>PUBLIC_URL</b> नहीं है (जैसे https://studio.yourdomain.com — Cloudflare Tunnel का पता)। बिना इसके Google/Meta login वापस नहीं आ सकता और Instagram/Facebook वीडियो नहीं ले पाएँगे।</div>` : ""}
+    <div class="section"><div class="row between"><h2>जुड़े हुए</h2>${admin ? `<span class="row"><button class="btn" id="c-yt" ${st.youtube ? "" : "disabled"} title="${st.youtube ? "" : ".env में YT_CLIENT_ID/YT_CLIENT_SECRET चाहिए"}">+ YouTube</button><button class="btn" id="c-meta" ${st.meta ? "" : "disabled"} title="${st.meta ? "" : ".env में META_APP_ID/META_APP_SECRET चाहिए"}">+ Instagram / Facebook</button></span>` : ""}</div>
+      ${c.connections.length ? `<table><tr><th>platform</th><th>नाम</th><th>जुड़ा</th><th></th></tr>${c.connections.map((x) => `<tr><td>${PLAT[x.platform] || x.platform}</td><td>${esc(x.name)}${x.meta?.subscribers ? ` <span class="muted small">· ${x.meta.subscribers} subs</span>` : ""}${x.meta?.page ? ` <span class="muted small">· page: ${esc(x.meta.page)}</span>` : ""}</td><td class="small muted">${new Date(x.created_at).toLocaleDateString("hi-IN")}</td><td>${admin ? `<button class="btn quiet small danger c-del" data-id="${x.id}">हटाएँ</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">अभी कोई channel नहीं जुड़ा।</p>`}</div>
+    <div class="section"><h2>एक बार का setup</h2>
+      <details><summary><b>YouTube</b> (free, 10 मिनट)</summary><ol class="small muted"><li>console.cloud.google.com → नया project → "YouTube Data API v3" enable करें</li><li>OAuth consent screen → External → अपना Gmail test user में जोड़ें</li><li>Credentials → OAuth client ID → Web application → Authorized redirect URI: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/youtube/callback</code></li><li>client id/secret को .env में <code>YT_CLIENT_ID</code> / <code>YT_CLIENT_SECRET</code> में डालें, <code>docker compose up -d</code>, फिर यहाँ "+ YouTube"</li></ol><p class="small muted">quota: ~6 upload/दिन (10,000 units, upload 1,600)।</p></details>
+      <details><summary><b>Instagram / Facebook</b> (free, Business account चाहिए)</summary><ol class="small muted"><li>Instagram को Professional (Creator/Business) बनाएँ और एक Facebook Page से link करें</li><li>developers.facebook.com → Create App (Business) → products: Facebook Login for Business + Instagram Graph API</li><li>Facebook Login → Settings → Valid OAuth Redirect URIs: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/meta/callback</code></li><li>App ID/Secret को .env में <code>META_APP_ID</code> / <code>META_APP_SECRET</code>; फिर "+ Instagram / Facebook"</li><li>Cloudflare Access में <code>/pub/*</code> path को bypass करें (Meta वहीं से वीडियो उठाता है)</li></ol><p class="small muted">limit: Instagram 100 post/24h, Facebook Reels ~30/24h।</p></details></div>`;
+}
+function bindSettings() {
+  const start = async (pl) => { try { const r = await api("POST", `/connect/${pl}/start`); location.href = r.url; } catch (e) { toast(e.message); } };
+  const yt = $("#c-yt"); if (yt) yt.onclick = () => start("youtube");
+  const mt = $("#c-meta"); if (mt) mt.onclick = () => start("meta");
+  document.querySelectorAll(".c-del").forEach((b) => (b.onclick = async () => { if (confirm("यह connection हटाएँ?")) { await api("DELETE", `/connections/${b.dataset.id}`); load().then(render); } }));
 }
 
 // ---------- boot ----------

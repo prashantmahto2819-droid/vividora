@@ -68,7 +68,7 @@ export function unmount() {
   if (!E) return;
   document.removeEventListener("keydown", onKey);
   cancelAnimationFrame(E.raf);
-  clearTimeout(E.saveT);
+  clearTimeout(E.saveT); clearTimeout(E.pubT);
   E = null;
 }
 function update(project) {
@@ -81,6 +81,7 @@ function update(project) {
   renderTop();
   if (E.exportOpen) renderExport();
   if (was !== project.status && project.status === "review_output") { E.exportOpen = true; renderExport(); }
+
 }
 
 // ---------- time mapping ----------
@@ -644,9 +645,18 @@ function renderTop() {
   const el = $("#ed-status", E.root); if (el) el.textContent = ST[E.p.status] || E.p.status;
   const b = $("#ed-export", E.root); if (b) b.disabled = E.p.status === "rendering";
 }
+async function loadPublishData() {
+  const { api } = E.ctx;
+  try { const [c, pubs] = await Promise.all([api("GET", "/connections"), api("GET", `/projects/${E.pid}/publications`)]); E.conns = c; E.pubs = pubs; } catch { E.conns = { connections: [], setup: {} }; E.pubs = []; }
+  if (E.exportOpen) renderExport();
+  clearTimeout(E.pubT);
+  if (E.exportOpen && (E.pubs || []).some((x) => x.status === "queued")) E.pubT = setTimeout(loadPublishData, 4000);
+}
+const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" };
 function renderExport() {
   const m = $("#ed-modal", E.root); const { esc, S, api, toast, load } = E.ctx; const p = E.p;
-  if (!E.exportOpen) { m.hidden = true; m.innerHTML = ""; return; }
+  if (!E.exportOpen) { m.hidden = true; m.innerHTML = ""; E.pubFor = null; return; }
+  if (!E.conns) { E.conns = { connections: [], setup: {} }; E.pubs = []; loadPublishData(); }
   const outs = p.assets.filter((a) => a.kind === "render"); const job = p.jobs?.find((j) => j.kind === "render" && ["running", "queued"].includes(j.status));
   const fx = E.rs.effects; const summary = [E.cuts.filter((c) => c.enabled !== false).length + " कट", styleOf()?.label, fx.zoom.enabled && "zoom", fx.look !== "none" && ("look " + fx.look.replace(/^lut:.*/, "LUT")), fx.music.id && "music", fx.broll.length && fx.broll.length + " B-roll", fx.titles.length && fx.titles.length + " text", fx.watermark.id && "logo"].filter(Boolean).join(" · ");
   m.hidden = false;
@@ -656,10 +666,14 @@ function renderExport() {
     <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>
     ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="small muted">${esc(job?.message || "queue में")}</p>` : ""}
     ${outs.length ? `<h3>तैयार वीडियो</h3><div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
-      return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(a.label?.startsWith("short-") ? (a.meta.title || a.label) : pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}</span></div><div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}</div></div>`; }).join("")}</div>` : ""}
+      return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(a.label?.startsWith("short-") ? (a.meta.title || a.label) : pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}</span></div><div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}${p.status === "approved" && E.canEdit && (E.conns?.connections || []).length ? `<button class="btn small primary" data-pub="${a.id}">Publish</button>` : ""}</div>
+        ${(E.pubs || []).filter((x) => x.asset_id === a.id).map((x) => `<div class="small pubrow ${x.status}">${PLAT[x.platform] || x.platform}: ${x.status === "done" ? `<a href="${x.url}" target="_blank" rel="noopener">${esc(x.url || "हो गया")}</a>` : x.status === "failed" ? `<span class="muted">असफल — ${esc((x.error || "").slice(0, 120))}</span>` : "upload हो रहा…"}</div>`).join("")}</div>`; }).join("")}</div>` : ""}
+    ${E.pubFor ? publishForm(E.pubFor) : ""}
     <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? "मंज़ूर ✓" : ""}</span>
       <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit ? `<button class="btn primary" id="go-render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा…" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };
+  $$("[data-pub]", m).forEach((b) => (b.onclick = () => { const a = p.assets.find((x) => x.id === b.dataset.pub); E.pubFor = { asset: a, title: "", description: "", tags: "", conn: "", privacy: "private", when: "" }; renderExport(); $("#pubform", m)?.scrollIntoView({ behavior: "smooth" }); }));
+  bindPublishForm(m);
   m.onclick = (e) => { if (e.target === m) { E.exportOpen = false; renderExport(); } };
   $$(".chip input", m).forEach((i) => (i.onchange = () => i.closest(".chip").classList.toggle("on", i.checked)));
   const gr = $("#go-render", m); if (gr) gr.onclick = async () => {
@@ -671,4 +685,33 @@ function renderExport() {
   const ap = $("#approve", m); if (ap) ap.onclick = async () => { if (confirm("यह वीडियो मंज़ूर करें?")) { await api("POST", `/projects/${E.pid}/approve`); toast("मंज़ूर"); await load(); } };
 }
 
+function publishForm(f) {
+  const { esc } = E.ctx; const a = f.asset; const conns = E.conns?.connections || []; const vertical = a.meta.height > a.meta.width;
+  const fit = conns.filter((c) => vertical ? true : c.platform !== "instagram");
+  const conn = conns.find((c) => c.id === f.conn) || fit[0]; f.conn = conn?.id || "";
+  const label = a.label?.startsWith("short-") ? a.meta.title || a.label : (E.ctx.S.presets?.platforms.find((x) => x.id === a.label) || {}).label || a.label;
+  return `<div class="box" id="pubform"><div class="row between"><h3 style="margin:0">Publish: ${esc(label)}</h3><button class="ibtn" id="pub-close">✕</button></div>
+    <div class="irow">${field("कहाँ", `<select id="pub-conn">${fit.map((c) => `<option value="${c.id}" ${c.id === f.conn ? "selected" : ""}>${PLAT[c.platform]} · ${esc(c.name)}</option>`).join("")}</select>`)}
+      ${conn?.platform === "youtube" ? field("दिखे", `<select id="pub-privacy">${[["private", "Private (बाद में public करेंगे)"], ["unlisted", "Unlisted"], ["public", "Public"]].map(([v, l]) => `<option value="${v}" ${f.privacy === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : ""}
+      ${field("schedule (खाली = अभी)", `<input type="datetime-local" id="pub-when" value="${f.when}">`)}
+      <button class="btn small" id="pub-ai" title="transcript से title/description/tags">✨ AI से लिखें</button></div>
+    ${field("Title", `<input id="pub-title" maxlength="100" value="${esc(f.title)}" placeholder="वीडियो का title">`)}
+    ${field("Description / caption", `<textarea id="pub-desc" rows="5" placeholder="description, hashtags…">${esc(f.description)}</textarea>`)}
+    ${field("Tags (comma से अलग)", `<input id="pub-tags" value="${esc(f.tags)}">`)}
+    <div class="row between"><span class="small muted">${conn?.platform === "youtube" ? "YouTube quota: ~6 upload/दिन" : conn?.platform === "instagram" ? "Instagram: Reel के रूप में, caption 2200 तक" : conn ? "Facebook: Page पर" : "पहले Settings → Channels में channel जोड़ें"}</span><button class="btn primary" id="pub-go" ${conn ? "" : "disabled"}>Upload करें</button></div></div>`;
+}
+function bindPublishForm(m) {
+  const f = E.pubFor; if (!f) return; const { api, toast } = E.ctx;
+  const sync = () => { f.title = $("#pub-title", m).value; f.description = $("#pub-desc", m).value; f.tags = $("#pub-tags", m).value; f.conn = $("#pub-conn", m).value; f.privacy = $("#pub-privacy", m)?.value || "private"; f.when = $("#pub-when", m).value; };
+  $("#pub-close", m).onclick = () => { E.pubFor = null; renderExport(); };
+  $("#pub-conn", m).onchange = () => { sync(); renderExport(); };
+  $("#pub-ai", m).onclick = async () => { sync(); const conn = (E.conns.connections || []).find((c) => c.id === f.conn); $("#pub-ai", m).disabled = true;
+    try { const r = await api("POST", `/projects/${E.pid}/metadata`, { platform: conn?.platform || "youtube", label: f.asset.label }); f.title = r.title; f.description = r.description; f.tags = (r.tags || []).join(", "); renderExport(); toast(r.source === "llm" ? "AI ने लिखा" : "transcript से draft बना (AI key नहीं)"); } catch (e) { toast(e.message); $("#pub-ai", m).disabled = false; } };
+  $("#pub-go", m).onclick = async () => { sync(); if (!f.title.trim()) return toast("title लिखें");
+    const conn = (E.conns.connections || []).find((c) => c.id === f.conn); const when = f.when ? new Date(f.when) : null;
+    const body = { asset_id: f.asset.id, connection_id: f.conn, title: f.title.trim(), description: f.description, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean), privacy: f.privacy };
+    if (when) { if (conn?.platform === "youtube") body.publish_at = when.toISOString(); else body.scheduled_at = Math.floor(when.getTime() / 1000); }
+    if (!confirm(`${PLAT[conn?.platform]} · ${conn?.name} पर upload करें?\n"${body.title}"`)) return;
+    try { await api("POST", `/projects/${E.pid}/publications`, body); toast("upload queue में"); E.pubFor = null; await loadPublishData(); } catch (e) { toast(e.message); } };
+}
 function renderAll() { renderTop(); renderPanel(); renderInspector(); renderTimeline(); layoutFrame(); renderOverlay(); renderPlayhead(); }
