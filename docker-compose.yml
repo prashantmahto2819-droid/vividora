@@ -38,6 +38,8 @@ services:
       WHISPER_COMPUTE: int8
       WHISPER_THREADS: ${WHISPER_THREADS:-12}
       WHISPER_CACHE: /models
+      HF_HUB_DISABLE_XET: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
     command: ["python", "-m", "vividora.worker.cpu"]
     depends_on:
       api:

@@ -4,3 +4,6 @@ PyJWT>=2.8
 python-multipart>=0.0.9
 # CPU transcription inside the worker (TRANSCRIBE_LOCAL=1)
 faster-whisper>=1.1.0
+# pin the hub client: newer releases break ctranslate2 model downloads (metadata_errors)
+huggingface_hub>=0.25,<1.0
+hf_xet<2
