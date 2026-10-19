@@ -67,6 +67,7 @@ export function mount(root, project, ctx) {
   E.montage = project.kind === "montage";
   TABS = E.montage ? TABS_MONTAGE : TABS_ALL;
   if (E.montage) { E.tab = "montage"; E.mo = { clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); }
+  E.speed = JSON.parse(JSON.stringify(project.edl?.speed || []));
   E.hist = []; E.redo = [];
   E.dur = project.edl?.duration || project.meta?.duration || 1;
   E.pps = clamp(Math.floor(900 / E.dur), 6, 120);
@@ -146,6 +147,7 @@ function skeleton() {
         <span class="grow"></span>
         <button class="btn small quiet" id="t-in" title="I">In</button><button class="btn small quiet" id="t-out" title="O">Out</button>
         <button class="btn small" id="t-cut" title="In–Out के बीच हटाएँ">${ICON.cuts} हटाएँ</button>
+        <select class="btn small quiet" id="t-speed" title="In–Out की speed"><option value="">speed…</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select>
         <span class="muted small" id="t-marks"></span>
       </div>
     </section>
@@ -201,6 +203,8 @@ function bindStatic() {
   $("#t-in", E.root).onclick = () => mark("in");
   $("#t-out", E.root).onclick = () => mark("out");
   $("#t-cut", E.root).onclick = addCutFromMarks;
+  $("#t-speed", E.root).onchange = (e) => { const r = +e.target.value; e.target.value = ""; if (!r || !E.canEdit) return; if (E.markIn == null || E.markOut == null) return E.ctx.toast("पहले I और O से हिस्सा चुनें");
+    const it = { id: uid(), start: +E.markIn.toFixed(3), end: +E.markOut.toFixed(3), rate: r }; E.speed.push(it); E.markIn = E.markOut = null; $("#t-marks", E.root).textContent = ""; touch(); select({ type: "speed", id: it.id }); };
   $("#tl-zoom", E.root).oninput = (e) => { E.pps = +e.target.value; renderTimeline(); };
   window.addEventListener("resize", layoutFrame);
   document.addEventListener("keydown", onKey);
@@ -371,6 +375,7 @@ function selItem() {
   if (type === "sfx") return fx.sfx.find((t) => t._id === id);
   if (type === "caption") return captionChunks()[id];
   if (type === "short") return E.shorts.find((t) => t.id === id);
+  if (type === "speed") return E.speed.find((t) => t.id === id);
   return null;
 }
 function deleteSel() {
@@ -382,11 +387,12 @@ function deleteSel() {
   else if (type === "sfx") fx.sfx = fx.sfx.filter((t) => t._id !== id);
   else if (type === "music") fx.music.id = "";
   else if (type === "short") { E.shorts = E.shorts.filter((t) => t.id !== id); E.shortsDirty = true; }
+  else if (type === "speed") E.speed = E.speed.filter((t) => t.id !== id);
   else return;
   touch(); select(null);
 }
-function snapshot() { return JSON.stringify({ rs: E.rs, cuts: E.cuts, shorts: E.shorts }); }
-function restore(snap) { const o = JSON.parse(snap); E.rs = o.rs; E.cuts = o.cuts; E.shorts = o.shorts; E.shortsDirty = true; E.sel = null; E.last = snap; E.dirty = true; clearTimeout(E.saveT); E.saveT = setTimeout(() => save(false), 800); renderPanel(); renderInspector(); renderTimeline(); layoutFrame(); renderOverlay(); updateHistoryButtons(); }
+function snapshot() { return JSON.stringify({ rs: E.rs, cuts: E.cuts, shorts: E.shorts, speed: E.speed }); }
+function restore(snap) { const o = JSON.parse(snap); E.rs = o.rs; E.cuts = o.cuts; E.shorts = o.shorts; E.speed = o.speed || []; E.shortsDirty = true; E.sel = null; E.last = snap; E.dirty = true; clearTimeout(E.saveT); E.saveT = setTimeout(() => save(false), 800); renderPanel(); renderInspector(); renderTimeline(); layoutFrame(); renderOverlay(); updateHistoryButtons(); }
 function updateHistoryButtons() { const u = $("#ed-undo", E.root), r = $("#ed-redo", E.root); if (u) u.disabled = !E.hist.length; if (r) r.disabled = !E.redo.length; }
 function undo() { if (!E.hist.length) return; E.redo.push(snapshot()); restore(E.hist.pop()); }
 function redo() { if (!E.redo.length) return; E.hist.push(snapshot()); restore(E.redo.pop()); }
@@ -399,7 +405,7 @@ async function save(loud) {
   const { api, toast } = E.ctx;
   const rs = JSON.parse(JSON.stringify(E.rs));
   try {
-    const body = { settings: { render: rs }, edl: { cuts: E.cuts } };
+    const body = { settings: { render: rs }, edl: { cuts: E.cuts, speed: E.speed } };
     if (E.shortsDirty) { body.meta = { shorts: E.shorts }; E.shortsDirty = false; E.shortsSeen = JSON.stringify(E.shorts); }
     if (E.transcriptDirty) { body.transcript = E.p.transcript; E.transcriptDirty = false; }
     const p = await api("PATCH", `/projects/${E.pid}`, body);
@@ -451,6 +457,10 @@ function renderInspector() {
     const item = libItem(it.id);
     h = `<h3>SFX</h3><p class="small muted">${esc(item?.name || "?")}</p><div class="irow">${field("कब", num("at", it.at, 0.05, 0))}${field("आवाज़", `<input type="range" data-k="volume" min="0" max="1.5" step="0.05" value="${it.volume ?? 0.8}" ${dis}>`)}</div>
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
+  } else if (type === "speed") {
+    h = `<h3>Speed <span class="tag manual">${it.rate}×</span></h3><div class="irow">${field("से", num("start", it.start, 0.1, 0, E.dur))}${field("तक", num("end", it.end, 0.1, 0, E.dur))}</div>
+      ${field("rate", `<input type="range" data-k="rate" min="0.25" max="4" step="0.05" value="${it.rate}" ${dis}>`)}<p class="small muted">आवाज़ pitch वही रहती है (atempo)। 1 से कम = slow motion।</p>
+      <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "short") {
     h = `<h3>Short <span class="tag manual">${(it.end - it.start).toFixed(0)}s</span></h3>
       ${field("Title (YouTube)", `<input data-k="title" value="${esc(it.title || "")}" ${dis}>`)}
@@ -476,14 +486,14 @@ function renderInspector() {
     else it[k] = el.value;
     if (k === "fit") { touch(); renderInspector(); return; }
     if (k === "bg" && !$('[data-k="_bgon"]', ins).checked) it.bg = "";
-    if (type === "cut" || type === "short") { it.start = clamp(it.start, 0, E.dur); it.end = clamp(it.end, it.start + 0.05, E.dur); }
+    if (type === "cut" || type === "short" || type === "speed") { it.start = clamp(it.start, 0, E.dur); it.end = clamp(it.end, it.start + 0.05, E.dur); }
     if (type === "short") E.shortsDirty = true;
     touch();
   }));
   $$("[data-act]", ins).forEach((b) => (b.onclick = () => {
     const a = b.dataset.act;
     if (a === "del") deleteSel();
-    else if (a === "seek") seek(type === "cut" || type === "short" ? it.start : type === "caption" ? it.start : srcOf(it.start ?? it.at));
+    else if (a === "seek") seek(type === "cut" || type === "short" || type === "speed" ? it.start : type === "caption" ? it.start : srcOf(it.start ?? it.at));
     else if (a === "playshort") { seek(it.start); E.stopAt = it.end; $("#pv", E.root).play(); }
     else if (a === "captext") applyCaptionText(it, $('[data-k="_captext"]', ins).value);
   }));
@@ -606,7 +616,8 @@ function renderPanel() {
     h = `<div class="ph"><h3>Effects</h3><span class="small muted">${stack.length} लगे</span></div>
       <div class="box"><label class="chk"><input type="checkbox" id="fx-zoom" ${fx.zoom.enabled ? "checked" : ""} ${dis}> <b>Auto zoom / punch-in</b></label>
         ${field("कितना", `<input type="range" id="fx-zoom-str" min="0.3" max="2" step="0.1" value="${fx.zoom.strength}" ${dis}>`)}</div>
-      <div class="box"><b>Transition (हर कट पर)</b><div class="trgrid">${(S.presets?.transitions || []).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-${t.id}"></i>${esc(t.label)}</button>`).join("")}</div><p class="small muted">एक कट के लिए अलग: timeline पर कट चुनें → inspector।</p></div>
+      <div class="box"><b>Transition (हर कट पर)</b><p class="small muted" style="margin:.2rem 0">Effect-style (cut पर flash/blur…):</p><div class="trgrid">${(S.presets?.transitions || []).filter((t) => !t.id.startsWith("x_")).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-${t.id}"></i>${esc(t.label)}</button>`).join("")}</div>
+        <p class="small muted" style="margin:.5rem 0 .2rem">Clip transitions (दोनों clips 0.4s overlap — wipe/slide/dissolve, CapCut जैसे):</p><div class="trgrid">${(S.presets?.transitions || []).filter((t) => t.id.startsWith("x_")).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-x"></i>${esc(t.label)}</button>`).join("")}</div><p class="small muted">एक कट के लिए अलग: timeline पर कट चुनें → inspector।</p></div>
       ${stack.length ? `<h4>लगे हुए effects (ऊपर से नीचे)</h4><ul class="plist fxstack">${stack.map((it, i) => { const d = fxDef(it.id); if (!d) return ""; const pr = fxParams(d, it.params);
         return `<li class="${it.enabled === false ? "off" : ""}" data-fxi="${i}"><div class="grow"><div class="row between"><label class="chk small"><input type="checkbox" data-fxon="${i}" ${it.enabled === false ? "" : "checked"} ${dis}> <b>${esc(d.label)}</b> <span class="tag">${d.preview === "css" ? "preview ≈" : "सिर्फ़ render में"}</span></label><span class="row" style="gap:0"><button class="ibtn" data-fxup="${i}" title="ऊपर">↑</button><button class="ibtn" data-fxdown="${i}" title="नीचे">↓</button><button class="ibtn" data-fxdel="${i}">${ICON.trash}</button></span></div>
         ${(d.params || []).map((p) => p.type === "color" ? `<label class="small muted">${esc(p.label)} <input type="color" data-fxp="${i}:${p.name}" value="${pr[p.name]}" ${dis}></label>` : `<label class="small muted fxp"><span>${esc(p.label)}</span><input type="range" data-fxp="${i}:${p.name}" min="${p.min}" max="${p.max}" step="${p.step || 1}" value="${pr[p.name]}" ${dis}><b>${pr[p.name]}</b></label>`).join("")}</div></li>`; }).join("")}</ul>` : ""}
@@ -773,8 +784,9 @@ function renderTimeline() {
   const sel = (type, id) => (E.sel?.type === type && E.sel.id === id ? "sel" : "");
   const ks = keeps();
   const clipMarks = (E.p.meta?.clips || []).map((c, i) => `<div class="clipmark" style="left:${X(c.start)}px" title="${esc(c.name)}"><span>${i + 1}. ${esc(c.name.replace(/^clip\d+_/, "").slice(0, 16))}</span></div>`).join("");
-  const video = clipMarks + ks.map(([a, b]) => `<div class="clip" style="left:${X(a)}px;width:${((b - a) * pps).toFixed(1)}px"><span>${fmt(b - a)}</span></div>`).join("")
-    + E.cuts.map((c) => `<div class="cutblk ${c.enabled === false ? "off" : ""} ${sel("cut", c.id)}" data-cut="${c.id}" style="left:${X(c.start)}px;width:${Math.max(4, (c.end - c.start) * pps).toFixed(1)}px" title="${c.reason} ${fmt(c.start)}–${fmt(c.end)}"><i class="h l"></i><i class="h r"></i></div>`).join("")
+  const speedRow = (E.speed || []).map((sp) => `<div class="speedblk ${sel("speed", sp.id)}" data-speed="${sp.id}" style="left:${X(sp.start)}px;width:${Math.max(6, (sp.end - sp.start) * pps).toFixed(1)}px" title="${sp.rate}×"><span>${sp.rate}×</span></div>`).join("");
+  const video = clipMarks + speedRow + ks.map(([a, b]) => `<div class="clip" style="left:${X(a)}px;width:${((b - a) * pps).toFixed(1)}px"><span>${fmt(b - a)}</span></div>`).join("")
+    + E.cuts.map((c) => `<div class="cutblk ${c.enabled === false ? "off" : ""} ${sel("cut", c.id)}" data-cut="${c.id}" style="left:${X(c.start)}px;width:${Math.max(4, (c.end - c.start) * pps).toFixed(1)}px" title="${c.reason} ${fmt(c.start)}–${fmt(c.end)}${c.transition ? " · " + c.transition : ""}"><i class="h l"></i>${c.transition ? `<b class="trb">${c.transition.startsWith("x_") ? "⇄" : "✦"}</b>` : ""}<i class="h r"></i></div>`).join("")
     + (E.markIn != null && E.markOut != null ? `<div class="markrange" style="left:${X(E.markIn)}px;width:${((E.markOut - E.markIn) * pps).toFixed(1)}px"></div>` : "");
   const caps = captionChunks().map((c, i) => `<div class="capblk ${sel("caption", i)}" data-cap="${i}" style="left:${X(c.start)}px;width:${Math.max(6, (c.end - c.start) * pps).toFixed(1)}px"><span>${esc(c.words.map((w) => w.w).join(" "))}</span></div>`).join("");
   const text = fx.titles.map((t) => `<div class="itm title ${sel("title", t._id)}" data-item="title:${t._id}" style="left:${OX(t.start)}px;width:${OW(t.start, t.end)}px"><i class="h l"></i><span>${esc(t.text)}</span><i class="h r"></i></div>`).join("")
@@ -813,6 +825,7 @@ function bindTimeline() {
   };
   $$(".cutblk", body).forEach((el) => { el.onmousedown = (e) => { e.stopPropagation(); const c = E.cuts.find((x) => x.id === el.dataset.cut); if (e.target.classList.contains("h")) return dragEdge(e, c, e.target.classList.contains("l") ? "start" : "end", "src"); select({ type: "cut", id: c.id }); };
     el.ondblclick = () => { const c = E.cuts.find((x) => x.id === el.dataset.cut); c.enabled = c.enabled === false; touch(); }; });
+  $$(".speedblk", body).forEach((el) => (el.onmousedown = (e) => { e.stopPropagation(); select({ type: "speed", id: el.dataset.speed }); }));
   $$(".capblk", body).forEach((el) => (el.onmousedown = (e) => { e.stopPropagation(); const i = +el.dataset.cap; select({ type: "caption", id: i }); seek(captionChunks()[i].start); }));
   $$(".itm", body).forEach((el) => (el.onmousedown = (e) => {
     e.stopPropagation(); const [type, id] = el.dataset.item?.split(":") || []; if (!type) return;

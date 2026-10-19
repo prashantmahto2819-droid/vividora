@@ -44,7 +44,20 @@ EXTRAS: dict[str, dict] = {
 TRANSITIONS = {
     "none": "कोई नहीं", "flash": "Flash", "dip": "Dip to black", "punch": "Zoom punch", "whip": "Whip blur",
     "glitch": "Glitch", "flashpunch": "Flash + punch",
+    # real two-clip transitions (ffmpeg xfade) — these overlap the clips by XFADE_SECONDS
+    "x_dissolve": "Dissolve", "x_fade": "Cross fade", "x_fadeblack": "Fade black", "x_fadewhite": "Fade white",
+    "x_wipeleft": "Wipe ←", "x_wiperight": "Wipe →", "x_wipeup": "Wipe ↑", "x_wipedown": "Wipe ↓",
+    "x_slideleft": "Slide ←", "x_slideright": "Slide →", "x_slideup": "Slide ↑", "x_slidedown": "Slide ↓",
+    "x_smoothleft": "Smooth ←", "x_smoothright": "Smooth →", "x_circleopen": "Circle open", "x_circleclose": "Circle close",
+    "x_circlecrop": "Circle crop", "x_radial": "Radial", "x_pixelize": "Pixelize", "x_hblur": "Blur",
+    "x_zoomin": "Zoom in", "x_squeezeh": "Squeeze", "x_diagtl": "Diagonal", "x_hlslice": "Slices", "x_coverleft": "Cover ←", "x_revealright": "Reveal →",
+    "x_fadegrays": "Fade grays", "x_hlwind": "Wind",
 }
+XFADE_SECONDS = 0.4
+
+
+def is_xfade(kind: str | None) -> bool:
+    return bool(kind) and kind.startswith("x_")
 
 
 def extras_filter(ids: list[str]) -> str:

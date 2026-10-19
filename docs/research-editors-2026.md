@@ -329,7 +329,80 @@ CPU budget (10-min 1080p30 talking head, 22-core Xeon, rough): transcription 3�
 
 ---
 
-## 5. Things I could not verify (please check before relying on them)
+## 5. Instagram "Edits" app (Meta, Apr 2025 → 2026)
+
+Sources: [Inro feature guide (May 2026)](https://www.inro.social/blog/edits-new-meta-app), [TechPP](https://techpp.com/2025/04/26/instagram-edits/), [Planoly review](https://planoly.com/blog/instagrams-edits-app-review), [SocialMediaToday keyframes update](https://www.socialmediatoday.com/news/instagram-adds-new-features-edits-app-keyframes/751543/), [TechCrunch launch](https://techcrunch.com/2025/04/22/meta-releases-its-capcut-rival-edits-globally). iOS/Android only, no desktop/web. Free, **no watermark** ("Made with Edits" attribution tag in some share contexts), export **up to 4K60** (TechPP).
+
+**Tabs**: **Ideas** (sticky notes, saved Reels/audio, colour-coded; "Weekly Ideas" Jan–Mar 2026, English only), **Inspiration** (trending audio/Reels feed, save to collections), **Projects**, **Record** (camera, up to 10-min takes, higher-quality capture, **Teleprompter**, **Safe Zone** overlay for Reels UI, **Clip Preview**, one-tap **Green screen** capture), **Insights** (per-Reel retention graph showing drop-off, deeper than IG app), **Storyboards** (Sep–Nov 2025; sticky-note storyboards Dec 2025; **Multiple Takes** Apr 2026).
+
+**Editing tools**: trim/split/basic timeline (single main track + overlay tracks), **Keyframes** for position/rotation/scale (May 2025; for text/stickers/overlays/cutouts "coming soon" then), **Cut Silences**, **Beat Markers** (beat-synced cuts; no "auto-cut-to-beat" generator reported), **Variable Volume** (audio keyframes), **Freeze Frame**, **Reverse Play**, **Lip Sync** feature (Jan–Mar 2026 — audio-lip-sync of mouthed audio, details thin [unverified scope]), **Voiceover Teleprompter**, precision editing controls, **Import audio from files**, voice **noise removal/voice enhancement**, transitions, **Object overlays** (photo/video over Reel), **Stickers & filters** from Instagram's library, Instagram music library.
+
+**AI tools**: **Cutouts** (isolate a person/object automatically or by manual selection, then layer over other media), **AI Object Segmentation (SAM-based)** to apply effects to a specific person/object (Dec 2025) — this is the "effects on person" equivalent, **Animate** (still image → video; reviewer found it blurry/low-res), **Restyle** presets on ≤10-s clips (expanded Apr 2026), **Personalized Sound Effects** (AI SFX, Jan–Mar 2026), **Auto captions** (one tap; reviewer: hard to edit/time), AI voice: not reported **[unverified]**.
+
+**Text/captions**: text & caption library (Sep–Nov 2025), **per-word font styling, font style presets, title presentation styles** (Dec 2025), **caption animations** and **Indic-language font presets** (current as of May 2026 — directly relevant for Hindi), text effects/animations.
+
+**Effects/sound**: 25 new video effects (Apr 2026) + enhanced controls (Jan–Mar 2026); 150+ sound-effects library.
+
+**Templates/collab/publish**: Templates (Dec 2025; US/UK/CA/AU/NZ/IE first — **not India at that time [verify]**), creator-made templates + editable project files from named creators (Apr 2026), share drafts via IG DM, add public Reels to Projects, direct publish to Instagram and Facebook, iOS lock-screen widgets, in-video interactive links (Apr 2026).
+
+**Unique vs CapCut**: retention-graph Insights inside the editor; Ideas/Inspiration trend pipeline from the Reels feed; teleprompter + Safe Zone in capture; free 4K60 with no watermark and no Pro gating; rumoured Reels distribution boost for Edits-made videos [unverified]; Meta-native SAM segmentation. **Missing vs CapCut**: no desktop, fewer masks/curve speed presets, no auto-reframe/AI clips/script-to-video (as of sources), smaller effect library, templates region-locked.
+
+**Vividora takeaways**: copy the *Ideas → Storyboard → Record (teleprompter + safe zone) → Edit → Insights* loop; Indic caption presets are now table-stakes; SAM-style "pick a person, apply effect" UI is the right mental model for body effects.
+
+## 6. AI-generated clips for hooks and B-roll (2026)
+
+Sources: [invideo official per-second rate card (Aug 2026)](https://invideo.io/blog/ai-video-model-pricing), [Dupple generator tests (Jun 2026)](https://dupple.com/learn/best-ai-video-generators), [fast.io Runway review](https://www.fast.io/resources/runway-ai-review-2026.md), [InsiderLLM local models guide](https://insiderllm.com/guides/local-ai-video-generation/), [ETV Bharat Veo 3 India](https://www.etvbharat.com/en/!technology/google-veo-3-ai-video-tool-officially-launched-in-india-via-gemini-ai-pro-plan-enn25070403123), [Gemini API regions](https://ai.google.dev/gemini-api/docs/available-regions.md.txt), [FLUX licence guide](https://www.promptzone.com/zuzanna_choi/flux-ai-license-key-insights-2g8d.md), [AMD ROCm ComfyUI LTX tutorial](https://rocm.docs.amd.com/projects/ai-developer-hub/en/v14.0/notebooks/inference/t2v_comfyui_radeon.html), [Coverr on AI copyright](https://coverr.co/blog/is-ai-generated-video-copyright-free-2026). Prices as of mid-2026; resellers quote 2–3× official.
+
+### 6.1 Hosted providers (what creators use)
+| Provider / model | Official API price | Consumer plan | Clip length / I2V | API | India | Commercial use |
+|---|---|---|---|---|---|---|
+| **Google Veo 3.1** (Gemini API / Vertex) | $0.40/s 720–1080p, $0.60/s 4K; **Veo 3.1 Fast** $0.10/s 720p, $0.12/s 1080p; **Veo 3.1 Lite** $0.05/s 720p, $0.08/s 1080p; audio included; 8-s cap | Google AI Pro **₹1,950/mo** in India (incl. Flow, 2 TB); AI Ultra $249.99 | 4/6/8 s; T2V + I2V + reference images | Yes (Gemini API; India is a supported region) | Yes (Gemini app + API) | Paid-plan outputs usable commercially; SynthID watermark embedded; check Google GenAI prohibited-use policy |
+| **Kling 3.0** (Kuaishou) | Kling 3.0 Turbo ¥0.8/s (~$0.11) 720p; others credit-based | Free 66 credits/day; Standard $6.99 (660 cr), Pro $25.99 (3,000), Ultra $180; ~30 cr per 5-s 720p clip | 5/10 s, I2V strong, lip-sync, motion brush | Yes (global API via klingai.com / partners) | Accessible from India (web); payments in USD | Paid plans grant commercial use; free tier watermark [unverified] |
+| **Runway Gen-4 / 4.5** | API $0.01/credit; Gen-4.5 = 25 credits/s (~$0.25/s); Gen-4 Turbo cheaper | Free 125 one-time; Standard $12/mo (625 cr), Pro $28 (2,250), Max $76 (9,500) | 5/10 s; I2V, reference images, Aleph (video-to-video edit), Act-One/Two | Yes | Yes | Paid plans commercial; free tier limits [unverified] |
+| **Luma Dream Machine / Ray** | not on rate card | Free ~30 gens/mo (watermark); Standard $30 (~120 gens ≈ $1/clip); Pro $90 | 5 s; keyframes (start/end) | Yes | Yes | Paid commercial |
+| **Pika 2.x** | not on rate card | Free 480p watermark; Standard ~$8; Pro ~$35; Fancy ~$95 | up to 25 s (Pikaframes); I2V | limited | Yes | Paid; terms vague |
+| **Hailuo / MiniMax** | **MiniMax-H3 $0.13/s at 2K**; older: $0.28 per 6-s 768p, $0.49 per 6-s 1080p | Free; Standard $9.99 (1,000 cr); Unlimited $94.99 | 6–10 s; I2V is its strength | Yes (MiniMax Open Platform) | Yes | Standard removes watermark |
+| **Seedance 2.0** (ByteDance) | token-billed (≈$0.14/s 1080p est.) via BytePlus/Volcano; also inside Filmora, InVideo, Higgsfield | via partners | 5–10 s, I2V | Yes (BytePlus) | partner-dependent | partner terms |
+| **OpenAI Sora 2** | $0.10/s (720p) – $0.70/s (sora-2-pro 1080p) | — | 4–20 s | **API ends 24 Sep 2026; app shut 26 Apr 2026** → do not build on it | — | — |
+| **LTX-2.3 (Lightricks hosted)** | $0.06–0.24/s Fast, $0.08–0.32/s Pro, audio incl. | — | up to 4K 50 fps | Yes | Yes | open weights too (see 6.2) |
+| **Grok Imagine Video** | $0.05–0.08/s | — | — | Yes | — | — |
+
+Practical cost for Vividora: a 10-min motivational video needs maybe 6–10 B-roll clips of 5 s → Veo 3.1 Lite ≈ $2.5–4, Veo Fast ≈ $5–8, Kling Turbo ≈ $3–6, Hailuo ≈ $0.5–2 (older models per-clip). Hook clip (1 × 8 s Veo 3.1 1080p) ≈ $3.2. Cheapest good-looking I2V in 2026: Hailuo and Kling; cheapest with native audio: Veo 3.1 Lite/Fast.
+
+Still B-roll + Ken Burns is 10–100× cheaper: **FLUX.1 schnell** (Apache-2.0, outputs commercial) via API (~$0.003/img on hosted endpoints) or **Gemini image (Nano Banana)**; locally FLUX schnell 12B on CPU is minutes/image [est.] — on the RX 580 (8 GB) only SD1.5/SDXL-Turbo via Vulkan/ROCm-gfx803 is realistic (SDXL ~1–2 min/image [unverified]). **FLUX.1 dev** weights are non-commercial (outputs commercial) → don't self-host dev in a sold product. **SDXL** = CreativeML OpenRAIL-M (commercial OK with use restrictions). Ken Burns: ffmpeg `zoompan=z='min(zoom+0.0015,1.3)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=150:s=1920x1080:fps=30` (render at 2× then downscale to avoid jitter) + optional parallax via depth map (Depth-Anything-V2 small, Apache, ~50 ms/frame CPU [est.]).
+
+**Licensing/YouTube notes**: outputs from every major provider are usable commercially on paid tiers (free tiers often watermark and sometimes restrict); purely AI output is generally not copyrightable (no human authorship) so others can reuse it; YouTube requires the **"altered or synthetic content" disclosure** when realistic AI footage could mislead (illustrative B-roll of landscapes usually needs no label, synthetic people/events do) and monetisation is fine for original commentary with AI B-roll but not for mass-produced low-effort AI content (YPP "inauthentic content" policy, July 2025) [policy summary from general knowledge — verify on YouTube Help]. Keep prompt + provider + timestamp logs per clip for provenance.
+
+### 6.2 Open-source / local video models (realistic hardware)
+| Model | Licence | VRAM (practical) | Time per 5-s clip (RTX 4090) | Notes for Z440 (RX 580 8 GB, Xeon CPU) |
+|---|---|---|---|---|
+| **Wan 2.2 TI2V-5B** | Apache-2.0 | ~8 GB (GGUF Q4 + T5 offload 6–8 GB) | 2–4 min | Only candidate that *fits* 8 GB; on gfx803 ROCm (unofficial) or CPU it would take **~30–90 min per clip [est.]** — usable only for overnight batch hooks |
+| **Wan 2.2 A14B** / Wan 2.1 14B | Apache-2.0 | 11–16 GB (Q5), 6–8 GB (Q3 480p) | 4–8 min | too slow/large for RX 580 |
+| **LTX-2.3 distilled / LTX-Video 2B** | Lightricks community (free < $10M revenue) / earlier Apache-2.0 for 2B | 10–16 GB FP8; 2B runs on 12 GB; AMD doc shows LTX-2B on RX 7900 XTX 66 s/clip (ROCm 6.3) | seconds–2 min | fastest family; RX 580 lacks ROCm 6.3 support & VRAM; CPU ≈ 20–40 min/clip [est.] |
+| **HunyuanVideo 1.5** | Tencent community licence (check; restricts >100M MAU) | 14–24 GB | 75 s distilled – 12 min | best faces; not for this hardware |
+| **CogVideoX-5B / 2B** | Apache-2.0 (2B), CogVideoX licence (5B) | 8–18 GB | 5–15 min | 8 fps output, dated |
+| **Stable Video Diffusion** | Stability community licence (non-commercial above revenue cap) | < 10 GB | — | I2V 14/25 frames; dropped from Stability API Aug 2025 |
+| **Mochi 1** | Apache-2.0 | 17–20 GB | 5 min | superseded |
+
+Bottom line: **local video generation is not viable on the RX 580**; the sensible plan is (1) stills via FLUX-schnell/Gemini + Ken Burns/parallax locally, (2) hosted Veo 3.1 Lite/Fast, Kling or Hailuo for the 1–3 true motion clips per video, (3) revisit local Wan/LTX only with a ≥16 GB NVIDIA/RDNA3+ card. ComfyUI on AMD is officially documented for RX 7900/9000 series with ROCm 6.3+ ([AMD](https://rocm.docs.amd.com/projects/ai-developer-hub/en/v14.0/notebooks/inference/t2v_comfyui_radeon.html)).
+
+## 7. "Hook" patterns (CapCut / Edits) and how to reproduce them
+
+Observed builds (CapCut: [TourBox text-behind-person](https://www.tourboxtech.com/en/news/how-to-put-text-behind-a-person-in-capcut.html), [CapCut player-cutout reels](https://www.capcut.com/create/capcut-background-removal-player-cutout-reels), Edits Cutouts/Overlays per §5; top performers add a 1–2 s hook before the main sequence per [socialz](https://socialz.ai/blog/capcut-trending-video)):
+
+1. **Text-behind-person**: clip on main track → big text layer above → compound them → duplicate original clip on top → Auto cutout. Vividora: `bg` + `text` + `subject×alpha` three-layer overlay using cached RVM alpha.
+2. **Cutout pop-over / "person pops out of frame"**: background = blurred/zoomed/colour-flat version of the same frame (or an AI still); subject layer scaled 1.0→1.15 with Pop-up (overshoot ease) in first 10 frames, thick white or neon **stroke** (alpha dilation 6–12 px) + drop shadow, optional **glow** pulse to beat. Freeze the subject frame for the hook (`tpad`/`loop`) so it reads as a poster.
+3. **Outline + colour-flat background (Edits "Cutouts + Restyle")**: subject cutout over solid brand colour or gradient, 3–4 px stroke, big headline in Indic font preset; CapCut version uses Body effect "Stroke".
+4. **Split-screen hook**: `xstack`/`hstack` of speaker (left) + B-roll/AI clip or text card (right), or top/bottom for 9:16; animated divider via mask Linear keyframe (wipe reveal).
+5. **Zoom-in intro / 3D Zoom Pro**: quick scale 1.3→1.0 with ease-out over 15 frames + subtle rotate 2° + motion blur (`tmix` 3 frames) + whoosh SFX; variant "Shaky Dolly" = zoom + 2-px random jitter.
+6. **Freeze-frame + title card**: freeze at a strong facial expression, desaturate background, outline subject, slam-in title with Bounce, record-scratch/whoosh SFX, then resume.
+7. **Hook text punch**: first spoken sentence rendered as 3–5 oversized words, one per beat, Karaoke/Boxed template, with camera punch-in 5% on each word.
+8. **Masked reveal**: Circle/Linear mask keyframed 0→full over 12 frames to reveal the speaker from an AI B-roll frame (xfade `circleopen` / `wipeleft` are the ffmpeg equivalents).
+9. **AI-video hook**: 4–8 s Veo/Kling I2V clip generated from the video's first frame or a FLUX still prompted from the script's hook line, then `xfade` into the talking head; CapCut users do the same with Dreamina/Seedance.
+
+All of these need only: cached alpha (RVM), face box track, beat grid, ASS/Remotion text, and ffmpeg filtergraphs described in §3 — no extra ML. Ship them as parameterised "Hook presets" in the recipe JSON (duration, stroke px/colour, bg mode: blur|flat|ai-still, text template, SFX).
+
+## 8. Things I could not verify (please check before relying on them)
 - Exact current CapCut Pro price (regional), exact names of CapCut mask list, blending modes, "Flash in/out" speed preset, mobile caption template names (Hormozi-style), Voice changer / Remove flicker names, absence of eye-contact tool.
 - Filmora speed-ramp preset names and free-version watermark behaviour (from memory of older docs).
 - Vozo eye-contact / "AI video editor" retake feature; Vozo Studio XL/XXL prices (page showed $0 — page bug).
@@ -337,8 +410,12 @@ CPU budget (10-min 1080p30 talking head, 22-core Xeon, rough): transcription 3�
 - Kokoro Hindi support; Chatterbox Hindi; XTTS Hindi; Piper hi_IN voice quality; Collabora Whisper-Hindi model licence; MatAnyone licence; Noto Animated Emoji licence; Tenor API terms.
 - All "[est.]" CPU timings — run `bench/` scripts on the Z440 (RVM ONNX at 720p with 0.25/0.375 ratios, faster-whisper medium/large int8, vidstab, x264 presets, VAAPI) before finalising the autopilot SLA.
 - Platform loudness targets per Instagram/Facebook.
+- Edits: AI voice feature, Lip Sync scope, template availability in India, export resolution claim (4K60 from TechPP only), Reels-boost rumour.
+- AI video: free-tier watermark/commercial terms per provider (Kling, Runway); HunyuanVideo/CogVideoX-5B/SVD exact licences; all local-generation timings on CPU/RX 580 [est.]; YouTube AI-disclosure/monetisation policy wording.
 
-## 6. Source index (primary ones)
+## 9. Source index (primary ones)
+Edits: https://www.inro.social/blog/edits-new-meta-app · https://techpp.com/2025/04/26/instagram-edits/ · https://planoly.com/blog/instagrams-edits-app-review · https://www.socialmediatoday.com/news/instagram-adds-new-features-edits-app-keyframes/751543/
+AI video: https://invideo.io/blog/ai-video-model-pricing · https://dupple.com/learn/best-ai-video-generators · https://insiderllm.com/guides/local-ai-video-generation/ · https://www.etvbharat.com/en/!technology/google-veo-3-ai-video-tool-officially-launched-in-india-via-gemini-ai-pro-plan-enn25070403123 · https://ai.google.dev/gemini-api/docs/available-regions.md.txt · https://www.promptzone.com/zuzanna_choi/flux-ai-license-key-insights-2g8d.md · https://rocm.docs.amd.com/projects/ai-developer-hub/en/v14.0/notebooks/inference/t2v_comfyui_radeon.html · https://coverr.co/blog/is-ai-generated-video-copyright-free-2026 · https://www.tourboxtech.com/en/news/how-to-put-text-behind-a-person-in-capcut.html
 CapCut: https://www.capcut.com/tools/desktop-ai-power · https://www.capcut.com/help/how-to-use-auto-cut · https://www.capcut.com/resource/ai-effect · https://www.capcut.com/resource/caption-template · https://www.capcut.com/tools/speed-ramp · https://www.capcut.com/resource/capcut-effects-download · https://litcommerce.com/wp-content/uploads/2026/03/CapCut-ToolCheat-Sheet.pdf · https://vidpros.com/capcut-pro-vs-free/ · https://www.miracamp.com/learn/capcut/the-ultimate-guide-to-autocut · https://www.miracamp.com/learn/capcut/how-to-add-text · https://www.nemovideo.com/blog/capcut-ai-video-features · https://photography.tutsplus.com/tutorials/a-complete-guide-to-body-effects-in-capcut--cms-108858
 Filmora: https://filmora.wondershare.com/whats-new-in-filmora-video-editor.html · https://filmora.wondershare.de/guide/smart-short-clips.html · https://www.macworld.com/article/3016776/wondershare-filmora-v15-smarter-editing-powered-by-ai-and-built-for-real-creators.html
 Vozo: https://www.vozo.ai/pricing · https://www.vozo.ai/docs/common/tools-points-rules.md

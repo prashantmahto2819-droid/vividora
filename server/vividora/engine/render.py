@@ -64,6 +64,60 @@ def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: flo
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1")
 
 
+def _plan_segments(keep: list[tuple[float, float]], edl: dict, default_tr: str, speed: list[dict] | None):
+    """Segments (a, b, rate, transition_before) on the SOURCE timeline. Speed ranges split
+    keep segments; a transition belongs to the boundary that starts a segment."""
+    cut_tr: dict[float, str] = {}
+    for cdef in (edl.get("cuts") or []):
+        if cdef.get("enabled", True):
+            cut_tr[round(float(cdef.get("end", -1)), 2)] = cdef.get("transition") or default_tr
+    rates = sorted(((float(r["start"]), float(r["end"]), max(0.25, min(4.0, float(r.get("rate", 1))))) for r in (speed or [])
+                    if float(r.get("end", 0)) > float(r.get("start", 0))))
+    segs = []
+    for i, (a, b) in enumerate(keep):
+        bounds = sorted({a, b, *[x for r in rates for x in (r[0], r[1]) if a < x < b]})
+        first = True
+        for x, y in zip(bounds, bounds[1:]):
+            rate = next((r[2] for r in rates if r[0] <= x and y <= r[1]), 1.0)
+            tr = (cut_tr.get(round(a, 2), default_tr) if i > 0 else "none") if first else "none"
+            segs.append({"a": x, "b": y, "rate": rate, "tr": tr if fx.is_xfade(tr) or tr in fx.TRANSITIONS else "none"})
+            first = False
+    return segs
+
+
+def _segment_timeline(segs: list[dict]) -> list[dict]:
+    """Add output start/duration to each segment, accounting for xfade overlaps."""
+    t = 0.0
+    for sgm in segs:
+        d = (sgm["b"] - sgm["a"]) / sgm["rate"]
+        if fx.is_xfade(sgm["tr"]):
+            t -= min(fx.XFADE_SECONDS, d / 2, (segs[segs.index(sgm) - 1]["out_dur"] / 2) if segs.index(sgm) > 0 else d)
+        sgm["out_start"] = max(0.0, t)
+        sgm["out_dur"] = d
+        t += d
+    return segs
+
+
+def _src_to_out(segs: list[dict]):
+    def f(t: float) -> float | None:
+        for sgm in segs:
+            if sgm["a"] <= t < sgm["b"] or (t == sgm["b"] and sgm is segs[-1]):
+                return sgm["out_start"] + (t - sgm["a"]) / sgm["rate"]
+        return None
+    return f
+
+
+def _atempo(rate: float) -> str:
+    parts = []
+    r = rate
+    while r > 2.0:
+        parts.append("atempo=2.0"); r /= 2.0
+    while r < 0.5:
+        parts.append("atempo=0.5"); r /= 0.5
+    parts.append(f"atempo={r:.4f}")
+    return ",".join(parts)
+
+
 def _cut_points(keep: list[tuple[float, float]]) -> list[float]:
     """Output-timeline times where a jump cut happens."""
     pts, t = [], 0.0
@@ -95,10 +149,23 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     keep = [(a, b) for a, b in keep if b - a >= 1 / fps]
     if not keep:
         raise ValueError("कट के बाद कुछ नहीं बचा — कुछ कट बंद करें")
-    new_dur = sum(b - a for a, b in keep)
-    cuts = _cut_points(keep)
-
-    words = remap_words(words_of(transcript), keep) if transcript else []
+    e_tr_default = (effects or {}).get("transition") or "none"
+    segs = _segment_timeline(_plan_segments(keep, edl, e_tr_default, (effects or {}).get("speed") or edl.get("speed")))
+    use_segments = any(fx.is_xfade(sg["tr"]) or sg["rate"] != 1.0 for sg in segs)
+    if use_segments:
+        new_dur = segs[-1]["out_start"] + segs[-1]["out_dur"]
+        cuts = [sg["out_start"] for sg in segs[1:] if not fx.is_xfade(sg["tr"])]
+        to_out = _src_to_out(segs)
+        raw_words = words_of(transcript) if transcript else []
+        words = []
+        for wd in raw_words:
+            ws_, we_ = to_out(wd["start"]), to_out(min(wd["end"], wd["start"] + 3))
+            if ws_ is not None and we_ is not None and we_ > ws_:
+                words.append({**wd, "start": round(ws_, 3), "end": round(we_, 3)})
+    else:
+        new_dur = sum(b - a for a, b in keep)
+        cuts = _cut_points(keep)
+        words = remap_words(words_of(transcript), keep) if transcript else []
     style = resolve_style(style, caption_overrides) if style else style
     burn = preset.get("burn_captions", True) if burn_captions is None else burn_captions
     work = out_dir / f".{name}"
@@ -110,6 +177,43 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
 
     # ---- video base: cuts → frame fit → zoom → look → flash
     sel = _select_expr(keep, fps)
+    seg_audio_label = None
+    if use_segments:
+        # trim/concat/xfade path: real transitions and speed ramps
+        a_src = "[1:a]" if audio is not None else ("[0:a]" if meta.get("has_audio") else None)
+        if audio is not None:
+            inputs += ["-i", str(audio)]
+            next_in += 1
+        vlabels, alabels = [], []
+        for i, sg in enumerate(segs):
+            chains.append(f"[0:v]trim=start={sg['a']:.3f}:end={sg['b']:.3f},setpts=(PTS-STARTPTS)/{sg['rate']:.4f},fps={fps},settb=AVTB,format=yuv420p[sv{i}]")
+            vlabels.append(f"[sv{i}]")
+            if a_src:
+                chains.append(f"{a_src}atrim=start={sg['a']:.3f}:end={sg['b']:.3f},asetpts=PTS-STARTPTS,"
+                              f"{_atempo(sg['rate'])},aformat=sample_rates=48000:channel_layouts=mono[sa{i}]")
+                alabels.append(f"[sa{i}]")
+        cur_v, cur_a = vlabels[0], (alabels[0] if alabels else None)
+        acc = segs[0]["out_dur"]
+        for i in range(1, len(segs)):
+            sg = segs[i]
+            if fx.is_xfade(sg["tr"]):
+                d = acc - sg["out_start"]  # overlap length
+                chains.append(f"{cur_v}{vlabels[i]}xfade=transition={sg['tr'][2:]}:duration={d:.3f}:offset={sg['out_start']:.3f},settb=AVTB[xv{i}]")
+                cur_v = f"[xv{i}]"
+                if cur_a:
+                    chains.append(f"{cur_a}{alabels[i]}acrossfade=d={d:.3f}:c1=tri:c2=tri[xa{i}]")
+                    cur_a = f"[xa{i}]"
+            else:
+                chains.append(f"{cur_v}{vlabels[i]}concat=n=2:v=1:a=0,settb=AVTB[xv{i}]")
+                cur_v = f"[xv{i}]"
+                if cur_a:
+                    chains.append(f"{cur_a}{alabels[i]}concat=n=2:v=0:a=1[xa{i}]")
+                    cur_a = f"[xa{i}]"
+            acc = sg["out_start"] + sg["out_dur"]
+        chains.append(f"{cur_v}setpts=PTS-STARTPTS[vseg]")
+        if cur_a:
+            chains.append(f"{cur_a}asetpts=PTS-STARTPTS[voice]")
+            seg_audio_label = "[voice]"
     src_w, src_h = int(meta.get("width", w)), int(meta.get("height", h))
     track_cmds = None
     kf = meta.get("face_track") or []
@@ -118,28 +222,36 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         factor = max(w / src_w, h / src_h)
         scaled_w = int(round(src_w * factor))
 
-        def to_out(t: float) -> float | None:
-            o = 0.0
-            for a, b in keep:
-                if a <= t < b:
-                    return o + (t - a)
-                o += b - a
-            return None
+        if use_segments:
+            to_out_fn = _src_to_out(segs)
+        else:
+            def to_out_fn(t: float) -> float | None:
+                o = 0.0
+                for a, b in keep:
+                    if a <= t < b:
+                        return o + (t - a)
+                    o += b - a
+                return None
 
         track_cmds = work / "face.cmd"
-        track_cmds.write_text(crop_commands(kf, scaled_w, w, to_out, focus_x), encoding="utf-8")
+        track_cmds.write_text(crop_commands(kf, scaled_w, w, to_out_fn, focus_x), encoding="utf-8")
     frame = _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
-    v = f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}"
+    v = (f"[vseg]{frame}" if use_segments else f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}")
     # transitions: per-cut kind (edl cut.transition) or the global default
     default_tr = e.get("transition") or ("flash" if e.get("flash") else "none")
     tr_cuts = []
-    for t, (a, b) in zip(cuts, keep[1:]):
-        kind = default_tr
-        for cdef in (edl.get("cuts") or []):
-            if cdef.get("enabled", True) and abs(float(cdef.get("end", -1)) - a) < 0.08 and cdef.get("transition"):
-                kind = cdef["transition"]
-        if kind and kind != "none":
-            tr_cuts.append((t, kind))
+    if use_segments:
+        for sg in segs[1:]:
+            if sg["tr"] and sg["tr"] != "none" and not fx.is_xfade(sg["tr"]):
+                tr_cuts.append((sg["out_start"], sg["tr"]))
+    else:
+        for t, (a, b) in zip(cuts, keep[1:]):
+            kind = default_tr
+            for cdef in (edl.get("cuts") or []):
+                if cdef.get("enabled", True) and abs(float(cdef.get("end", -1)) - a) < 0.08 and cdef.get("transition"):
+                    kind = cdef["transition"]
+            if kind and kind != "none" and not fx.is_xfade(kind):
+                tr_cuts.append((t, kind))
     bump, tr_filters = fx.transition_filters(tr_cuts, new_dur)
     zoom = e.get("zoom") or {}
     plan = fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0))) if zoom.get("enabled") else [(0.0, 1.0)]
@@ -213,14 +325,15 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
 
     # ---- audio: voice (cut) → music duck → sfx → loudnorm
     a_cfg = preset.get("audio", {})
-    if audio is not None or meta.get("has_audio"):
-        if audio is not None:
-            inputs += ["-i", str(audio)]
-            a_in = f"[{next_in}:a]"
-            next_in += 1
-        else:
-            a_in = "[0:a]"
-        chains.append(f"{a_in}aselect='{sel}',asetpts=N/SR/TB,aformat=sample_rates=48000:channel_layouts=mono[voice]")
+    if seg_audio_label or (not use_segments and (audio is not None or meta.get("has_audio"))):
+        if not use_segments:
+            if audio is not None:
+                inputs += ["-i", str(audio)]
+                a_in = f"[{next_in}:a]"
+                next_in += 1
+            else:
+                a_in = "[0:a]"
+            chains.append(f"{a_in}aselect='{sel}',asetpts=N/SR/TB,aformat=sample_rates=48000:channel_layouts=mono[voice]")
         cur_a = "[voice]"
         music = e.get("music") or {}
         if music.get("path"):
@@ -265,7 +378,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     files = [{"kind": "render", "path": out, "mime": "video/mp4", "label": preset["id"],
               "meta": {"preset": preset["id"], "width": w, "height": h, "duration": round(new_dur, 2),
                        "fps": fps, "captions": style.get("id") if (burn and style) else None,
-                       "clip": clip, "face_track": track_cmds is not None,
+                       "clip": clip, "face_track": track_cmds is not None, "segments": len(segs) if use_segments else None,
                        "effects": {"zoom": bool(zoom.get("enabled")), "look": e.get("look") or None,
                                    "music": bool((e.get("music") or {}).get("path")),
                                    "broll": len(e.get("broll") or []), "titles": len(titles),
