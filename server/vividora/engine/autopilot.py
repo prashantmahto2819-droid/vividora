@@ -40,10 +40,23 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
     caption_style = learned.get("caption_style") or brand.get("caption_style") or ("hormozi" if is_short_source else "karaoke")
     hook = _first_hook(project)
     music = ""
-    bg = [m for m in library if m.get("kind") == "music" and "bg" in (m.get("name") or "").lower()] or \
-         [m for m in library if m.get("kind") == "music"]
+    niche = " ".join([str(workspace_settings.get("niche") or ""), str(brand.get("music_mood") or "")]).lower()
+    mood = next((m for m in ("motivational", "emotional", "news", "lofi", "upbeat", "cinematic", "story", "energetic") if m in niche), None)
+    if not mood:
+        mood = "news" if "news" in niche else "motivational"
+    musics = [m for m in library if m.get("kind") == "music"]
+    bg = [m for m in musics if mood in (m.get("tags") or "") or mood in (m.get("name") or "").lower()] or musics
     if bg and brand.get("music", True):
         music = random.Random(project["id"]).choice(bg)["id"]
+    stickers = [m for m in library if m.get("kind") == "sticker"]
+    sfx = {(m.get("name") or "").lower(): m["id"] for m in library if m.get("kind") == "sfx"}
+
+    def find(names: list[str]) -> str:
+        for n in names:
+            for m in stickers:
+                if n in (m.get("name") or "").lower():
+                    return m["id"]
+        return ""
     logo = brand.get("logo_id") or next((l["id"] for l in library if l.get("kind") == "logo"), "")
     grade_preset = brand.get("grade_preset") or "natural_skin"
     effects = {
@@ -58,6 +71,24 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
         "broll": [], "titles": [], "sfx": [],
         "watermark": {"id": logo, "opacity": 0.7, "size": 0.12, "pos": "tr"},
     }
+    # CTA popup + SFX (output timeline ≈ source minus cuts; place relative to the end)
+    out_dur = duration - float(((project.get("edl") or {}).get("stats") or {}).get("removed_seconds") or 0)
+    hindi = lang != "en"
+    cta = find(["subscribe hindi"] if hindi else ["subscribe red"]) or find(["subscribe"])
+    if cta and out_dur > 8 and brand.get("cta_popup", True):
+        at = max(2.0, out_dur * (0.72 if not is_short_source else 0.82))
+        effects["broll"].append({"_id": "ap_cta", "id": cta, "start": round(at, 2), "end": round(min(out_dur, at + 2.8), 2),
+                                 "fit": "free", "x": 0.5, "y": 0.78, "scale": 0.55, "opacity": 1, "rotate": 0, "anim": "pop"})
+        if sfx.get("pop"):
+            effects["sfx"].append({"_id": "ap_pop", "id": sfx["pop"], "at": round(at, 2), "volume": 0.7})
+    if hook and sfx.get("whoosh"):
+        effects["sfx"].append({"_id": "ap_whoosh", "id": sfx["whoosh"], "at": 0.0, "volume": 0.6})
+    if not is_short_source and out_dur > 40 and brand.get("cta_popup", True):
+        bell = find(["like sub bell"])
+        if bell:
+            effects["broll"].append({"_id": "ap_bell", "id": bell, "start": 6.0, "end": 9.0, "fit": "free", "x": 0.5, "y": 0.86,
+                                     "scale": 0.7, "opacity": 1, "rotate": 0, "anim": "slide_up"})
+    effects["zoom"]["mode"] = "punch" if is_short_source else "push"
     presets = ["yt-short", "ig-reel", "fb-reel"] if is_short_source else ["yt-long", "yt-short"]
     return {
         "presets": presets,

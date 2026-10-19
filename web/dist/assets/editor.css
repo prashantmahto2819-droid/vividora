@@ -204,3 +204,10 @@
 .ed-frameprev[hidden] { display: none; } .ed-frameprev img { max-width: 100%; max-height: 100%; }
 .ed-frameprev .ibtn { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6); color: #fff; }
 .ed-frameprev span { position: absolute; left: 8px; bottom: 6px; background: rgba(0,0,0,.6); color: #fff; padding: .1rem .5rem; border-radius: 4px; }
+.lib.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
+.lib.grid li { flex-direction: column; border: 1px solid var(--ed-line); border-radius: 8px; padding: .3rem; gap: .2rem; position: relative; }
+.lib.grid li img { width: 100%; height: 64px; }
+.lib.grid li .grow { width: 100%; } .lib.grid li .grow span { display: none; } .lib.grid li .grow b { font-size: .65rem; }
+.lib.grid li .btn { width: 100%; justify-content: center; padding: .15rem; font-size: .7rem; }
+.lib.grid li .ibtn[data-del] { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; background: rgba(0,0,0,.5); display: none; }
+.lib.grid li:hover .ibtn[data-del] { display: flex; }

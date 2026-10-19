@@ -92,7 +92,7 @@ function render() {
   </div>`;
   $("#logout").onclick = logout;
   const chs = $("#ch-switch"); if (chs) chs.onchange = () => { S.channel = chs.value; localStorage.setItem("vividora_channel", S.channel); load().then(render); };
-  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics(); if (r.kind === "library") bindLibrary();
+  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics(); if (r.kind === "home" || (!r.kind)) bindHome(); if (r.kind === "library") bindLibrary();
   if (detail && S.project) bindProject(S.project);
 }
 
@@ -115,18 +115,43 @@ function homeView() {
   const card = (p) => { const [label, cls] = STATUS[p.status] || [p.status, ""]; return `<a class="pcard" href="#/projects/${p.id}">
       <div class="pthumb">${p.thumb_url ? `<img src="${p.thumb_url}" alt="">` : `<div class="ph">${p.kind === "montage" ? "🎵" : "🎬"}</div>`}<span class="status ${cls}">${label}</span>${p.settings?.autopilot ? `<span class="ap">✈ autopilot</span>` : ""}</div>
       <div class="pbody"><b>${esc(p.title)}</b><span class="small muted">${p.meta?.duration ? fmt(p.meta.duration) + " · " : ""}${new Date(p.updated_at).toLocaleDateString("hi-IN")}</span>${["preparing", "transcribing", "cutting", "rendering"].includes(p.status) ? `<div class="progress"><i class="indet"></i></div>` : ""}</div></a>`; };
+  const HS = homeSections();
+  const sec = (id, html) => (HS.find((x) => x.id === id)?.on ? { id, html } : null);
+  const blocks = {
+    review: review.length ? `<div class="hsec"><div class="row between"><h2>जाँच के लिए</h2></div><div class="pgrid">${review.map(card).join("")}</div></div>` : "",
+    working: working.length ? `<div class="hsec"><h2>चल रहा है</h2><div class="pgrid">${working.map(card).join("")}</div></div>` : "",
+    recent: `<div class="hsec"><div class="row between"><h2>हाल के projects</h2><a class="small muted" href="#/new">+ नया</a></div>${S.projects.length ? `<div class="pgrid">${S.projects.slice(0, 8).map(card).join("")}</div>` : `<div class="empty"><p>अभी कोई project नहीं।</p><a class="btn primary" href="#/record">पहली recording करें</a></div>`}</div>`,
+    ideas: `<div class="hsec"><div class="row between"><h2>Record करने के लिए</h2><a class="small muted" href="#/plan">सब</a></div>${ideas.length ? `<ul class="hlist">${ideas.map((i) => `<li><a href="#/record"><b>${esc(i.title)}</b>${i.script ? `<span class="tag manual">script ✓</span>` : ""}</a></li>`).join("")}</ul>` : `<p class="small muted">Plan में ideas बनाएँ → "बनाना है" में रखें, यहाँ दिखेंगे।</p>`}</div>`,
+    trends: `<div class="hsec"><div class="row between"><h2>आज trending</h2><a class="small muted" href="#/plan">radar</a></div>${trends.length ? `<ul class="hlist">${trends.map((r) => `<li>${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.traffic ? r.meta.traffic + "+" : r.meta?.channel ? esc(r.meta.channel) : ""}</span></li>`).join("")}</ul>` : `<p class="small muted">Plan → "ताज़ा करें"</p>`}</div>`,
+    published: vids.length ? `<div class="hsec"><h2>हाल में published</h2><ul class="hlist">${vids.slice(0, 5).map((v) => `<li><a href="${v.url}" target="_blank" rel="noopener">${esc(v.title)}</a><span class="small muted">${v.platform} · ${(v.views || 0).toLocaleString("en-IN")} views</span></li>`).join("")}</ul></div>` : "",
+    library: `<div class="hsec"><div class="row between"><h2>Library</h2><a class="small muted" href="#/library">खोलें</a></div><div class="hlibq"><a href="#/library" class="hbtn"><i>🎵</i><b>Music & SFX</b></a><a href="#/library" class="hbtn"><i>📣</i><b>Popups</b></a><a href="#/library" class="hbtn"><i>😀</i><b>Stickers</b></a><a href="#/library" class="hbtn"><i>🖼</i><b>Frames</b></a></div></div>`,
+  };
+  const order = HS.filter((x) => x.on).map((x) => x.id);
+  const main = order.filter((id) => !["ideas", "trends", "library"].includes(id)).map((id) => blocks[id]).join("");
+  const side = order.filter((id) => ["ideas", "trends", "library"].includes(id)).map((id) => blocks[id]).join("");
   return `<div class="home">
-    <div class="hhero"><div><p class="kicker">${greet}, ${esc(S.user.name.split(" ")[0])}</p><h1>${review.length ? `${review.length} वीडियो आपकी मंज़ूरी का इंतज़ार कर रहे हैं` : working.length ? `${working.length} वीडियो पर काम चल रहा है` : "आज क्या बनाएँ?"}</h1>
+    <div class="row between" style="margin-bottom:.5rem"><span></span><button class="btn small quiet" id="home-custom">⚙ dashboard customize</button></div>
+    <div id="home-cust" hidden class="box hcust"><b>Sections</b> <span class="small muted">— दिखाएँ/छुपाएँ, ↑↓ से क्रम</span><ul>${HS.map((x, i) => `<li><label class="chk"><input type="checkbox" data-hs="${x.id}" ${x.on ? "checked" : ""}> ${x.label}</label><span><button class="btn small quiet" data-hsu="${i}">↑</button><button class="btn small quiet" data-hsd="${i}">↓</button></span></li>`).join("")}</ul></div>
+    ${HS.find((x) => x.id === "hero")?.on ? `<div class="hhero"><div><p class="kicker">${greet}, ${esc(S.user.name.split(" ")[0])}</p><h1>${review.length ? `${review.length} वीडियो आपकी मंज़ूरी का इंतज़ार कर रहे हैं` : working.length ? `${working.length} वीडियो पर काम चल रहा है` : "आज क्या बनाएँ?"}</h1>
       <p class="muted">Record करें या upload — Vividora cuts, captions, zoom, music, Shorts और titles तैयार कर देगा। आप सिर्फ़ approve करें।</p></div>
-      ${canEdit ? `<div class="hactions"><a class="hbtn" href="#/record"><i>⏺</i><b>Record</b><span>camera + teleprompter</span></a><a class="hbtn" href="#/new"><i>⬆</i><b>Upload</b><span>recording / clips</span></a><a class="hbtn" href="#/new?type=montage"><i>🎵</i><b>Montage</b><span>music + clips</span></a><a class="hbtn" href="#/plan"><i>✨</i><b>Plan</b><span>trends · ideas · script</span></a></div>` : ""}</div>
-    <div class="hstats"><div><b>${review.length}</b><span>मंज़ूरी बाकी</span></div><div><b>${working.length}</b><span>चल रहे</span></div><div><b>${approved.length}</b><span>मंज़ूर</span></div><div><b>${vids.length}</b><span>published</span></div><div><b>${views.toLocaleString("en-IN")}</b><span>views</span></div></div>
-    ${review.length ? `<div class="hsec"><div class="row between"><h2>जाँच के लिए</h2></div><div class="pgrid">${review.map(card).join("")}</div></div>` : ""}
-    ${working.length ? `<div class="hsec"><h2>चल रहा है</h2><div class="pgrid">${working.map(card).join("")}</div></div>` : ""}
-    <div class="hcols">
-      <div class="hsec"><div class="row between"><h2>हाल के projects</h2><a class="small muted" href="#/new">+ नया</a></div>${S.projects.length ? `<div class="pgrid">${S.projects.slice(0, 8).map(card).join("")}</div>` : `<div class="empty"><p>अभी कोई project नहीं।</p><a class="btn primary" href="#/record">पहली recording करें</a></div>`}</div>
-      <div class="hside"><div class="hsec"><div class="row between"><h2>Record करने के लिए</h2><a class="small muted" href="#/plan">सब</a></div>${ideas.length ? `<ul class="hlist">${ideas.map((i) => `<li><a href="#/record"><b>${esc(i.title)}</b>${i.script ? `<span class="tag manual">script ✓</span>` : ""}</a></li>`).join("")}</ul>` : `<p class="small muted">Plan में ideas बनाएँ → "बनाना है" में रखें, यहाँ दिखेंगे।</p>`}</div>
-      <div class="hsec"><div class="row between"><h2>आज trending</h2><a class="small muted" href="#/plan">radar</a></div>${trends.length ? `<ul class="hlist">${trends.map((r) => `<li>${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.traffic ? r.meta.traffic + "+" : r.meta?.channel ? esc(r.meta.channel) : ""}</span></li>`).join("")}</ul>` : `<p class="small muted">Plan → "ताज़ा करें"</p>`}</div></div>
-    </div></div>`;
+      ${canEdit ? `<div class="hactions"><a class="hbtn" href="#/record"><i>⏺</i><b>Record</b><span>camera + teleprompter</span></a><a class="hbtn" href="#/new"><i>⬆</i><b>Upload</b><span>recording / clips</span></a><a class="hbtn" href="#/new?type=montage"><i>🎵</i><b>Montage</b><span>music + clips</span></a><a class="hbtn" href="#/plan"><i>✨</i><b>Plan</b><span>trends · ideas · script</span></a></div>` : ""}</div>` : ""}
+    ${HS.find((x) => x.id === "stats")?.on ? `<div class="hstats"><div><b>${review.length}</b><span>मंज़ूरी बाकी</span></div><div><b>${working.length}</b><span>चल रहे</span></div><div><b>${approved.length}</b><span>मंज़ूर</span></div><div><b>${vids.length}</b><span>published</span></div><div><b>${views.toLocaleString("en-IN")}</b><span>views</span></div></div>` : ""}
+    <div class="hcols"><div>${main}</div><div class="hside">${side}</div></div></div>`;
+}
+const HOME_DEFAULT = [["hero", "Welcome + quick actions"], ["stats", "Stats"], ["review", "जाँच के लिए"], ["working", "चल रहा है"], ["recent", "हाल के projects"], ["published", "हाल में published"], ["ideas", "Record करने के लिए"], ["trends", "आज trending"], ["library", "Library shortcuts"]];
+function homeSections() {
+  let saved = []; try { saved = JSON.parse(localStorage.getItem("vividora_home") || "[]"); } catch {}
+  const known = new Map(HOME_DEFAULT.map(([id, label]) => [id, label]));
+  const out = saved.filter((x) => known.has(x.id)).map((x) => ({ id: x.id, on: x.on !== false, label: known.get(x.id) }));
+  for (const [id, label] of HOME_DEFAULT) if (!out.find((x) => x.id === id)) out.push({ id, on: true, label });
+  return out;
+}
+function bindHome() {
+  const save = (list) => { try { localStorage.setItem("vividora_home", JSON.stringify(list.map(({ id, on }) => ({ id, on })))); } catch {} render(); setTimeout(() => { const c = $("#home-cust"); if (c) c.hidden = false; }); };
+  const b = $("#home-custom"); if (b) b.onclick = () => { const c = $("#home-cust"); c.hidden = !c.hidden; };
+  document.querySelectorAll("[data-hs]").forEach((cb) => (cb.onchange = () => { const l = homeSections(); l.find((x) => x.id === cb.dataset.hs).on = cb.checked; save(l); }));
+  document.querySelectorAll("[data-hsu]").forEach((x) => (x.onclick = () => { const l = homeSections(); const i = +x.dataset.hsu; if (i > 0) { [l[i - 1], l[i]] = [l[i], l[i - 1]]; save(l); } }));
+  document.querySelectorAll("[data-hsd]").forEach((x) => (x.onclick = () => { const l = homeSections(); const i = +x.dataset.hsd; if (i < l.length - 1) { [l[i + 1], l[i]] = [l[i], l[i + 1]]; save(l); } }));
 }
 function loginView() {
   return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका video studio</p>

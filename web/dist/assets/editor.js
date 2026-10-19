@@ -460,7 +460,7 @@ function renderInspector() {
       ${it.fit === "free" ? `</div><div class="irow">${field("X", `<input type="range" data-k="x" min="0" max="1" step="0.01" value="${it.x ?? 0.5}" ${dis}>`)}${field("Y", `<input type="range" data-k="y" min="0" max="1" step="0.01" value="${it.y ?? 0.5}" ${dis}>`)}</div>
       <div class="irow">${field("size", `<input type="range" data-k="scale" min="0.05" max="1" step="0.01" value="${it.scale ?? 0.4}" ${dis}>`)}${field("opacity", `<input type="range" data-k="opacity" min="0.1" max="1" step="0.05" value="${it.opacity ?? 1}" ${dis}>`)}${field("घुमाव°", num("rotate", it.rotate || 0, 1, -180, 180))}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" data-k="_kf" ${it.to ? "checked" : ""} ${dis}> keyframe: अंत में यहाँ पहुँचे</label>${it.to ? `${field("X₂", `<input type="range" data-k="to.x" min="0" max="1" step="0.01" value="${it.to.x ?? it.x ?? 0.5}" ${dis}>`)}${field("Y₂", `<input type="range" data-k="to.y" min="0" max="1" step="0.01" value="${it.to.y ?? it.y ?? 0.5}" ${dis}>`)}${field("size₂", `<input type="range" data-k="to.scale" min="0.05" max="1" step="0.01" value="${it.to.scale ?? it.scale ?? 0.4}" ${dis}>`)}` : ""}</div>
-      <div class="irow">${field("in/out", `<select data-k="anim" ${dis}><option value="none" ${!it.anim || it.anim === "none" ? "selected" : ""}>cut</option><option value="fade" ${it.anim === "fade" ? "selected" : ""}>fade</option></select>`)}` : ""}
+      <div class="irow">${field("animation", `<select data-k="anim" ${dis}>${(E.ctx.S.presets?.sticker_anims || [{ id: "none", label: "none" }, { id: "fade", label: "fade" }]).map((a) => `<option value="${a.id}" ${(it.anim || "none") === a.id ? "selected" : ""}>${esc(a.label)}</option>`).join("")}</select>`)}` : ""}
       ${field("कोना", `<select data-k="pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${(it.pos || "tr") === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`)}</div>
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "sfx") {
@@ -579,7 +579,7 @@ function renderPanel() {
       ${t === "overlay" && E.libKind === "frame" ? `<div class="box"><b>Frame / border</b>${fx.frame?.id ? `<p class="small">${esc(libItem(fx.frame.id)?.name || "")}</p>` : `<p class="small muted">frame PNG चुनकर “लगाएँ”</p>`}
         ${field("opacity", `<input type="range" id="frm-op" min="0.2" max="1" step="0.05" value="${fx.frame?.opacity ?? 1}" ${dis}>`)}${fx.frame?.id ? `<button class="btn small quiet" id="frm-clear">हटाएँ</button>` : ""}</div>` : ""}
       ${t === "overlay" && E.libKind === "lut" ? `<p class="small muted">LUT (.cube) लगाने पर Effects का look बदल जाता है। अभी: <b>${fx.look?.startsWith("lut:") ? esc(libItem(fx.look.slice(4))?.name || "LUT") : "कोई नहीं"}</b></p>` : ""}
-      <ul class="lib">${E.lib === null ? `<li class="muted small">लोड हो रहा…</li>` : items.map((x) => `<li data-lib="${x.id}">
+      <ul class="lib ${["sticker", "image", "frame", "logo"].includes(E.libKind) ? "grid" : ""}">${E.lib === null ? `<li class="muted small">लोड हो रहा…</li>` : items.map((x) => `<li data-lib="${x.id}">
         ${["image", "logo", "sticker", "frame"].includes(x.kind) ? `<img src="${x.url}" alt="" loading="lazy" style="object-fit:contain;background:repeating-conic-gradient(#1a2130 0 25%,#222b3b 0 50%) 50%/10px 10px">` : x.kind === "broll" ? `<video src="${x.url}#t=0.5" muted preload="metadata"></video>` : `<i class="libicon">${ICON.audio}</i>`}
         <div class="grow"><b class="small">${esc(x.name)}</b><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}${x.meta?.width ? ` · ${x.meta.width}×${x.meta.height}` : ""}</span></div>
         ${x.kind === "music" || x.kind === "sfx" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
@@ -629,7 +629,7 @@ function renderPanel() {
     const stack = fx.stack || [];
     h = `<div class="ph"><h3>Effects</h3><span class="small muted">${stack.length} लगे</span></div>
       <div class="box"><label class="chk"><input type="checkbox" id="fx-zoom" ${fx.zoom.enabled ? "checked" : ""} ${dis}> <b>Auto zoom / punch-in</b></label>
-        ${field("कितना", `<input type="range" id="fx-zoom-str" min="0.3" max="2" step="0.1" value="${fx.zoom.strength}" ${dis}>`)}</div>
+        <div class="irow">${field("pattern", `<select id="fx-zoom-mode" ${dis}>${(S.presets?.zoom_modes || []).map((z) => `<option value="${z.id}" ${(fx.zoom.mode || "punch") === z.id ? "selected" : ""}>${esc(z.label)}</option>`).join("")}</select>`)}${field("कितना", `<input type="range" id="fx-zoom-str" min="0.3" max="2" step="0.1" value="${fx.zoom.strength}" ${dis}>`)}</div></div>
       <div class="box"><b>Transition (हर कट पर)</b><p class="small muted" style="margin:.2rem 0">Effect-style (cut पर flash/blur…):</p><div class="trgrid">${(S.presets?.transitions || []).filter((t) => !t.id.startsWith("x_")).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-${t.id}"></i>${esc(t.label)}</button>`).join("")}</div>
         <p class="small muted" style="margin:.5rem 0 .2rem">Clip transitions (दोनों clips 0.4s overlap — wipe/slide/dissolve, CapCut जैसे):</p><div class="trgrid">${(S.presets?.transitions || []).filter((t) => t.id.startsWith("x_")).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-x"></i>${esc(t.label)}</button>`).join("")}</div><p class="small muted">एक कट के लिए अलग: timeline पर कट चुनें → inspector।</p></div>
       ${stack.length ? `<h4>लगे हुए effects (ऊपर से नीचे)</h4><ul class="plist fxstack">${stack.map((it, i) => { const d = fxDef(it.id); if (!d) return ""; const pr = fxParams(d, it.params);
@@ -752,6 +752,7 @@ function bindPanel() {
   // effects
   on("#fx-zoom", "onchange", (e) => { fx.zoom.enabled = e.target.checked; touch(); });
   on("#fx-zoom-str", "oninput", (e) => { fx.zoom.strength = +e.target.value; touch(); });
+  on("#fx-zoom-mode", "onchange", (e) => { fx.zoom.mode = e.target.value; fx.zoom.enabled = true; touch(); renderPanel(); });
   on("#fx-q", "oninput", (e) => { E.fxq = e.target.value; const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; $("#fx-q", panel).focus(); const v = $("#fx-q", panel); v.setSelectionRange(v.value.length, v.value.length); });
   $$("[data-fxcat]", panel).forEach((b) => (b.onclick = () => { E.fxcat = b.dataset.fxcat; renderPanel(); }));
   $$("[data-fxadd]", panel).forEach((b) => (b.onclick = () => { fx.stack = fx.stack || []; if (fx.stack.length >= 8) return toast("एक साथ 8 effects तक"); fx.stack.push({ id: b.dataset.fxadd, params: {}, enabled: true }); touch(); layoutFrame(); renderPanel(); panel.scrollTop = 0; }));
@@ -815,7 +816,7 @@ function libAdd(x) {
   else if (x.kind === "logo") fx.watermark.id = x.id;
   else if (x.kind === "lut") fx.look = "lut:" + x.id;
   else if (x.kind === "frame") fx.frame = { id: x.id, opacity: fx.frame?.opacity ?? 1 };
-  else if (x.kind === "sticker") { const b = { _id: uid(), id: x.id, start: st, end: +Math.min(outDur(), st + 3).toFixed(2), fit: "free", x: 0.5, y: 0.35, scale: 0.3, opacity: 1, rotate: 0, anim: "fade" }; fx.broll.push(b); select({ type: "broll", id: b._id }); }
+  else if (x.kind === "sticker") { const b = { _id: uid(), id: x.id, start: st, end: +Math.min(outDur(), st + 3).toFixed(2), fit: "free", x: 0.5, y: 0.35, scale: (x.tags || "").includes("popup") ? 0.55 : 0.3, opacity: 1, rotate: 0, anim: "pop" }; fx.broll.push(b); select({ type: "broll", id: b._id }); }
   else if (x.kind === "sfx") { const s = { _id: uid(), id: x.id, at: st, volume: 0.8 }; fx.sfx.push(s); select({ type: "sfx", id: s._id }); }
   else { const d = x.kind === "image" ? 3 : Math.min(x.meta?.duration || 4, 8); const b = { _id: uid(), id: x.id, start: st, end: +Math.min(outDur(), st + d).toFixed(2), fit: x.kind === "image" ? "pip" : "cover", pos: "tr" }; fx.broll.push(b); select({ type: "broll", id: b._id }); }
   touch(); renderPanel();

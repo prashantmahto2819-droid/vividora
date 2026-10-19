@@ -92,17 +92,46 @@ def transition_filters(cuts: list[tuple[float, str]], duration: float) -> tuple[
 ZOOM_LEVELS = [1.0, 1.14, 1.0, 1.08, 1.2, 1.0, 1.12]
 
 
+ZOOM_MODES = {"punch": "Punch-in हर कट पर", "push": "धीरे-धीरे zoom in (Ken Burns)", "inout": "In-Out बारी-बारी",
+              "beat": "हर 2 सेकंड punch", "emphasis": "ज़ोर वाले शब्दों पर"}
+
+
 def zoom_plan(boundaries: list[float], duration: float, strength: float = 1.0,
-              min_gap: float = 1.6, max_points: int = 80) -> list[tuple[float, float]]:
-    """Zoom targets at segment starts: [(time, zoom)]. Alternates levels so
-    jump cuts read as deliberate punch-ins."""
+              min_gap: float = 1.6, max_points: int = 80, mode: str = "punch",
+              emphasis: list[float] | None = None) -> list[tuple[float, float]]:
+    """Zoom targets: [(time, zoom)]. punch = alternate levels at cuts; push = slow
+    continuous push per segment; inout = in on one cut, out on the next; beat = every 2 s;
+    emphasis = punch on given times (loud/keyword words)."""
+    k = max(0.0, min(2.0, strength))
+    if mode == "push":
+        pts = []
+        marks = sorted(set([0.0, *[b for b in boundaries if b < duration]]))
+        for i, b in enumerate(marks[:max_points]):
+            end = marks[i + 1] if i + 1 < len(marks) else duration
+            pts.append((round(b, 3), 1.0))
+            pts.append((round(max(b + 0.05, end - 0.05), 3), round(1.0 + 0.12 * k, 4)))
+        return pts or [(0.0, 1.0)]
+    if mode == "beat":
+        boundaries = [i * 2.0 for i in range(int(duration / 2.0) + 1)]
+        min_gap = 1.9
+    if mode == "emphasis" and emphasis:
+        boundaries = emphasis
+        min_gap = 1.2
+    if mode == "inout":
+        pts, last, i = [], -10.0, 0
+        for b in sorted(set([0.0, *boundaries])):
+            if b - last < min_gap or b >= duration:
+                continue
+            pts.append((round(b, 3), round(1.0 + (0.16 * k if i % 2 else 0.0), 4)))
+            last, i = b, i + 1
+        return pts[:max_points] or [(0.0, 1.0)]
     pts: list[tuple[float, float]] = []
     last = -10.0
     i = 0
     for b in sorted(set([0.0, *boundaries])):
         if b - last < min_gap or b >= duration:
             continue
-        z = 1.0 + (ZOOM_LEVELS[i % len(ZOOM_LEVELS)] - 1.0) * max(0.0, min(2.0, strength))
+        z = 1.0 + (ZOOM_LEVELS[i % len(ZOOM_LEVELS)] - 1.0) * k
         pts.append((round(b, 3), round(z, 4)))
         last = b
         i += 1
@@ -221,16 +250,38 @@ def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_la
     if op < 1:
         prep += f",colorchannelmixer=aa={op:.3f}"
     anim = item.get("anim") or "none"
-    if anim in ("fade", "pop"):
-        prep += f",fade=t=in:st={s:.3f}:d=0.25:alpha=1,fade=t=out:st={max(s, e - 0.25):.3f}:d=0.25:alpha=1"
+    if anim != "none":
+        prep += f",fade=t=in:st={s:.3f}:d=0.15:alpha=1,fade=t=out:st={max(s, e - 0.2):.3f}:d=0.2:alpha=1"
     prep += f"[ovf{idx}]"
-    # scale keyframe: shrink the (max-size) overlay per frame with the overlay's own scale option is not possible,
-    # so we animate position only and pick size by the larger keyframe; a zoom is approximated by `scale` filter eval
+    zexpr = None
     if abs(sc1 - sc0) > 0.001:
-        zw = f"'trunc({w}*{_lerp(sc0, sc1, s, e)}/2)*2'"
+        zexpr = _lerp(sc0, sc1, s, e)
+    if anim in ("pop", "bounce", "zoom"):
+        # overshoot ease on the first 0.35 s: 0 → 1.15 → 1.0 (pop); bounce has a second, smaller kick
+        u = f"min(1\\,max(0\\,(t-{s:.3f})/0.35))"
+        if anim == "zoom":
+            k = f"(1.6-0.6*{u})"
+        elif anim == "bounce":
+            k = f"(if(lt({u}\\,0.6)\\,{u}/0.6*1.18\\,1.18-0.18*({u}-0.6)/0.4)+0.04*sin(10*max(0\\,t-{s:.3f}))*exp(-4*max(0\\,t-{s:.3f})))"
+        else:
+            k = f"if(lt({u}\\,0.7)\\,0.2+{u}/0.7*0.95\\,1.15-0.15*({u}-0.7)/0.3)"
+        base = zexpr or f"{max(sc0, sc1):.4f}"
+        zexpr = f"({base})*({k})"
+    if zexpr:
+        zw = f"'max(8\\,trunc({w}*{zexpr}/2)*2)'"
         prep = prep.replace(f"[ovf{idx}]", f",scale=w={zw}:h=-2:eval=frame[ovf{idx}]")
     px = f"'{w}*{_lerp(x0, x1, s, e)}-w/2'" if (x1 != x0) else f"'{w * x0:.1f}-w/2'"
     py = f"'{h}*{_lerp(y0, y1, s, e)}-h/2'" if (y1 != y0) else f"'{h * y0:.1f}-h/2'"
+    if anim == "slide_up":
+        py = f"'{h * y0:.1f}-h/2+{h * 0.35:.0f}*pow(max(0\\,1-(t-{s:.3f})/0.35)\\,2)'"
+    elif anim == "slide_left":
+        px = f"'{w * x0:.1f}-w/2+{w * 0.6:.0f}*pow(max(0\\,1-(t-{s:.3f})/0.35)\\,2)'"
+    elif anim == "drop":
+        py = f"'{h * y0:.1f}-h/2-{h:.0f}*pow(max(0\\,1-(t-{s:.3f})/0.45)\\,2)'"
+    elif anim == "shake":
+        px = f"'{w * x0:.1f}-w/2+{w * 0.012:.1f}*sin(60*t)*exp(-3*max(0\\,t-{s:.3f}))'"
+    elif anim == "float":
+        py = f"'{h * y0:.1f}-h/2+{h * 0.01:.1f}*sin(4*t)'"
     return (f"{prep};{in_label}[ovf{idx}]overlay=x={px}:y={py}:eval=frame:enable='between(t\\,{s:.3f}\\,{e:.3f})'"
             f":eof_action=pass{out_label}")
 
@@ -282,6 +333,10 @@ def title_events(titles: list[dict], width: int, height: int, font: str = "Poppi
             continue
         out.append(f"Dialogue: 2,{_t(s0)},{_t(e0)},Title,,0,0,0,,{{{tags}}}{txt}")
     return style, out
+
+
+STICKER_ANIMS = {"none": "कोई नहीं", "fade": "Fade", "pop": "Pop (bounce in)", "bounce": "Bounce", "zoom": "Zoom in",
+                 "slide_up": "नीचे से", "slide_left": "दाएँ से", "drop": "ऊपर से गिरे", "shake": "Shake", "float": "Float"}
 
 
 TEXT_ANIMS = {"none": "कोई नहीं", "fade": "Fade", "pop": "Pop", "slide_up": "Slide up", "slide_left": "Slide in (बाएँ से)",

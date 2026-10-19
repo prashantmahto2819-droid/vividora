@@ -150,7 +150,8 @@ def after_job(c, job: dict, result: dict) -> None:
             project = db.get("projects", pid)
             ch = db.get("channels", project.get("channel_id") or "") or db.row(c.execute(
                 "SELECT * FROM channels WHERE workspace_id = ? ORDER BY created_at LIMIT 1", (project["workspace_id"],)).fetchone())
-            ch_settings = (ch or {}).get("settings") or (db.get("workspaces", project["workspace_id"]) or {}).get("settings") or {}
+            ch_settings = {**((ch or {}).get("settings") or (db.get("workspaces", project["workspace_id"]) or {}).get("settings") or {}),
+                           "niche": (ch or {}).get("niche") or ""}
             lib = db.rows(c.execute("SELECT id, kind, name, tags FROM library WHERE workspace_id = ? AND (channel_id IS NULL OR channel_id = ?)",
                                     (project["workspace_id"], (ch or {}).get("id"))))
             opts = autopilot.plan(project, ch_settings, lib)

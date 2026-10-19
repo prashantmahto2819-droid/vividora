@@ -304,7 +304,13 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                 tr_cuts.append((t, kind))
     bump, tr_filters = fx.transition_filters(tr_cuts, new_dur)
     zoom = e.get("zoom") or {}
-    plan = fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0))) if zoom.get("enabled") else [(0.0, 1.0)]
+    emph = None
+    if zoom.get("enabled") and zoom.get("mode") == "emphasis" and words:
+        from .shorts import HOOK_WORDS
+        import re as _re
+        emph = [wd["start"] for wd in words if _re.sub(r"[^\w]", "", wd["w"].lower()) in HOOK_WORDS or wd["w"].rstrip().endswith("!")]
+    plan = (fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0)), mode=zoom.get("mode") or "punch", emphasis=emph)
+            if zoom.get("enabled") else [(0.0, 1.0)])
     if len(plan) > 1 or bump:
         v += "," + fx.zoom_filter(plan, w, h, fx=0.5, fy=min(0.9, max(0.1, focus_y)), bump=bump)
     look = fx.look_filter(e.get("look"), Path(e["lut_path"]) if e.get("lut_path") else None)
