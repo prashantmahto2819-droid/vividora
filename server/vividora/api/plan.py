@@ -181,7 +181,47 @@ async def inbound(request: Request):
     return ok({"matched": True, "project_id": p["id"]})
 
 
+REF_KINDS = ("audio", "video", "effect", "caption", "hook", "other")
+
+
+@require("viewer")
+async def list_refs(request: Request, user: dict):
+    q = "SELECT * FROM refs WHERE workspace_id = ?"
+    args: list = [user["workspace_id"]]
+    pid = request.query_params.get("project_id")
+    if pid:
+        q += " AND (project_id = ? OR project_id IS NULL)"
+        args.append(pid)
+    return ok(db.rows(db.conn().execute(q + " ORDER BY created_at DESC LIMIT 300", args)))
+
+
+@require("editor")
+async def create_ref(request: Request, user: dict):
+    data = await body(request)
+    if not (data.get("url") or data.get("note")):
+        raise ApiError(422, "link या note लिखें")
+    row = {"id": db.new_id(), "workspace_id": user["workspace_id"], "project_id": data.get("project_id") or None,
+           "kind": data.get("kind") if data.get("kind") in REF_KINDS else "other", "url": (data.get("url") or "")[:500] or None,
+           "note": (data.get("note") or "")[:2000] or None, "created_by": user["id"], "created_at": db.now()}
+    with db.tx() as c:
+        db.insert(c, "refs", row)
+    return ok(row, 201)
+
+
+@require("editor")
+async def delete_ref(request: Request, user: dict):
+    r = db.get("refs", request.path_params["ref_id"])
+    if not r or r["workspace_id"] != user["workspace_id"]:
+        raise ApiError(404, "not found")
+    with db.tx() as c:
+        c.execute("DELETE FROM refs WHERE id = ?", (r["id"],))
+    return ok()
+
+
 routes = [
+    Route("/refs", list_refs),
+    Route("/refs", create_ref, methods=["POST"]),
+    Route("/refs/{ref_id}", delete_ref, methods=["DELETE"]),
     Route("/trends", list_trends),
     Route("/trends/refresh", refresh_trends, methods=["POST"]),
     Route("/ideas", list_ideas),

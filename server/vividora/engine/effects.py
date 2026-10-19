@@ -20,7 +20,61 @@ LOOKS: dict[str, dict] = {
     "bw": {"label": "ब्लैक & व्हाइट", "filter": "hue=s=0,eq=contrast=1.12"},
     "cool": {"label": "ठंडा", "filter": "colorbalance=rs=-.05:bs=.06,eq=saturation=1.02"},
     "vintage": {"label": "विंटेज", "filter": "curves=vintage,eq=saturation=0.85,vignette=PI/5"},
+    "teal_orange": {"label": "Teal-Orange", "filter": "colorbalance=rs=.08:gs=-.02:bs=-.10:rh=-.06:bh=.10,eq=saturation=1.12:contrast=1.06"},
+    "matte": {"label": "Matte", "filter": "curves=m='0/0.06 0.25/0.26 0.75/0.74 1/0.94',eq=saturation=0.92"},
+    "moody": {"label": "Moody", "filter": "eq=brightness=-0.06:contrast=1.15:saturation=0.8,colorbalance=bs=.06:bm=.03,vignette=PI/4.5"},
+    "golden": {"label": "Golden hour", "filter": "colorbalance=rs=.1:gs=.04:bs=-.08:rm=.05:gm=.02,eq=saturation=1.1:brightness=0.02"},
+    "bright": {"label": "Bright & clean", "filter": "eq=brightness=0.05:contrast=1.04:saturation=1.08,unsharp=3:3:0.4"},
+    "retro": {"label": "Retro VHS", "filter": "eq=saturation=1.2:contrast=0.95,noise=alls=10:allf=t,colorbalance=rs=.05:bs=.05"},
+    "noir": {"label": "Noir", "filter": "hue=s=0,eq=contrast=1.3:brightness=-0.05,vignette=PI/4"},
 }
+
+# Global extras stacked after the look (ids → ffmpeg filter)
+EXTRAS: dict[str, dict] = {
+    "vignette": {"label": "Vignette", "filter": "vignette=PI/4.5"},
+    "grain": {"label": "Film grain", "filter": "noise=alls=9:allf=t+u"},
+    "sharpen": {"label": "Sharpen", "filter": "unsharp=5:5:0.8:5:5:0"},
+    "mirror": {"label": "Mirror (flip)", "filter": "hflip"},
+    "letterbox": {"label": "Cinematic bars", "filter": "drawbox=x=0:y=0:w=iw:h=ih*0.07:color=black:t=fill,drawbox=x=0:y=ih*0.93:w=iw:h=ih*0.07:color=black:t=fill"},
+    "shake": {"label": "Handheld shake", "filter": "crop=iw-24:ih-24:'12+7*sin(t*37)':'12+7*cos(t*29)',scale=iw+24:ih+24:flags=bicubic"},
+    "soft_glow": {"label": "Soft glow", "filter": "split[gl1][gl2];[gl2]gblur=sigma=14[glb];[gl1][glb]blend=all_mode=screen:all_opacity=0.25"},
+    "fade_in": {"label": "Fade in", "filter": "fade=t=in:d=0.6"},
+}
+
+TRANSITIONS = {
+    "none": "कोई नहीं", "flash": "Flash", "dip": "Dip to black", "punch": "Zoom punch", "whip": "Whip blur",
+    "glitch": "Glitch", "flashpunch": "Flash + punch",
+}
+
+
+def extras_filter(ids: list[str]) -> str:
+    return ",".join(EXTRAS[i]["filter"] for i in ids if i in EXTRAS)
+
+
+def transition_filters(cuts: list[tuple[float, str]], duration: float) -> tuple[str, str]:
+    """Per-cut transitions on the output timeline. Returns (pre_zoom_bump_expr, filters).
+    cuts: [(time, kind)]. The zoom bump is added to the zoom expression (punch)."""
+    pre, parts = [], []
+    flash_t = [t for t, k in cuts if k in ("flash", "flashpunch")]
+    if flash_t:
+        parts.append(flash_filter(flash_t))
+    punch_t = [t for t, k in cuts if k in ("punch", "flashpunch")]
+    for t in punch_t[:80]:
+        pre.append(f"0.11*exp(-max(0\\,t-{t:.3f})*9)*gte(t\\,{t:.3f})")
+    dip_t = [t for t, k in cuts if k == "dip"]
+    if dip_t:
+        # brightness dips to black and back over ±0.14 s (fade= would blacken everything before st)
+        terms = "+".join(f"max(0\\,1-abs(t-{t:.3f})/0.14)" for t in dip_t[:120])
+        parts.append(f"eq=brightness='-min(1\\,{terms})':eval=frame")
+    whip_t = [t for t, k in cuts if k == "whip"]
+    if whip_t:
+        en = "+".join(f"between(t\\,{t - 0.09:.3f}\\,{t + 0.09:.3f})" for t in whip_t[:150])
+        parts.append(f"gblur=sigma=16:enable='{en}'")
+    gl_t = [t for t, k in cuts if k == "glitch"]
+    if gl_t:
+        en = "+".join(f"between(t\\,{t - 0.06:.3f}\\,{t + 0.1:.3f})" for t in gl_t[:150])
+        parts.append(f"rgbashift=rh=14:bh=-14:enable='{en}',noise=alls=40:allf=t:enable='{en}'")
+    return "+".join(pre), ",".join(p for p in parts if p)
 
 ZOOM_LEVELS = [1.0, 1.14, 1.0, 1.08, 1.2, 1.0, 1.12]
 
@@ -62,9 +116,12 @@ def zoom_expr(points: list[tuple[float, float]], ease: float = 0.3) -> str:
     return expr
 
 
-def zoom_filter(points: list[tuple[float, float]], w: int, h: int, fx: float = 0.5, fy: float = 0.4) -> str:
+def zoom_filter(points: list[tuple[float, float]], w: int, h: int, fx: float = 0.5, fy: float = 0.4,
+                bump: str = "") -> str:
     """Scale per frame by z(t), then crop back to w×h around the focus point."""
     z = zoom_expr(points)
+    if bump:
+        z = f"({z})+({bump})"
     return (f"scale=w='trunc(iw*({z})/2)*2':h='trunc(ih*({z})/2)*2':eval=frame:flags=bicubic,"
             f"crop={w}:{h}:x='(iw-{w})*{fx:.3f}':y='(ih-{h})*{fy:.3f}'")
 

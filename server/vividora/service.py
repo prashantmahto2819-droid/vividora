@@ -18,7 +18,9 @@ from .engine.presets import caption_styles, platforms
 DEFAULT_EFFECTS = {
     "zoom": {"enabled": False, "strength": 1.0},     # auto punch-in on cuts
     "look": "none",                                   # colour look id, or lut:<library_id>
-    "flash": False,                                   # white flash at cuts
+    "flash": False,                                   # (legacy) white flash at cuts
+    "transition": "none",                             # default per-cut transition: none|flash|dip|punch|whip|glitch|flashpunch
+    "extras": [],                                     # global extras: vignette, grain, sharpen, mirror, letterbox, shake, soft_glow, fade_in
     "music": {"id": "", "volume": 0.18, "duck": True},
     "broll": [],        # [{id, start, end, fit: cover|pip, pos: tl|tr|bl|br}]
     "titles": [],       # [{start, end, text, pos: top|center|bottom, size, color, bg}]
@@ -29,7 +31,8 @@ DEFAULT_EFFECTS = {
 DEFAULT_RENDER = {
     "presets": ["yt-long", "yt-short"],
     "caption_style": "karaoke",
-    "captions": {"size_scale": 1.0, "position": "", "primary": "", "highlight": "", "font": ""},
+    "captions": {"size_scale": 1.0, "position": "", "primary": "", "highlight": "", "font": "", "italic": "", "uppercase": "",
+                 "letter_spacing": "", "outline_scale": "", "shadow_scale": "", "outline_color": ""},
     "burn_captions": True,
     "focus_x": 0.5,
     "focus_y": 0.5,
@@ -87,10 +90,14 @@ def asset_of(project_id: str, kind: str, label: str | None = None) -> dict | Non
     return db.row(db.conn().execute(q + " ORDER BY created_at DESC LIMIT 1", args).fetchone())
 
 
-def start_pipeline(c, project: dict) -> dict:
-    """Called when the upload finished: inspect, clean audio, make preview."""
-    set_status(c, project["id"], "preparing", "फ़ाइल जाँची जा रही है")
-    return queue.enqueue(c, project["id"], "prepare")
+def start_pipeline(c, project: dict, merge: bool = False) -> dict:
+    """Called when the upload finished: inspect, clean audio, make preview.
+    merge=True joins the project's clips into one recording first."""
+    c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? AND status='queued'",
+              (db.now(), project["id"]))
+    db.update(c, "projects", project["id"], {"transcript": None, "edl": None})
+    set_status(c, project["id"], "preparing", "clips जोड़े जा रहे हैं" if merge else "फ़ाइल जाँची जा रही है")
+    return queue.enqueue(c, project["id"], "prepare", {"merge": merge})
 
 
 def after_job(c, job: dict, result: dict) -> None:
@@ -103,6 +110,8 @@ def after_job(c, job: dict, result: dict) -> None:
 
     if kind == "prepare":
         meta = {**project.get("meta", {}), **result.get("meta", {})}
+        if result.get("clips") is not None:
+            meta["clips"] = result["clips"]
         db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now()})
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], keep_path=f["path"])

@@ -81,14 +81,30 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
         kind = job["kind"]
 
         if kind == "prepare":
-            raw = _fetch(client, assets, "raw", tmp)
-            out = prepare.prepare(raw, tmp / "work", on_progress=_progress(client, job["id"]))
-            files = []
+            prog = _progress(client, job["id"])
+            clips_meta = None
+            if job["payload"].get("merge"):
+                clip_assets = sorted([a for a in assets if a["kind"] == "clip"], key=lambda a: (a.get("meta") or {}).get("order", 0))
+                paths = [client.download(a["id"], tmp / "clips" / Path(a["path"]).name) for a in clip_assets]
+                if len(paths) == 1:
+                    raw = paths[0]
+                    clips_meta = [{"name": paths[0].name, "start": 0.0, "end": ffmpeg.probe(raw)["duration"]}]
+                else:
+                    m = prepare.merge(paths, tmp / "work" / "merged.mp4", on_progress=lambda f, msg: prog(f * 0.3, msg))
+                    raw = m["path"]
+                    clips_meta = m["boundaries"]
+                merged_up = client.upload(job["id"], raw, "raw")
+                out = prepare.prepare(raw, tmp / "work", on_progress=lambda f, msg: prog(0.3 + f * 0.7, msg))
+                files = [{"kind": "raw", "path": merged_up["path"], "mime": "video/mp4", "meta": {"merged": len(paths) > 1}}]
+            else:
+                raw = _fetch(client, assets, "raw", tmp)
+                out = prepare.prepare(raw, tmp / "work", on_progress=prog)
+                files = []
             for f in out["files"]:
                 up = client.upload(job["id"], f["path"], f["kind"])
                 files.append({"kind": f["kind"], "path": up["path"], "mime": f.get("mime"),
                               "meta": f.get("meta", {})})
-            return {"meta": out["meta"], "files": files}
+            return {"meta": out["meta"], "files": files, "clips": clips_meta}
 
         if kind == "autocut":
             transcript = project.get("transcript") or {"segments": []}

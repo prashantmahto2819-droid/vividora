@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS stats (
   fetched_at TEXT NOT NULL, views INTEGER NOT NULL DEFAULT 0, likes INTEGER NOT NULL DEFAULT 0,
   comments INTEGER NOT NULL DEFAULT 0, extra TEXT NOT NULL DEFAULT '{}');
 CREATE INDEX IF NOT EXISTS stats_pub ON stats(publication_id, fetched_at);
+CREATE TABLE IF NOT EXISTS refs (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  project_id TEXT, kind TEXT NOT NULL DEFAULT 'other', url TEXT, note TEXT, created_by TEXT, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS refs_ws ON refs(workspace_id, created_at);
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);

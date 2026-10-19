@@ -106,6 +106,28 @@ def resolve_style(style: dict, overrides: dict | None) -> dict:
         s["font"] = o["font"]
     if o.get("position") in ALIGN:
         s["position"] = o["position"]
+    if o.get("italic") is not None and o.get("italic") != "":
+        s["italic"] = bool(o["italic"])
+    if o.get("uppercase") is not None and o.get("uppercase") != "":
+        s["uppercase"] = bool(o["uppercase"])
+    if o.get("bold") is not None and o.get("bold") != "":
+        s["bold"] = bool(o["bold"])
+    try:
+        if o.get("letter_spacing") not in (None, ""):
+            s["letter_spacing"] = max(-0.01, min(0.03, float(o["letter_spacing"])))
+    except (TypeError, ValueError):
+        pass
+    for key, lo, hi in (("outline_scale", 0.0, 3.0), ("shadow_scale", 0.0, 3.0)):
+        try:
+            if o.get(key) not in (None, ""):
+                base_key = key.replace("_scale", "")
+                s[base_key] = float(s.get(base_key, 0.005 if base_key == "outline" else 0.0)) * max(lo, min(hi, float(o[key])))
+                if base_key == "shadow" and s[base_key] == 0 and float(o[key]) > 0:
+                    s[base_key] = 0.004 * float(o[key])
+        except (TypeError, ValueError):
+            pass
+    if o.get("outline_color"):
+        s["outline_color"] = o["outline_color"]
     try:
         sc = float(o.get("size_scale", 1.0) or 1.0)
     except (TypeError, ValueError):

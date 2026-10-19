@@ -24,6 +24,11 @@ async def start(request: Request, user: dict):
     name = storage.safe_name(data["filename"], "recording.mp4")
     if "." + name.rsplit(".", 1)[-1].lower() not in ALLOWED_EXT:
         raise ApiError(422, "सिर्फ़ वीडियो/ऑडियो फ़ाइलें (mp4, mov, mkv, webm, wav, mp3…)")
+    if data.get("clip"):
+        # one of several clips: numbered so the merge keeps the order they were added
+        n = db.conn().execute("SELECT COUNT(*) FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)).fetchone()[0]
+        n += db.conn().execute("SELECT COUNT(*) FROM uploads WHERE project_id = ? AND done = 0 AND filename LIKE 'clip%'", (p["id"],)).fetchone()[0]
+        name = f"clip{n + 1:02d}_{name}"
     rel = str(storage.project_dir(p["workspace_id"], p["id"]) / "raw" / name)
     path = storage.ensure_parent(rel)
     # resume if the same file is already half here
@@ -90,14 +95,69 @@ async def finish(request: Request, user: dict):
     received = path.stat().st_size if path.exists() else 0
     if received != up["size"]:
         raise ApiError(409, "file incomplete", received=received)
+    data = await body(request)
+    is_clip = up["filename"].startswith("clip")
     with db.tx() as c:
         db.update(c, "uploads", up["id"], {"done": True, "received": received})
-        service.replace_assets(c, p["id"], "raw", keep_path=up["path"])
-        service.add_asset(c, p["id"], "raw", up["path"])
-        job = service.start_pipeline(c, p)
+        if is_clip:
+            order = db.conn().execute("SELECT COUNT(*) FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)).fetchone()[0]
+            service.add_asset(c, p["id"], "clip", up["path"], label=up["filename"], meta={"order": order})
+            job = service.start_pipeline(c, p, merge=True) if data.get("start") else None
+        else:
+            service.replace_assets(c, p["id"], "raw", keep_path=up["path"])
+            service.add_asset(c, p["id"], "raw", up["path"])
+            job = service.start_pipeline(c, p)
         service.log(c, user["workspace_id"], "upload.finish", user_id=user["id"], project_id=p["id"],
                     detail={"file": up["filename"], "size": received})
     return ok({"job": job})
+
+
+@require("editor")
+async def start_pipeline(request: Request, user: dict):
+    """Start (or restart) the pipeline for a multi-clip project after all clips are up."""
+    p = own_project(request, user)
+    clips = db.rows(db.conn().execute("SELECT * FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)))
+    if not clips:
+        raise ApiError(400, "पहले clips upload करें")
+    with db.tx() as c:
+        job = service.start_pipeline(c, p, merge=True)
+    return ok({"job": job})
+
+
+@require("editor")
+async def adopt_raw(request: Request, user: dict):
+    """Turn a single-recording project into a multi-clip one: the raw file becomes clip 1."""
+    p = own_project(request, user)
+    raw = service.asset_of(p["id"], "raw")
+    if not raw:
+        raise ApiError(400, "कोई recording नहीं")
+    if db.conn().execute("SELECT COUNT(*) FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)).fetchone()[0]:
+        return ok({"adopted": False})
+    src = storage.abs_path(raw["path"])
+    name = "clip01_" + src.name
+    rel = str(storage.project_dir(p["workspace_id"], p["id"]) / "raw" / name)
+    dst = storage.ensure_parent(rel)
+    if src.exists() and not dst.exists():
+        import shutil
+        shutil.copy2(src, dst)
+    with db.tx() as c:
+        service.add_asset(c, p["id"], "clip", rel, label=name, meta={"order": 0})
+    return ok({"adopted": True})
+
+
+@require("editor")
+async def delete_clip(request: Request, user: dict):
+    p = own_project(request, user)
+    a = db.get("assets", request.path_params["asset_id"])
+    if not a or a["project_id"] != p["id"] or a["kind"] != "clip":
+        raise ApiError(404, "clip not found")
+    with db.tx() as c:
+        c.execute("DELETE FROM assets WHERE id = ?", (a["id"],))
+    try:
+        storage.abs_path(a["path"]).unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass
+    return ok()
 
 
 routes = [
@@ -105,4 +165,7 @@ routes = [
     Route("/projects/{project_id}/uploads/{upload_id}", status),
     Route("/projects/{project_id}/uploads/{upload_id}/chunk", chunk, methods=["PUT"]),
     Route("/projects/{project_id}/uploads/{upload_id}/finish", finish, methods=["POST"]),
+    Route("/projects/{project_id}/start", start_pipeline, methods=["POST"]),
+    Route("/projects/{project_id}/clips/adopt", adopt_raw, methods=["POST"]),
+    Route("/projects/{project_id}/clips/{asset_id}", delete_clip, methods=["DELETE"]),
 ]

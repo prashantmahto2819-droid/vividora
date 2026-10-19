@@ -1,8 +1,13 @@
 /* Vividora editor — CapCut-style workspace */
 :root { --ed-bg: #0F1319; --ed-panel: #171C25; --ed-panel-2: #1F2632; --ed-line: #2A3340; --ed-accent: var(--amber); }
-.ed { display: grid; height: 100vh; height: 100dvh; background: var(--ed-bg); color: var(--text); overflow: hidden;
-  grid-template-columns: 64px 320px 1fr 300px; grid-template-rows: 52px 1fr 300px;
-  grid-template-areas: "top top top top" "tabs panel stage inspector" "tl tl tl tl"; }
+.ed { --w-panel: 320px; --w-insp: 300px; --h-tl: 300px; display: grid; height: 100vh; height: 100dvh; background: var(--ed-bg); color: var(--text); overflow: hidden;
+  grid-template-columns: 64px var(--w-panel) 6px 1fr 6px var(--w-insp); grid-template-rows: 52px 1fr 6px var(--h-tl);
+  grid-template-areas: "top top top top top top" "tabs panel gp stage gi inspector" "gt gt gt gt gt gt" "tl tl tl tl tl tl"; }
+.ed-gutter { background: var(--ed-line); position: relative; z-index: 5; transition: background .15s; }
+.ed-gutter:hover, .ed-gutter:active { background: var(--ed-accent); }
+.ed-gutter.gx { cursor: ew-resize; } .ed-gutter.gy { cursor: ns-resize; }
+#g-panel { grid-area: gp; } #g-insp { grid-area: gi; } #g-tl { grid-area: gt; }
+.ed-gutter::after { content: ""; position: absolute; inset: -4px; }
 .ed svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .ed .grow { flex: 1; }
 .ed h3 { font-size: .95rem; font-weight: 600; } .ed h4 { font-size: .8rem; color: var(--muted); font-weight: 500; margin: 1rem 0 .4rem; text-transform: uppercase; letter-spacing: .05em; }
@@ -126,9 +131,9 @@
 .modal { background: var(--ed-panel); border: 1px solid var(--ed-line); border-radius: 14px; padding: 1.25rem; width: min(820px, 100%); max-height: 92vh; overflow: auto; }
 .modal h3 { margin: 1rem 0 .5rem; }
 
-@media (max-width: 1100px) { .ed { grid-template-columns: 56px 280px 1fr 260px; } }
 @media (max-width: 900px) {
   .ed { grid-template-columns: 56px 1fr; grid-template-rows: 48px minmax(0, 1fr) auto 240px; grid-template-areas: "top top" "tabs stage" "panel panel" "tl tl"; height: auto; min-height: 100dvh; overflow: visible; }
+  .ed-gutter { display: none; }
   .ed-panel { border-right: 0; border-top: 1px solid var(--ed-line); max-height: 40vh; }
   .ed-inspector { position: fixed; right: 0; bottom: 0; left: 0; z-index: 30; max-height: 45vh; border-top: 1px solid var(--ed-line); box-shadow: 0 -10px 30px rgba(0,0,0,.5); display: none; }
   .ed.has-sel .ed-inspector { display: block; }
@@ -136,3 +141,17 @@
   .ed-title #ed-name { max-width: 30vw; }
 }
 .pubrow { margin-top: .3rem; } .pubrow.done a { color: var(--green); } .pubrow.failed { color: var(--rose); }
+.trgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; margin-top: .4rem; }
+.trbtn { background: var(--ed-bg); border: 2px solid var(--ed-line); border-radius: 8px; color: var(--text); font-size: .72rem; padding: .35rem .2rem; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: .25rem; }
+.trbtn.on { border-color: var(--ed-accent); } .trbtn i { width: 42px; height: 24px; border-radius: 4px; background: linear-gradient(90deg, #3b4f6b 50%, #6b3b4f 50%); position: relative; overflow: hidden; }
+.trbtn i::after { content: ""; position: absolute; inset: 0; }
+.trbtn .tr-flash::after { background: linear-gradient(90deg, transparent 42%, #fff 50%, transparent 58%); }
+.trbtn .tr-dip::after { background: linear-gradient(90deg, transparent 35%, #000 50%, transparent 65%); }
+.trbtn .tr-punch::after { border: 2px solid #fff; inset: 4px 10px; border-radius: 2px; }
+.trbtn .tr-whip::after { background: linear-gradient(90deg, transparent 30%, rgba(255,255,255,.5) 50%, transparent 70%); filter: blur(2px); }
+.trbtn .tr-glitch::after { background: repeating-linear-gradient(0deg, rgba(255,0,80,.5) 0 2px, transparent 2px 5px, rgba(0,200,255,.5) 5px 7px, transparent 7px 10px); }
+.trbtn .tr-flashpunch::after { background: linear-gradient(90deg, transparent 44%, #fff 50%, transparent 56%); border: 2px solid rgba(255,255,255,.6); inset: 4px 8px; }
+.clipmark { position: absolute; top: 0; bottom: 0; border-left: 2px dashed var(--ed-accent); z-index: 1; pointer-events: none; }
+.clipmark span { position: absolute; top: 0; left: 3px; font-size: .6rem; color: var(--ed-accent); background: rgba(15,19,25,.8); padding: 0 3px; border-radius: 3px; white-space: nowrap; }
+.plist.caps li { padding: .25rem .2rem; } .plist.caps input { flex: 1; font-size: .8rem; }
+.plist.refs li { align-items: flex-start; }

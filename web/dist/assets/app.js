@@ -42,7 +42,7 @@ async function load() {
   } else S.project = null;
   if (S.route.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (S.route.kind === "users") S.users = await api("GET", "/users").catch(() => []);
-  if (S.route.kind === "plan") { const [t, i, n] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", "/ideas").catch(() => []), api("GET", "/notify").catch(() => ({}))]); S.trends = t; S.ideas = i; S.notify = n; }
+  if (S.route.kind === "plan") { const [t, i, n, r] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", "/ideas").catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = r; }
   if (S.route.kind === "analytics") S.analytics = await api("GET", "/analytics").catch(() => ({ videos: [], learn: {} }));
   if (S.route.kind === "settings") S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} }));
   schedulePoll();
@@ -124,18 +124,18 @@ function newView() {
     <div class="choices" style="margin-bottom:1rem"><label class="chip on"><input type="radio" name="ptype" value="talking_head" checked>🎙️ Recording (मेरी आवाज़ वाला वीडियो)</label><label class="chip"><input type="radio" name="ptype" value="montage">🎵 Montage (music + clips, बिना voice)</label></div>
     <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का" value="${idea ? esc(idea.title) : ""}"></div>
     <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
-    <div class="drop" id="drop" data-upload="1"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" hidden><b>फ़ाइल यहाँ छोड़ें या चुनें</b><br><span class="muted small">mp4, mov, mkv, webm · 20 GB तक</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
+    <div class="drop" id="drop" data-upload="1"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" multiple hidden><b>फ़ाइल(ें) यहाँ छोड़ें या चुनें</b><br><span class="muted small">mp4, mov, mkv, webm · 20 GB तक · कई clips चुनें तो क्रम से एक timeline पर जुड़ेंगी</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
     <div id="up-progress"></div>
     <div class="actionbar"><a class="btn" href="#/">रद्द</a><button class="btn primary" id="start" disabled>upload शुरू करें</button></div></form>`;
 }
 function bindNew() {
-  const drop = $("#drop"), file = $("#file"); let chosen = null;
+  const drop = $("#drop"), file = $("#file"); let chosen = null; let chosenAll = [];
   drop.onclick = () => file.click();
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
   drop.ondragleave = () => drop.classList.remove("over");
-  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); chosen = e.dataTransfer.files[0]; pick(); };
-  file.onchange = () => { chosen = file.files[0]; pick(); };
-  function pick() { if (!chosen) return; $("#fname").textContent = `${chosen.name} · ${gb(chosen.size)}`; $("#start").disabled = false; }
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); chosenAll = [...e.dataTransfer.files]; chosen = chosenAll[0]; pick(); };
+  file.onchange = () => { chosenAll = [...file.files]; chosen = chosenAll[0]; pick(); };
+  function pick() { if (!chosen) return; $("#fname").innerHTML = chosenAll.length > 1 ? chosenAll.map((f, i) => `${i + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : `${esc(chosen.name)} · ${gb(chosen.size)}`; $("#start").disabled = false; }
   let ptype = "talking_head";
   document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage"; drop.style.display = mont ? "none" : ""; $("#start").textContent = mont ? "montage project बनाएँ" : "upload शुरू करें"; $("#start").disabled = mont ? false : !chosen; }));
   $("#new").onsubmit = async (e) => {
@@ -147,13 +147,16 @@ function bindNew() {
     try {
       const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value });
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
+      if (chosenAll.length > 1) {
+        for (let i = 0; i < chosenAll.length; i++) { const f = chosenAll[i]; await uploadFile(p.id, f, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">clip ${i + 1}/${chosenAll.length} · ${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; }, { clip: true, start: i === chosenAll.length - 1 }); }
+      } else
       await uploadFile(p.id, chosen, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; });
       toast("upload पूरा — जाँच शुरू"); go("/projects/" + p.id);
     } catch (err) { $("#up-progress").innerHTML = `<div class="note err">${esc(err.message)} — दोबारा कोशिश करें, upload वहीं से चलेगा।</div>`; $("#start").disabled = false; }
   };
 }
-async function uploadFile(pid, file, onProgress) {
-  const up = await api("POST", `/projects/${pid}/uploads`, { filename: file.name, size: file.size });
+async function uploadFile(pid, file, onProgress, opts = {}) {
+  const up = await api("POST", `/projects/${pid}/uploads`, { filename: file.name, size: file.size, clip: !!opts.clip });
   let off = up.received; const chunk = up.chunk;
   while (off < file.size) {
     const part = file.slice(off, Math.min(file.size, off + chunk));
@@ -162,7 +165,7 @@ async function uploadFile(pid, file, onProgress) {
     catch (err) { if (err.received != null) { off = err.received; continue; } throw err; }
     off = r.received; onProgress(off, file.size);
   }
-  return api("POST", `/projects/${pid}/uploads/${up.upload_id}/finish`);
+  return api("POST", `/projects/${pid}/uploads/${up.upload_id}/finish`, { start: opts.start !== false });
 }
 
 function hasOverrides(c) { return c && (c.position || c.primary || c.font || (c.size_scale && c.size_scale != 1)); }
@@ -373,6 +376,9 @@ function planView() {
         <form id="idea-add" class="row" style="margin-bottom:.75rem"><input name="title" placeholder="अपना idea लिखें…" style="flex:1;min-width:160px" required><button class="btn small">+ जोड़ें</button></form>` : ""}
         ${["new", "approved", "recorded", "done"].map((stt) => { const list = ideas.filter((i) => i.status === stt); return list.length ? `<h3 class="small muted" style="margin:.75rem 0 .3rem">${ISTAT[stt]} · ${list.length}</h3><ul class="ideas">${list.map((i) => `<li class="${open && open.id === i.id ? "sel" : ""}" data-idea="${i.id}"><b>${esc(i.title)}</b><span class="small muted">${FMT[i.format] || i.format}${i.script ? " · script ✓" : ""}${i.source ? " · " + esc(i.source.slice(0, 40)) : ""}</span></li>`).join("")}</ul>` : ""; }).join("") || `<p class="muted small">अभी कोई idea नहीं।</p>`}</div>
     </div>
+    <div class="section"><div class="row between"><h2>Swipe file · references</h2></div><p class="small muted">trend audio / video / effect जो आपको बनाना है — link + note। (project के अंदर Refs tab से भी जुड़ते हैं)</p>
+      ${canEdit ? `<form id="ref-form" class="row" style="margin-bottom:.75rem"><select name="kind"><option value="audio">🎵 audio</option><option value="video">🎬 video</option><option value="effect">✨ effect</option><option value="caption">💬 caption</option><option value="hook">🪝 hook</option><option value="other">📌 other</option></select><input name="url" placeholder="https://…" style="flex:1;min-width:160px"><input name="note" placeholder="note: क्या बनाना है" style="flex:2;min-width:200px"><button class="btn small">+ जोड़ें</button></form>` : ""}
+      ${(S.refs || []).length ? `<ul class="trlist">${S.refs.map((r) => `<li><span>${{ audio: "🎵", video: "🎬", effect: "✨", caption: "💬", hook: "🪝" }[r.kind] || "📌"} ${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : ""} ${r.note ? `<span class="muted">— ${esc(r.note)}</span>` : ""}${r.project_id ? ` <a class="small" href="#/projects/${r.project_id}">project</a>` : ""}</span>${canEdit ? `<button class="btn quiet small ref-del" data-id="${r.id}">✕</button>` : ""}</li>`).join("")}</ul>` : `<p class="muted small">अभी खाली।</p>`}</div>
     ${open ? ideaPanel(open, canEdit) : ""}`;
 }
 function ideaPanel(i, canEdit) {
@@ -390,6 +396,8 @@ function ideaPanel(i, canEdit) {
     <div class="row between" style="margin-top:1rem"><span class="small muted">record करने के बाद "+ नया" से upload करें — यह idea link हो जाएगा।</span>${canEdit ? `<span class="row"><a class="btn small" href="#/new?idea=${i.id}">record हो गया → upload</a><button class="btn primary small" id="idea-save">सेव</button></span>` : ""}</div></div></div>`;
 }
 function bindPlan() {
+  const rf0 = $("#ref-form"); if (rf0) rf0.onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/refs", { kind: f.kind.value, url: f.url.value.trim(), note: f.note.value.trim() }); load().then(render); } catch (err) { toast(err.message); } };
+  document.querySelectorAll(".ref-del").forEach((b) => (b.onclick = async () => { await api("DELETE", `/refs/${b.dataset.id}`); load().then(render); }));
   const rf = $("#tr-refresh"); if (rf) rf.onclick = async () => { rf.disabled = true; rf.textContent = "ला रहा है…"; try { const r = await api("POST", "/trends/refresh"); toast(`${r.count} trends`); } catch (e) { toast(e.message); } load().then(render); };
   const gen = $("#idea-gen"); if (gen) gen.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true; b.textContent = "सोच रहा है…";
     try { await api("POST", "/ideas/generate", { topic: f.topic.value, format: f.format.value, count: +f.count.value }); toast("ideas आ गए"); } catch (err) { toast(err.message); } load().then(render); };

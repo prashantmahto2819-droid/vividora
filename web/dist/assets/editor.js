@@ -18,6 +18,7 @@ const ICON = {
   audio: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
   overlay: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>',
   montage: '<svg viewBox="0 0 24 24"><path d="M4 18V8M9 18V4M14 18v-8M19 18v-5"/><path d="M3 21h18"/></svg>',
+  refs: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>',
   shorts: '<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg>',
   export: '<svg viewBox="0 0 24 24"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z" fill="currentColor" stroke="none"/></svg>',
@@ -28,8 +29,8 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
-const TABS_ALL = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["overlay", "Overlay"], ["shorts", "Shorts"]];
-const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"]];
+const TABS_ALL = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["refs", "Refs"]];
+const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
 const TITLE_PRESETS = [
   { id: "headline", label: "Headline", pos: "top", size: 0.08, color: "#FFFFFF", bg: "", text: "यहाँ बड़ा टाइटल" },
@@ -47,9 +48,10 @@ export function mount(root, project, ctx) {
   if (E && E.pid === project.id && root.contains(E.root)) { update(project); return; }
   unmount();
   const rs = JSON.parse(JSON.stringify(project.render_defaults || {}));
-  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, music: { id: "", volume: 0.18, duck: true },
+  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, transition: "none", extras: [], music: { id: "", volume: 0.18, duck: true },
     broll: [], titles: [], watermark: { id: "", opacity: 0.75, size: 0.14, pos: "tr" }, sfx: [], ...(rs.effects || {}) };
-  rs.captions = { size_scale: 1, position: "", primary: "", highlight: "", font: "", ...(rs.captions || {}) };
+  if (rs.effects.flash && (!rs.effects.transition || rs.effects.transition === "none")) rs.effects.transition = "flash";
+  rs.captions = { size_scale: 1, position: "", primary: "", highlight: "", font: "", italic: "", uppercase: "", letter_spacing: "", outline_scale: "", shadow_scale: "", outline_color: "", ...(rs.captions || {}) };
   rs.hook = { text: "", seconds: 3, ...(rs.hook || {}) };
   for (const t of rs.effects.titles) t._id = t._id || uid();
   for (const b of rs.effects.broll) b._id = b._id || uid();
@@ -68,7 +70,7 @@ export function mount(root, project, ctx) {
   E.root = root.firstElementChild;
   bindStatic();
   renderAll();
-  loadLib();
+  loadLib(); loadRefs();
 }
 export function unmount() {
   if (!E) return;
@@ -120,7 +122,7 @@ function skeleton() {
       </div>
     </header>
     <nav class="ed-tabs">${TABS.map(([id, l]) => `<button data-tab="${id}" class="${id === E.tab ? "on" : ""}">${ICON[id]}<span>${l}</span></button>`).join("")}</nav>
-    <section class="ed-panel" id="ed-panel"></section>
+    <section class="ed-panel" id="ed-panel"></section><div class="ed-gutter gx" id="g-panel" title="drag करके चौड़ाई बदलें"></div>
     <section class="ed-stage">
       <div class="ed-viewport" id="viewport">
         <div class="ed-frame" id="frame">
@@ -142,8 +144,8 @@ function skeleton() {
         <span class="muted small" id="t-marks"></span>
       </div>
     </section>
-    <aside class="ed-inspector" id="inspector"></aside>
-    <section class="ed-tl">
+    <div class="ed-gutter gx" id="g-insp"></div><aside class="ed-inspector" id="inspector"></aside>
+    <div class="ed-gutter gy" id="g-tl" title="drag करके timeline की ऊँचाई बदलें"></div><section class="ed-tl">
       <div class="ed-tl-head">
         <span class="small muted" id="tl-info"></span><span class="grow"></span>
         <label class="small muted">zoom <input type="range" id="tl-zoom" min="4" max="160" value="${E.pps}"></label>
@@ -157,8 +159,25 @@ function skeleton() {
   </div>`;
 }
 
+function layoutSizes() {
+  if (!E.sizes) { let sz = {}; try { sz = JSON.parse(localStorage.getItem("vividora_layout") || "{}"); } catch {} E.sizes = { panel: 320, insp: 300, tl: 300, ...sz }; }
+  E.root.style.setProperty("--w-panel", E.sizes.panel + "px"); E.root.style.setProperty("--w-insp", E.sizes.insp + "px"); E.root.style.setProperty("--h-tl", E.sizes.tl + "px");
+}
+function bindGutters() {
+  const drag = (el, key, axis, min, max, invert) => {
+    el.onmousedown = (e) => { e.preventDefault(); const start = axis === "x" ? e.clientX : e.clientY; const v0 = E.sizes[key]; document.body.style.cursor = axis === "x" ? "ew-resize" : "ns-resize"; document.body.style.userSelect = "none";
+      const mv = (ev) => { const d = (axis === "x" ? ev.clientX : ev.clientY) - start; E.sizes[key] = clamp(v0 + (invert ? -d : d), min, max); layoutSizes(); layoutFrame(); };
+      const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); document.body.style.cursor = ""; document.body.style.userSelect = ""; try { localStorage.setItem("vividora_layout", JSON.stringify(E.sizes)); } catch {} renderTimeline(); };
+      document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up); };
+    el.ondblclick = () => { E.sizes[key] = { panel: 320, insp: 300, tl: 300 }[key]; layoutSizes(); layoutFrame(); try { localStorage.setItem("vividora_layout", JSON.stringify(E.sizes)); } catch {} };
+  };
+  drag($("#g-panel", E.root), "panel", "x", 220, 620, false);
+  drag($("#g-insp", E.root), "insp", "x", 220, 560, true);
+  drag($("#g-tl", E.root), "tl", "y", 160, 600, true);
+}
 function bindStatic() {
   const { api, toast, load } = E.ctx;
+  layoutSizes(); bindGutters();
   $$(".ed-tabs button", E.root).forEach((b) => (b.onclick = () => { E.tab = b.dataset.tab; $$(".ed-tabs button", E.root).forEach((x) => x.classList.toggle("on", x === b)); renderPanel(); }));
   $$("#ratio button", E.root).forEach((b) => (b.onclick = () => { E.ratio = b.dataset.r; $$("#ratio button", E.root).forEach((x) => x.classList.toggle("on", x === b)); layoutFrame(); renderOverlay(); }));
   $("#ed-export", E.root).onclick = () => { E.exportOpen = true; renderExport(); };
@@ -299,7 +318,9 @@ function renderOverlay() {
         return `<span style="${stroke}">${esc(txt)}</span>`;
       }).join(" ");
       const place = pos === "center" ? "top:50%;transform:translateY(-50%)" : pos === "top" ? "top:12%" : `bottom:${E.ratio === "16:9" ? 8 : 20}%`;
-      html += `<div class="ov-cap" style="${place};font-family:'${font}',var(--font);font-weight:${cs.bold === false ? 400 : 800};font-size:${size}px;color:${primary};${glow}${box}">${words}</div>`;
+      const italic = ov.italic === true || (ov.italic === "" && cs.italic); const boldOn = ov.bold === false ? 400 : (cs.bold === false ? 400 : 800);
+      const spacing = ov.letter_spacing ? `letter-spacing:${ov.letter_spacing * base}px;` : "";
+      html += `<div class="ov-cap" style="${place};font-family:'${font}',var(--font);font-weight:${boldOn};font-style:${italic ? "italic" : "normal"};${spacing}font-size:${size}px;color:${primary};${glow}${box}">${words}</div>`;
     }
   }
   $("#ovl-text", ovl).innerHTML = html;
@@ -362,6 +383,7 @@ function renderInspector() {
       ${it.text ? `<p class="small muted">“${esc(it.text)}”</p>` : ""}
       <div class="irow">${field("से", num("start", it.start, 0.05, 0, E.dur))}${field("तक", num("end", it.end, 0.05, 0, E.dur))}</div>
       <label class="chk"><input type="checkbox" data-k="enabled" ${it.enabled !== false ? "checked" : ""} ${dis}> यह हिस्सा हटेगा</label>
+      ${field("इस कट पर transition", `<select data-k="transition" ${dis}><option value="">default (${esc((E.ctx.S.presets?.transitions || []).find((t) => t.id === (E.rs.effects.transition || "none"))?.label || "none")})</option>${(E.ctx.S.presets?.transitions || []).map((t) => `<option value="${t.id}" ${it.transition === t.id ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>`)}
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} कट मिटाएँ</button></div>`;
   } else if (type === "title") {
     h = `<h3>Text</h3>${field("लिखें ( | से नई लाइन )", `<textarea data-k="text" rows="2" ${dis}>${esc(it.text)}</textarea>`)}
@@ -414,7 +436,8 @@ function renderInspector() {
     else if (a === "captext") applyCaptionText(it, $('[data-k="_captext"]', ins).value);
   }));
 }
-function applyCaptionText(chunk, text) {
+function applyCaptionText(chunk, text, quiet) {
+  if (!chunk) return;
   const parts = text.trim().split(/\s+/).filter(Boolean); if (!parts.length) return;
   const ws = chunk.words; const s = ws[0].start, e = ws[ws.length - 1].end;
   if (parts.length === ws.length) ws.forEach((w, i) => (w.w = parts[i]));
@@ -424,7 +447,7 @@ function applyCaptionText(chunk, text) {
     for (const seg of E.p.transcript.segments) { const i = (seg.words || []).indexOf(ws[0]); if (i >= 0) { seg.words.splice(i, ws.length, ...fresh); seg.text = seg.words.map((w) => w.w).join(" "); break; } }
     E.words = E.p.transcript.segments.flatMap((sg) => sg.words || []);
   }
-  E.transcriptDirty = true; touch(); select(null); E.ctx.toast("caption बदला");
+  E.transcriptDirty = true; touch(); if (!quiet) { select(null); E.ctx.toast("caption बदला"); } else renderTimeline();
 }
 
 // ---------- side panel ----------
@@ -446,8 +469,12 @@ function renderPanel() {
       <h4>अपने हिसाब से</h4>
       <div class="irow">${field("आकार", `<input type="range" id="cap-size" min="0.6" max="1.8" step="0.05" value="${ov.size_scale ?? 1}" ${dis}>`)}${field("जगह", `<select id="cap-pos" ${dis}><option value="">style जैसी</option>${["bottom", "center", "top"].map((p) => `<option value="${p}" ${ov.position === p ? "selected" : ""}>${{ bottom: "नीचे", center: "बीच", top: "ऊपर" }[p]}</option>`).join("")}</select>`)}</div>
       <div class="irow">${field("font", `<select id="cap-font" ${dis}><option value="">style जैसा</option>${(S.presets?.fonts || []).map((f) => `<option ${ov.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
-      <div class="irow">${field("अक्षर", `<input type="color" id="cap-primary" value="${ov.primary || "#ffffff"}" ${dis}>`)}${field("highlight", `<input type="color" id="cap-highlight" value="${ov.highlight || "#ffd400"}" ${dis}>`)}${field("", `<label class="chk small"><input type="checkbox" id="cap-usecolors" ${ov.primary ? "checked" : ""} ${dis}> रंग लागू</label>`)}</div>
-      <h4>Hook (शुरू के 3 सेकंड)</h4>${field("", `<input id="hook" value="${esc(E.rs.hook.text || "")}" placeholder="4 बजे उठने वाला लड़का" ${dis}>`)}`;
+      <div class="irow">${field("अक्षर", `<input type="color" id="cap-primary" value="${ov.primary || "#ffffff"}" ${dis}>`)}${field("highlight", `<input type="color" id="cap-highlight" value="${ov.highlight || "#ffd400"}" ${dis}>`)}${field("outline", `<input type="color" id="cap-outline-color" value="${ov.outline_color || "#000000"}" ${dis}>`)}${field("", `<label class="chk small"><input type="checkbox" id="cap-usecolors" ${ov.primary ? "checked" : ""} ${dis}> रंग लागू</label>`)}</div>
+      <div class="irow"><label class="chk small"><input type="checkbox" id="cap-italic" ${ov.italic === true ? "checked" : ""} ${dis}> <i>तिरछा (italic)</i></label><label class="chk small"><input type="checkbox" id="cap-upper" ${ov.uppercase === true ? "checked" : ""} ${dis}> ABC uppercase</label><label class="chk small"><input type="checkbox" id="cap-bold" ${ov.bold === false ? "" : "checked"} ${dis}> <b>bold</b></label></div>
+      <div class="irow">${field("अक्षरों के बीच जगह", `<input type="range" id="cap-spacing" min="-0.005" max="0.02" step="0.001" value="${ov.letter_spacing === "" || ov.letter_spacing == null ? 0 : ov.letter_spacing}" ${dis}>`)}${field("outline मोटाई", `<input type="range" id="cap-outline" min="0" max="3" step="0.1" value="${ov.outline_scale === "" || ov.outline_scale == null ? 1 : ov.outline_scale}" ${dis}>`)}${field("shadow", `<input type="range" id="cap-shadow" min="0" max="3" step="0.1" value="${ov.shadow_scale === "" || ov.shadow_scale == null ? 1 : ov.shadow_scale}" ${dis}>`)}</div>
+      <h4>Hook (शुरू के 3 सेकंड)</h4>${field("", `<input id="hook" value="${esc(E.rs.hook.text || "")}" placeholder="4 बजे उठने वाला लड़का" ${dis}>`)}
+      <h4>Caption text सुधारें · ${captionChunks().length}</h4><p class="small muted">किसी line पर क्लिक करके शब्द बदलें (गलत सुना हो तो)। Enter = सेव।</p>
+      <ul class="plist caps">${captionChunks().map((c, i) => `<li data-capi="${i}" class="${E.sel?.type === "caption" && E.sel.id === i ? "sel" : ""}"><span class="small muted">${fmt(c.start)}</span><input class="capedit" data-capi="${i}" value="${esc(c.words.map((w) => w.w).join(" "))}" ${dis}></li>`).join("")}</ul>`;
   } else if (t === "text") {
     h = `<div class="ph"><h3>Text</h3><span class="small muted">playhead पर जुड़ेगा</span></div>
       <div class="tgrid">${TITLE_PRESETS.map((tp) => `<button class="tcard" data-title="${tp.id}" ${dis}><span style="color:${tp.color};${tp.bg ? `background:${tp.bg};padding:.1em .4em;border-radius:4px` : ""};font-size:${tp.size * 220}px;font-weight:800">${esc(tp.text.split("|")[0])}</span><small>${tp.label}</small></button>`).join("")}</div>
@@ -457,7 +484,12 @@ function renderPanel() {
     if (!kinds.includes(E.libKind)) E.libKind = kinds[0];
     const items = (E.lib || []).filter((x) => x.kind === E.libKind);
     const music = fx.music, wm = fx.watermark;
-    h = `<div class="ph"><h3>${{ media: "Media library", audio: "Audio", overlay: "Logo & LUT" }[t]}</h3></div>
+    const pclips = E.p.assets.filter((a) => a.kind === "clip").sort((a, b) => (a.meta?.order || 0) - (b.meta?.order || 0));
+    const clipBox = t === "media" && !E.montage ? `<div class="box"><div class="row between"><b>Project clips · ${pclips.length || 1}</b>${E.canEdit ? `<label class="btn small">+ clip जोड़ें<input type="file" id="clip-file" accept="video/*,.mkv,.mts" multiple hidden></label>` : ""}</div>
+        <p class="small muted">कई recordings एक timeline पर क्रम से जुड़ती हैं। clip जोड़ने/हटाने पर transcript और कट दोबारा बनते हैं।</p>
+        ${pclips.length ? `<ol class="plist" style="padding-left:1.2rem">${pclips.map((c) => `<li><span class="grow small">${esc(c.label || "clip")}</span>${E.canEdit ? `<button class="ibtn" data-clipdel="${c.id}">${ICON.trash}</button>` : ""}</li>`).join("")}</ol><div class="row"><button class="btn small" id="clip-rebuild" ${E.canEdit ? "" : "disabled"}>दोबारा जोड़ें & process</button></div>` : `<p class="small muted">यह project एक ही recording से बना है — और clips जोड़ने पर सब एक साथ जुड़ जाएँगे।</p>`}
+        <div id="clip-progress"></div></div>` : "";
+    h = `<div class="ph"><h3>${{ media: "Media library", audio: "Audio", overlay: "Logo & LUT" }[t]}</h3></div>${clipBox}
       <div class="seg">${kinds.map((k) => `<button data-kind="${k}" class="${E.libKind === k ? "on" : ""}">${LIB_KINDS.find((x) => x[0] === k)[1]}</button>`).join("")}</div>
       <label class="drop small ${dis ? "off" : ""}"><input type="file" id="lib-file" multiple hidden ${dis}>${ICON.plus} ${E.libKind} upload करें <span class="muted">(${{ music: "mp3/wav", sfx: "mp3/wav", broll: "mp4/mov", image: "png/jpg", logo: "png", lut: ".cube" }[E.libKind]})</span></label>
       <div id="lib-progress"></div>
@@ -492,6 +524,14 @@ function renderPanel() {
         ${field("logo", `<select id="mo-wm" ${dis}><option value="">नहीं</option>${logos.map((l) => `<option value="${l.id}" ${mo.watermark === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>`)}</div>
       <button class="btn primary" id="mo-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.p.status === "rendering" ? "बन रहा है…" : "Montage बनाएँ"}</button>
       ${E.p.status === "rendering" ? `<div class="progress" style="margin-top:.5rem"><i style="width:${E.p.jobs?.find((j) => j.kind === "montage" && j.status === "running")?.progress || 0}%"></i></div>` : ""}`;
+  } else if (t === "refs") {
+    const refs = E.refs || []; const RK = { audio: "🎵 audio", video: "🎬 video", effect: "✨ effect", caption: "💬 caption", hook: "🪝 hook", other: "📌" };
+    h = `<div class="ph"><h3>References</h3><span class="small muted">trend audio / video / effect</span></div>
+      <p class="small muted">जो trend audio, video या effect आपको बनाना है — उसका link और note यहाँ रखें। project वाले यहीं दिखते हैं, बाकी Plan page के swipe-file में।</p>
+      ${E.canEdit ? `<div class="box"><div class="irow">${field("kind", `<select id="ref-kind">${Object.entries(RK).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>`)}${field("link", `<input id="ref-url" placeholder="https://… (Instagram/YouTube/TikTok)">`)}</div>
+        ${field("note", `<textarea id="ref-note" rows="2" placeholder="क्या चाहिए: 'इस audio पर 0:08 वाला beat drop', 'यह zoom effect'…"></textarea>`)}
+        <div class="irow"><label class="chk small"><input type="checkbox" id="ref-global"> सब projects के लिए (swipe file)</label><span class="grow"></span><button class="btn small primary" id="ref-add">+ जोड़ें</button></div></div>` : ""}
+      <ul class="plist refs">${refs.map((r) => `<li><span class="small">${RK[r.kind] || "📌"}</span><div class="grow" style="display:flex;flex-direction:column;min-width:0">${r.url ? `<a class="small" href="${esc(r.url)}" target="_blank" rel="noopener" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.url.replace(/^https?:\/\//, ""))}</a>` : ""}${r.note ? `<span class="small">${esc(r.note)}</span>` : ""}${!r.project_id ? `<span class="small muted">swipe file</span>` : ""}</div>${E.canEdit ? `<button class="ibtn" data-refdel="${r.id}">${ICON.trash}</button>` : ""}</li>`).join("") || `<li class="muted small">अभी कुछ नहीं</li>`}</ul>`;
   } else if (t === "shorts") {
     const planning = E.p.jobs?.some((j) => j.kind === "shorts_plan" && ["queued", "running"].includes(j.status));
     const vert = (S.presets?.platforms || []).filter((pl) => pl.height > pl.width);
@@ -509,7 +549,9 @@ function renderPanel() {
     h = `<div class="ph"><h3>Effects</h3></div>
       <div class="box"><label class="chk"><input type="checkbox" id="fx-zoom" ${fx.zoom.enabled ? "checked" : ""} ${dis}> <b>Auto zoom / punch-in</b></label><p class="small muted">हर कट पर हल्का zoom — jump cut की जगह deliberate लगता है।</p>
         ${field("कितना", `<input type="range" id="fx-zoom-str" min="0.3" max="2" step="0.1" value="${fx.zoom.strength}" ${dis}>`)}</div>
-      <div class="box"><label class="chk"><input type="checkbox" id="fx-flash" ${fx.flash ? "checked" : ""} ${dis}> <b>Cut flash</b></label><p class="small muted">हर कट पर सफ़ेद flash transition।</p></div>
+      <div class="box"><b>Transition (हर कट पर)</b><p class="small muted">default यहाँ; किसी एक कट के लिए अलग — timeline पर कट चुनकर inspector में।</p>
+        <div class="trgrid">${(S.presets?.transitions || []).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-${t.id}"></i>${esc(t.label)}</button>`).join("")}</div></div>
+      <div class="box"><b>Extras</b><div class="irow" style="flex-wrap:wrap">${(S.presets?.extras || []).map((x) => `<label class="chk small"><input type="checkbox" data-extra="${x.id}" ${(fx.extras || []).includes(x.id) ? "checked" : ""} ${dis}> ${esc(x.label)}</label>`).join("")}</div></div>
       <h4>Color look</h4><div class="looks">${looks.map((l) => `<button class="look ${fx.look === l.id ? "on" : ""}" data-look="${l.id}" ${dis}>${thumb ? `<img src="${thumb}" style="filter:${LOOK_CSS[l.id] || ""}" alt="">` : `<i style="filter:${LOOK_CSS[l.id] || ""}"></i>`}<small>${esc(l.label)}</small></button>`).join("")}</div>
       <p class="small muted">LUT फ़ाइल (.cube) Overlay → LUT से लगाएँ।</p>`;
   }
@@ -530,14 +572,30 @@ function bindPanel() {
   $$(".stylecard input", panel).forEach((i) => (i.onchange = () => { E.rs.caption_style = i.value; $$(".stylecard", panel).forEach((c) => c.classList.toggle("on", c.contains(i))); touch(); }));
   on("#burn", "onchange", (e) => { E.rs.burn_captions = e.target.checked; touch(); });
   const capSync = () => { const c = E.rs.captions; c.size_scale = +$("#cap-size", panel).value; c.position = $("#cap-pos", panel).value; c.font = $("#cap-font", panel).value;
-    const use = $("#cap-usecolors", panel).checked; c.primary = use ? $("#cap-primary", panel).value : ""; c.highlight = use ? $("#cap-highlight", panel).value : ""; touch(); };
-  ["#cap-size", "#cap-pos", "#cap-font", "#cap-primary", "#cap-highlight", "#cap-usecolors"].forEach((s) => on(s, "oninput", capSync));
+    const use = $("#cap-usecolors", panel).checked; c.primary = use ? $("#cap-primary", panel).value : ""; c.highlight = use ? $("#cap-highlight", panel).value : ""; c.outline_color = use ? $("#cap-outline-color", panel).value : "";
+    c.italic = $("#cap-italic", panel).checked ? true : ""; c.uppercase = $("#cap-upper", panel).checked ? true : ""; c.bold = $("#cap-bold", panel).checked ? "" : false;
+    c.letter_spacing = +$("#cap-spacing", panel).value || ""; c.outline_scale = +$("#cap-outline", panel).value === 1 ? "" : +$("#cap-outline", panel).value; c.shadow_scale = +$("#cap-shadow", panel).value === 1 ? "" : +$("#cap-shadow", panel).value; touch(); };
+  ["#cap-size", "#cap-pos", "#cap-font", "#cap-primary", "#cap-highlight", "#cap-outline-color", "#cap-usecolors", "#cap-italic", "#cap-upper", "#cap-bold", "#cap-spacing", "#cap-outline", "#cap-shadow"].forEach((s) => on(s, "oninput", capSync));
+  $$(".capedit", panel).forEach((inp) => { inp.onfocus = () => { const c = captionChunks()[+inp.dataset.capi]; if (c) { seek(c.start); E.sel = { type: "caption", id: +inp.dataset.capi }; } };
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); applyCaptionText(captionChunks()[+inp.dataset.capi], inp.value, true); inp.blur(); } };
+    inp.onchange = () => applyCaptionText(captionChunks()[+inp.dataset.capi], inp.value, true); });
   on("#hook", "oninput", (e) => { E.rs.hook.text = e.target.value; touch(); });
   // text
   $$("[data-title]", panel).forEach((b) => (b.onclick = () => { const tp = TITLE_PRESETS.find((x) => x.id === b.dataset.title); const st = +outOf(E.t).toFixed(2);
     const ti = { _id: uid(), start: st, end: +Math.min(outDur(), st + 3).toFixed(2), text: tp.text, pos: tp.pos, size: tp.size, color: tp.color, bg: tp.bg };
     fx.titles.push(ti); touch(); select({ type: "title", id: ti._id }); renderPanel(); }));
   $$("[data-title-id]", panel).forEach((li) => (li.onclick = () => { const ti = fx.titles.find((x) => x._id === li.dataset.titleId); select({ type: "title", id: ti._id }); seek(srcOf(ti.start)); }));
+  // project clips
+  on("#clip-file", "onchange", async (e) => { const files = [...e.target.files]; if (!files.length) return; const prog = $("#clip-progress", panel);
+    const raw = E.p.assets.find((a) => a.kind === "raw"); const hasClips = E.p.assets.some((a) => a.kind === "clip");
+    if (!hasClips && raw && !confirm("पहली recording को clip 1 बनाकर नई clips जोड़ें? (transcript दोबारा बनेगा)")) return;
+    try {
+      if (!hasClips && raw) await api("POST", `/projects/${E.pid}/clips/adopt`);
+      for (let i = 0; i < files.length; i++) { const f = files[i]; await uploadClip(f, (d, tot) => { prog.innerHTML = `<p class="small muted">${esc(f.name)} ${(d / tot * 100).toFixed(0)}%</p><div class="progress"><i style="width:${(d / tot * 100).toFixed(0)}%"></i></div>`; }, i === files.length - 1); }
+      toast("clips जुड़े — process शुरू"); const ctx = E.ctx; unmount(); await ctx.load(); ctx.render();
+    } catch (err) { toast(err.message); prog.innerHTML = ""; } });
+  $$("[data-clipdel]", panel).forEach((b) => (b.onclick = async () => { if (!confirm("clip हटाएँ? बाद में “दोबारा जोड़ें” दबाएँ।")) return; await api("DELETE", `/projects/${E.pid}/clips/${b.dataset.clipdel}`); E.p.assets = E.p.assets.filter((a) => a.id !== b.dataset.clipdel); renderPanel(); }));
+  on("#clip-rebuild", "onclick", async () => { try { await api("POST", `/projects/${E.pid}/start`); toast("clips जुड़ रहे हैं"); const ctx = E.ctx; unmount(); await ctx.load(); ctx.render(); } catch (err) { toast(err.message); } });
   // library
   $$("[data-kind]", panel).forEach((b) => (b.onclick = () => { E.libKind = b.dataset.kind; renderPanel(); }));
   on("#lib-file", "onchange", async (e) => { for (const f of e.target.files) await libUpload(E.libKind, f); renderPanel(); });
@@ -562,6 +620,10 @@ function bindPanel() {
     on("#mo-render", "onclick", async () => { sync(); const body = { ...mo, texts: mo.texts.split("\n").map((t) => t.trim()).filter(Boolean) };
       try { await api("POST", `/projects/${E.pid}/montage`, body); toast("montage बन रहा है"); await load(); renderPanel(); } catch (err) { toast(err.message); } });
   }
+  // refs
+  on("#ref-add", "onclick", async () => { const body = { kind: $("#ref-kind", panel).value, url: $("#ref-url", panel).value.trim(), note: $("#ref-note", panel).value.trim(), project_id: $("#ref-global", panel).checked ? null : E.pid };
+    try { await api("POST", "/refs", body); await loadRefs(); } catch (err) { toast(err.message); } });
+  $$("[data-refdel]", panel).forEach((b) => (b.onclick = async () => { await api("DELETE", `/refs/${b.dataset.refdel}`); await loadRefs(); }));
   // shorts
   on("#sh-plan", "onclick", async () => { await save(false); try { await api("POST", `/projects/${E.pid}/shorts/plan`, { options: { count: +$("#sh-count", panel).value } }); toast("Shorts ढूँढे जा रहे हैं"); E.shortsDirty = false; await load(); renderPanel(); } catch (err) { toast(err.message); } });
   on("#sh-add", "onclick", () => { if (E.markIn == null || E.markOut == null) return toast("पहले I और O से हिस्सा चुनें"); const sc = { id: "m" + uid().slice(0, 4), start: +E.markIn.toFixed(2), end: +E.markOut.toFixed(2), title: "", hook: "", selected: true }; E.shorts.push(sc); E.shortsDirty = true; E.markIn = E.markOut = null; $("#t-marks", E.root).textContent = ""; touch(); select({ type: "short", id: sc.id }); renderPanel(); });
@@ -574,10 +636,21 @@ function bindPanel() {
   // effects
   on("#fx-zoom", "onchange", (e) => { fx.zoom.enabled = e.target.checked; touch(); });
   on("#fx-zoom-str", "oninput", (e) => { fx.zoom.strength = +e.target.value; touch(); });
-  on("#fx-flash", "onchange", (e) => { fx.flash = e.target.checked; touch(); });
+  $$("[data-tr]", panel).forEach((b) => (b.onclick = () => { fx.transition = b.dataset.tr; fx.flash = false; $$(".trbtn", panel).forEach((x) => x.classList.toggle("on", x === b)); touch(); }));
+  $$("[data-extra]", panel).forEach((cb) => (cb.onchange = () => { fx.extras = $$("[data-extra]:checked", panel).map((x) => x.dataset.extra); touch(); }));
   $$("[data-look]", panel).forEach((b) => (b.onclick = () => { fx.look = b.dataset.look; $$(".look", panel).forEach((x) => x.classList.toggle("on", x === b)); layoutFrame(); touch(); }));
 }
+async function uploadClip(file, onProgress, startAfter) {
+  const { api } = E.ctx; const pid = E.pid;
+  const up = await api("POST", `/projects/${pid}/uploads`, { filename: file.name, size: file.size, clip: true });
+  let off = up.received; const chunk = up.chunk;
+  while (off < file.size) { const part = file.slice(off, Math.min(file.size, off + chunk)); let r;
+    try { r = await api("PUT", `/projects/${pid}/uploads/${up.upload_id}/chunk`, null, { data: part, offset: off }); } catch (err) { if (err.received != null) { off = err.received; continue; } throw err; }
+    off = r.received; onProgress(off, file.size); }
+  return api("POST", `/projects/${pid}/uploads/${up.upload_id}/finish`, { start: !!startAfter });
+}
 function libItem(id) { return (E.lib || []).find((x) => x.id === id); }
+async function loadRefs() { try { E.refs = await E.ctx.api("GET", `/refs?project_id=${E.pid}`); } catch { E.refs = []; } if (E && E.tab === "refs") renderPanel(); }
 async function loadLib() { try { E.lib = await E.ctx.api("GET", "/library"); } catch { E.lib = []; } if (E && ["media", "audio", "overlay", "montage"].includes(E.tab)) renderPanel(); else renderOverlay(); }
 async function libUpload(kind, file) {
   const { toast } = E.ctx; const prog = $("#lib-progress", E.root);
@@ -610,7 +683,8 @@ function renderTimeline() {
   let ruler = ""; for (let t = 0; t <= E.dur; t += step) ruler += `<span style="left:${X(t)}px" class="${t % (step * 5) === 0 ? "maj" : ""}">${t % (step * 5) === 0 ? fmt(t).replace(/\.0$/, "") : ""}</span>`;
   const sel = (type, id) => (E.sel?.type === type && E.sel.id === id ? "sel" : "");
   const ks = keeps();
-  const video = ks.map(([a, b]) => `<div class="clip" style="left:${X(a)}px;width:${((b - a) * pps).toFixed(1)}px"><span>${fmt(b - a)}</span></div>`).join("")
+  const clipMarks = (E.p.meta?.clips || []).map((c, i) => `<div class="clipmark" style="left:${X(c.start)}px" title="${esc(c.name)}"><span>${i + 1}. ${esc(c.name.replace(/^clip\d+_/, "").slice(0, 16))}</span></div>`).join("");
+  const video = clipMarks + ks.map(([a, b]) => `<div class="clip" style="left:${X(a)}px;width:${((b - a) * pps).toFixed(1)}px"><span>${fmt(b - a)}</span></div>`).join("")
     + E.cuts.map((c) => `<div class="cutblk ${c.enabled === false ? "off" : ""} ${sel("cut", c.id)}" data-cut="${c.id}" style="left:${X(c.start)}px;width:${Math.max(4, (c.end - c.start) * pps).toFixed(1)}px" title="${c.reason} ${fmt(c.start)}–${fmt(c.end)}"><i class="h l"></i><i class="h r"></i></div>`).join("")
     + (E.markIn != null && E.markOut != null ? `<div class="markrange" style="left:${X(E.markIn)}px;width:${((E.markOut - E.markIn) * pps).toFixed(1)}px"></div>` : "");
   const caps = captionChunks().map((c, i) => `<div class="capblk ${sel("caption", i)}" data-cap="${i}" style="left:${X(c.start)}px;width:${Math.max(6, (c.end - c.start) * pps).toFixed(1)}px"><span>${esc(c.words.map((w) => w.w).join(" "))}</span></div>`).join("");

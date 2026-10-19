@@ -129,16 +129,29 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         track_cmds.write_text(crop_commands(kf, scaled_w, w, to_out, focus_x), encoding="utf-8")
     frame = _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
     v = f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}"
+    # transitions: per-cut kind (edl cut.transition) or the global default
+    default_tr = e.get("transition") or ("flash" if e.get("flash") else "none")
+    tr_cuts = []
+    for t, (a, b) in zip(cuts, keep[1:]):
+        kind = default_tr
+        for cdef in (edl.get("cuts") or []):
+            if cdef.get("enabled", True) and abs(float(cdef.get("end", -1)) - a) < 0.08 and cdef.get("transition"):
+                kind = cdef["transition"]
+        if kind and kind != "none":
+            tr_cuts.append((t, kind))
+    bump, tr_filters = fx.transition_filters(tr_cuts, new_dur)
     zoom = e.get("zoom") or {}
-    if zoom.get("enabled"):
-        plan = fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0)))
-        if len(plan) > 1:
-            v += "," + fx.zoom_filter(plan, w, h, fx=0.5, fy=min(0.9, max(0.1, focus_y)))
+    plan = fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0))) if zoom.get("enabled") else [(0.0, 1.0)]
+    if len(plan) > 1 or bump:
+        v += "," + fx.zoom_filter(plan, w, h, fx=0.5, fy=min(0.9, max(0.1, focus_y)), bump=bump)
     look = fx.look_filter(e.get("look"), Path(e["lut_path"]) if e.get("lut_path") else None)
     if look:
         v += "," + look
-    if e.get("flash") and cuts:
-        v += "," + fx.flash_filter(cuts)
+    extras = fx.extras_filter([x for x in (e.get("extras") or []) if isinstance(x, str)])
+    if extras:
+        v += "," + extras
+    if tr_filters:
+        v += "," + tr_filters
     v += "[vbase]"
     chains.append(v)
     cur = "[vbase]"

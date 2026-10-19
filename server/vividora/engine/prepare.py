@@ -31,6 +31,34 @@ def _deepfilter(src_wav: Path, out_wav: Path) -> bool:
     return True
 
 
+def merge(clips: list[Path], out: Path, *, on_progress: ProgressFn | None = None) -> dict:
+    """Join several recordings into one file (same size/fps as the largest clip).
+    Returns {"path", "boundaries": [{"name", "start", "end"}]}."""
+    infos = [ffmpeg.probe(c) for c in clips]
+    best = max(infos, key=lambda i: i.get("width", 0) * i.get("height", 0))
+    w, h = int(best.get("width", 1280)), int(best.get("height", 720))
+    fps = min(60.0, max(24.0, float(best.get("fps") or 30)))
+    has_audio = all(i.get("has_audio") for i in infos)
+    inputs, parts, bounds, t = [], [], [], 0.0
+    for n, (c, i) in enumerate(zip(clips, infos)):
+        inputs += ["-i", str(c)]
+        parts.append(f"[{n}:v]scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,"
+                     f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p[v{n}]")
+        if has_audio:
+            parts.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{n}]")
+        d = float(i.get("duration") or 0)
+        bounds.append({"name": c.name, "start": round(t, 3), "end": round(t + d, 3)})
+        t += d
+    labels = "".join(f"[v{n}]" + (f"[a{n}]" if has_audio else "") for n in range(len(clips)))
+    parts.append(f"{labels}concat=n={len(clips)}:v=1:a={1 if has_audio else 0}[v]" + ("[a]" if has_audio else ""))
+    maps = ["-map", "[v]"] + (["-map", "[a]"] if has_audio else [])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg.run([*inputs, "-filter_complex", ";".join(parts), *maps, "-c:v", "libx264", "-preset", "veryfast",
+                "-crf", "18", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)],
+               duration=t, on_progress=on_progress, label="clips जोड़े जा रहे हैं")
+    return {"path": out, "boundaries": bounds, "duration": round(t, 3)}
+
+
 def prepare(raw: Path, work: Path, *, denoise: bool = True, on_progress: ProgressFn | None = None) -> dict:
     work.mkdir(parents=True, exist_ok=True)
     info = ffmpeg.probe(raw)
