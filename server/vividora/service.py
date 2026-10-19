@@ -29,6 +29,10 @@ DEFAULT_EFFECTS = {
     "titles": [],       # [{start, end, text, pos: top|center|bottom, size, color, bg}]
     "watermark": {"id": "", "opacity": 0.75, "size": 0.14, "pos": "tr"},
     "frame": {"id": "", "opacity": 1.0},             # full-frame PNG border/frame from the library
+    "body": {"enabled": False, "bg": "blur", "bg_blur": 18, "bg_color": "#111111", "bg_color2": "#F2B33D", "bg_image": "", "bg_video": "",
+             "stroke": False, "stroke_color": "#FFFFFF", "stroke_width": 8, "glow": False, "glow_color": "#F2B33D", "glow_size": 24,
+             "glow_strength": 1.6, "afterimage": False, "after_decay": 0.9, "clones": 0, "anim": "none", "anim_seconds": 0.9,
+             "blink_period": 0.4},
     "sfx": [],          # [{id, at, volume}]
 }
 
@@ -202,6 +206,21 @@ def after_job(c, job: dict, result: dict) -> None:
         db.update(c, "projects", pid, {"status_note": f"{job['payload'].get('platform')} पर publish हुआ", "updated_at": db.now()})
         notify.on_event("published", project, f"{job['payload'].get('platform')}: {result.get('url') or ''}")
 
+    elif kind == "matte":
+        for f in result.get("files", []):
+            replace_assets(c, pid, "alpha", keep_path=f["path"])
+            add_asset(c, pid, "alpha", f["path"], mime=f.get("mime"), meta=f.get("meta"))
+        db.update(c, "projects", pid, {"status_note": "cutout तैयार — Body effects लगाएँ", "updated_at": db.now()})
+        # if a render is waiting on the cutout, start it now
+        pend = (project.get("meta") or {}).get("render_after_matte")
+        if pend:
+            meta = {k: v for k, v in project["meta"].items() if k != "render_after_matte"}
+            db.update(c, "projects", pid, {"meta": meta})
+            try:
+                request_render(c, db.get("projects", pid), pend)
+            except ValueError:
+                pass
+
     elif kind == "montage":
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
@@ -271,6 +290,14 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
         raise ValueError("unknown caption style")
     new_settings = {**project.get("settings", {}), "render": opts}
     db.update(c, "projects", pid, {"settings": new_settings, "updated_at": db.now()})
+    body = (opts.get("effects") or {}).get("body") or {}
+    if body.get("enabled") and not asset_of(pid, "alpha"):
+        running = c.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'matte' AND status IN ('queued','running')", (pid,)).fetchone()[0]
+        if not running:
+            queue.enqueue(c, pid, "matte", {})
+        db.update(c, "projects", pid, {"meta": {**project.get("meta", {}), "render_after_matte": settings_in}})
+        set_status(c, pid, "rendering", "पहले cutout बन रहा है (CPU, कुछ मिनट) — फिर render")
+        return [{"deferred": "matte"}]
     # cancel renders still waiting from an earlier click
     c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? "
               "AND kind='render' AND status='queued'", (db.now(), pid))
@@ -335,6 +362,49 @@ def request_montage(c, project: dict, opts: dict) -> dict:
               (db.now(), project["id"]))
     set_status(c, project["id"], "rendering", "montage बन रहा है")
     return queue.enqueue(c, project["id"], "montage", payload)
+
+
+def resolve_effects_local(project: dict, effects: dict) -> dict:
+    """Same as the worker's _resolve_effects, but with files already on this machine."""
+    import copy
+    e = copy.deepcopy(effects or {})
+
+    def lib_path(item_id: str | None):
+        it = db.get("library", item_id or "")
+        if not it:
+            return None
+        p = storage.abs_path(it["path"])
+        return p if p.exists() else None
+
+    look = e.get("look") or "none"
+    if isinstance(look, str) and look.startswith("lut:"):
+        p = lib_path(look[4:]); e["lut_path"] = str(p) if p else None; e["look"] = "none"
+    for key in ("music", "watermark", "frame"):
+        d = e.get(key) or {}
+        if isinstance(d, dict) and d.get("id"):
+            p = lib_path(d["id"]); e[key] = {**d, "path": str(p) if p else None}
+    for key in ("broll", "sfx"):
+        out = []
+        for item in e.get(key) or []:
+            if isinstance(item, dict) and item.get("id"):
+                p = lib_path(item["id"])
+                if p:
+                    kind = "image" if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif") else "video"
+                    out.append({**item, "path": str(p), "type": item.get("type") or kind})
+        e[key] = out
+    body = e.get("body") if isinstance(e.get("body"), dict) else None
+    if body and body.get("enabled"):
+        alpha = asset_of(project["id"], "alpha")
+        if alpha and storage.abs_path(alpha["path"]).exists():
+            body["alpha_path"] = str(storage.abs_path(alpha["path"]))
+            for key in ("bg_image", "bg_video"):
+                if body.get(key):
+                    p = lib_path(body[key]); body[key + "_path"] = str(p) if p else None
+        else:
+            body["enabled"] = False
+    e["music"] = {}  # no audio in a frame preview
+    e["sfx"] = []
+    return e
 
 
 def delete_project(c, project: dict) -> None:

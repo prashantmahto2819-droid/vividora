@@ -200,3 +200,7 @@
 .speedblk span { font-size: .6rem; color: #1A1206; padding: 0 3px; line-height: 10px; font-weight: 700; } .speedblk.sel { outline: 1px solid #fff; }
 .cutblk .trb { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; font-size: .7rem; text-shadow: 0 0 3px #000; }
 .trbtn .tr-x::after { background: linear-gradient(100deg, #3b4f6b 45%, transparent 55%), linear-gradient(90deg, transparent 45%, #6b3b4f 55%); }
+.ed-frameprev { position: absolute; inset: 0; background: #000; z-index: 6; display: flex; align-items: center; justify-content: center; }
+.ed-frameprev[hidden] { display: none; } .ed-frameprev img { max-width: 100%; max-height: 100%; }
+.ed-frameprev .ibtn { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6); color: #fff; }
+.ed-frameprev span { position: absolute; left: 8px; bottom: 6px; background: rgba(0,0,0,.6); color: #fff; padding: .1rem .5rem; border-radius: 4px; }

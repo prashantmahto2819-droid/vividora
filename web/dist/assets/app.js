@@ -53,7 +53,7 @@ async function load() {
 }
 function schedulePoll() {
   clearTimeout(S.poll);
-  const busy = S.project && ["preparing", "transcribing", "cutting", "rendering"].includes(S.project.status);
+  const busy = S.project && (["preparing", "transcribing", "cutting", "rendering"].includes(S.project.status) || (S.project.jobs || []).some((j) => ["queued", "running"].includes(j.status)));
   const anyBusy = S.projects.some((p) => ["preparing", "transcribing", "cutting", "rendering"].includes(p.status));
   if (busy || anyBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy ? 2500 : 6000);
 }

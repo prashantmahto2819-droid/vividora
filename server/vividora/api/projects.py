@@ -9,7 +9,7 @@ from starlette.routing import Route
 from .. import db, service, storage
 from ..engine import autocut
 from ..engine import catalog
-from ..engine.effects import EXTRAS, LOOKS, TEXT_ANIMS, TRANSITIONS
+from ..engine.effects import BODY_ANIMS, BODY_BG, EXTRAS, LOOKS, TEXT_ANIMS, TRANSITIONS
 from ..engine.presets import caption_styles, platforms
 from ..security import media_token, read_token
 from .channels import channel_settings, get_channel
@@ -175,7 +175,7 @@ async def render(request: Request, user: dict):
         with db.tx() as c:
             jobs = service.request_render(c, p, data)
             service.log(c, user["workspace_id"], "project.render", user_id=user["id"],
-                        project_id=p["id"], detail={"presets": [j["payload"]["preset"] for j in jobs]})
+                        project_id=p["id"], detail={"presets": [j.get("payload", {}).get("preset", "deferred") for j in jobs]})
     except ValueError as e:
         raise ApiError(422, str(e))
     return ok({"jobs": jobs})
@@ -230,6 +230,62 @@ async def restore_now(request: Request, user: dict):
     if r.get("error"):
         raise ApiError(400, r["error"])
     return ok(r)
+
+
+@require("viewer")
+async def preview_frame(request: Request, user: dict):
+    """One rendered frame (JPEG) at source time t with the current/sent settings — for effects that CSS can't fake."""
+    import tempfile
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import Response
+    from ..engine import render as render_engine
+    from ..engine.presets import caption_style, platform
+    p = own_project(request, user)
+    data = await body(request)
+    t = max(0.0, float(data.get("t") or request.query_params.get("t") or 0))
+    opts = {**service.DEFAULT_RENDER, **p.get("settings", {}).get("render", {}), **(data.get("render") or {})}
+    raw = service.asset_of(p["id"], "raw")
+    if not raw:
+        raise ApiError(400, "recording नहीं मिली")
+    eff = service.resolve_effects_local(p, opts.get("effects") or {})
+    preset = platform(data.get("preset") or (opts.get("presets") or ["yt-short"])[0])
+    style = caption_style(opts.get("caption_style", "karaoke"))
+    fps = float(p["meta"].get("fps") or 30)
+
+    def work() -> bytes:
+        with tempfile.TemporaryDirectory(prefix="vfr_") as td:
+            out = render_engine.render(video=storage.abs_path(raw["path"]), audio=None, meta={**p["meta"], "has_audio": False},
+                                       edl={"duration": p["meta"]["duration"], "cuts": []}, transcript=p.get("transcript"),
+                                       preset=preset, style=style, out_dir=Path(td), name="frame", hook=opts.get("hook"),
+                                       focus_x=float(opts.get("focus_x", 0.5)), focus_y=float(opts.get("focus_y", 0.5)),
+                                       burn_captions=opts.get("burn_captions"), caption_overrides=opts.get("captions"),
+                                       effects=eff, clip={"start": t, "end": t + 2.5 / fps}, face_track="off",
+                                       encoder_preset="ultrafast", on_progress=None)
+            jpg = Path(td) / "frame.jpg"
+            import subprocess
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(out["files"][0]["path"]), "-frames:v", "1", "-q:v", "4", str(jpg)], check=True)
+            return jpg.read_bytes()
+
+    try:
+        img = await run_in_threadpool(work)
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(500, f"frame नहीं बना: {str(e)[-300:]}")
+    return Response(img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@require("editor")
+async def matte_now(request: Request, user: dict):
+    """Build (or rebuild) the person cutout for this project."""
+    p = own_project(request, user)
+    if not service.asset_of(p["id"], "proxy"):
+        raise ApiError(400, "पहले preview बनने दें")
+    with db.tx() as c:
+        running = c.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'matte' AND status IN ('queued','running')", (p["id"],)).fetchone()[0]
+        if running:
+            return ok({"job": None, "running": True})
+        job = service.queue.enqueue(c, p["id"], "matte", {})
+        service.log(c, user["workspace_id"], "matte.start", user_id=user["id"], project_id=p["id"])
+    return ok({"job": job})
 
 
 @require("editor")
@@ -338,6 +394,8 @@ async def presets(request: Request, user: dict):
                "extras": [{"id": k, "label": v["label"]} for k, v in EXTRAS.items()],
                "transitions": [{"id": k, "label": v} for k, v in TRANSITIONS.items()],
                "text_anims": [{"id": k, "label": v} for k, v in TEXT_ANIMS.items()],
+               "body_bg": [{"id": k, "label": v} for k, v in BODY_BG.items()],
+               "body_anims": [{"id": k, "label": v} for k, v in BODY_ANIMS.items()],
                "catalog": catalog.catalog_json(),
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
@@ -353,6 +411,8 @@ routes = [
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
+    Route("/projects/{project_id}/matte", matte_now, methods=["POST"]),
+    Route("/projects/{project_id}/frame", preview_frame, methods=["POST"]),
     Route("/projects/{project_id}/archive", archive_now, methods=["POST"]),
     Route("/projects/{project_id}/history", history_list),
     Route("/projects/{project_id}/history/{hid}/restore", history_restore, methods=["POST"]),

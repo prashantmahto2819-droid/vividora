@@ -18,6 +18,7 @@ const ICON = {
   audio: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
   overlay: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>',
   montage: '<svg viewBox="0 0 24 24"><path d="M4 18V8M9 18V4M14 18v-8M19 18v-5"/><path d="M3 21h18"/></svg>',
+  body: '<svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/><path d="M2 12l2-2M22 12l-2-2" stroke-dasharray="2 2"/></svg>',
   color: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 010 18c-2.5 0-3-2-1.5-3.5S13 15 11 13s-4-3-2.5-5S12 3 12 3z"/></svg>',
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg>',
   redo: '<svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/></svg>',
@@ -32,7 +33,7 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
-const TABS_ALL = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["color", "Color"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["refs", "Refs"]];
+const TABS_ALL = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["body", "Body"], ["color", "Color"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["refs", "Refs"]];
 const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
 const TITLE_PRESETS = [
@@ -51,7 +52,8 @@ export function mount(root, project, ctx) {
   if (E && E.pid === project.id && root.contains(E.root)) { update(project); return; }
   unmount();
   const rs = JSON.parse(JSON.stringify(project.render_defaults || {}));
-  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, transition: "none", extras: [], grade: {}, grade_preset: "", stack: [], frame: { id: "", opacity: 1 }, music: { id: "", volume: 0.18, duck: true },
+  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, transition: "none", extras: [], grade: {}, grade_preset: "", stack: [], frame: { id: "", opacity: 1 },
+    body: { enabled: false, bg: "blur", bg_blur: 18, bg_color: "#111111", bg_color2: "#F2B33D", bg_image: "", bg_video: "", stroke: false, stroke_color: "#FFFFFF", stroke_width: 8, glow: false, glow_color: "#F2B33D", glow_size: 24, glow_strength: 1.6, afterimage: false, after_decay: 0.9, clones: 0, anim: "none", anim_seconds: 0.9, blink_period: 0.4 }, music: { id: "", volume: 0.18, duck: true },
     broll: [], titles: [], watermark: { id: "", opacity: 0.75, size: 0.14, pos: "tr" }, sfx: [], ...(rs.effects || {}) };
   if (rs.effects.flash && (!rs.effects.transition || rs.effects.transition === "none")) rs.effects.transition = "flash";
   rs.captions = { size_scale: 1, position: "", primary: "", highlight: "", font: "", italic: "", uppercase: "", letter_spacing: "", outline_scale: "", shadow_scale: "", outline_color: "", ...(rs.captions || {}) };
@@ -136,6 +138,7 @@ function skeleton() {
           <div class="ed-mask" id="mask"></div>
           <div class="ed-safe" id="safe"></div>
           <div class="ed-ovl" id="ovl"><div id="ovl-media"></div><div id="ovl-text"></div></div>
+          <div class="ed-frameprev" id="frameprev" hidden><img alt=""><button class="ibtn" id="frameprev-x">✕</button><span class="small">rendered frame @ <b></b></span></div>
         </div>
       </div>
       <div class="ed-transport">
@@ -149,6 +152,7 @@ function skeleton() {
         <button class="btn small" id="t-cut" title="In–Out के बीच हटाएँ">${ICON.cuts} हटाएँ</button>
         <select class="btn small quiet" id="t-speed" title="In–Out की speed"><option value="">speed…</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select>
         <span class="muted small" id="t-marks"></span>
+        <button class="btn small quiet" id="t-frame" title="इस समय का असली rendered frame (effects/body/grade सहित)">🎞 Preview frame</button>
       </div>
     </section>
     <div class="ed-gutter gx" id="g-insp"></div><aside class="ed-inspector" id="inspector"></aside>
@@ -203,6 +207,11 @@ function bindStatic() {
   $("#t-in", E.root).onclick = () => mark("in");
   $("#t-out", E.root).onclick = () => mark("out");
   $("#t-cut", E.root).onclick = addCutFromMarks;
+  $("#t-frame", E.root).onclick = async () => { const fp = $("#frameprev", E.root); const btn = $("#t-frame", E.root); btn.disabled = true; btn.textContent = "बन रहा…";
+    try { const rs = JSON.parse(JSON.stringify(E.rs)); const r = await fetch(`/api/projects/${E.pid}/frame`, { method: "POST", headers: { authorization: "Bearer " + E.ctx.S.token, "content-type": "application/json" }, body: JSON.stringify({ t: E.t, render: rs, preset: E.ratio === "16:9" ? "yt-long" : E.ratio === "1:1" ? "yt-short" : "yt-short" }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); const blob = await r.blob(); fp.querySelector("img").src = URL.createObjectURL(blob); fp.querySelector("b").textContent = fmt(E.t); fp.hidden = false; }
+    catch (err) { E.ctx.toast(err.message); } btn.disabled = false; btn.textContent = "🎞 Preview frame"; };
+  $("#frameprev-x", E.root).onclick = () => ($("#frameprev", E.root).hidden = true);
   $("#t-speed", E.root).onchange = (e) => { const r = +e.target.value; e.target.value = ""; if (!r || !E.canEdit) return; if (E.markIn == null || E.markOut == null) return E.ctx.toast("पहले I और O से हिस्सा चुनें");
     const it = { id: uid(), start: +E.markIn.toFixed(3), end: +E.markOut.toFixed(3), rate: r }; E.speed.push(it); E.markIn = E.markOut = null; $("#t-marks", E.root).textContent = ""; touch(); select({ type: "speed", id: it.id }); };
   $("#tl-zoom", E.root).oninput = (e) => { E.pps = +e.target.value; renderTimeline(); };
@@ -440,6 +449,7 @@ function renderInspector() {
       <div class="irow">${field("शुरू", num("start", it.start, 0.1, 0))}${field("ख़त्म", num("end", it.end, 0.1, 0))}</div>
       <div class="irow">${field("जगह", `<select data-k="pos" ${dis}>${["top", "center", "bottom"].map((p) => `<option value="${p}" ${it.pos === p ? "selected" : ""}>${{ top: "ऊपर", center: "बीच", bottom: "नीचे" }[p]}</option>`).join("")}</select>`)}${field("आकार", `<input type="range" data-k="size" min="0.03" max="0.16" step="0.005" value="${it.size || 0.075}" ${dis}>`)}</div>
       <div class="irow">${field("रंग", `<input type="color" data-k="color" value="${it.color || "#ffffff"}" ${dis}>`)}${field("outline/box", `<div class="irow"><input type="color" data-k="bg" value="${it.bg || "#000000"}" ${dis}><label class="chk small"><input type="checkbox" data-k="_bgon" ${it.bg ? "checked" : ""} ${dis}> लगाएँ</label></div>`)}</div>
+      <label class="chk small"><input type="checkbox" data-k="behind" ${it.behind ? "checked" : ""} ${dis}> person के पीछे (Body effects चालू हों)</label>
       <div class="irow">${field("animation", `<select data-k="anim" ${dis}>${(E.ctx.S.presets?.text_anims || []).map((a) => `<option value="${a.id}" ${(it.anim || "fade") === a.id ? "selected" : ""}>${esc(a.label)}</option>`).join("")}</select>`)}${field("font", `<select data-k="font" ${dis}><option value="">Poppins</option>${(E.ctx.S.presets?.fonts || []).map((f) => `<option ${it.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "broll") {
@@ -626,6 +636,24 @@ function renderPanel() {
       <div class="fxgrid">${list.map((e) => `<button class="fxcard" data-fxadd="${e.id}" title="${esc((e.tags || []).join(", "))}" ${dis}>${thumb ? `<img src="${thumb}" alt="" style="filter:${e.preview === "css" && e.css ? stackCss([{ id: e.id }]) : ""}">` : `<i></i>`}<span>${esc(e.label)}</span><small>${e.preview === "css" ? "" : "render only"}</small></button>`).join("") || `<p class="small muted">कुछ नहीं मिला</p>`}</div>
       <h4>Quick looks</h4><div class="looks">${looks.map((l) => `<button class="look ${fx.look === l.id ? "on" : ""}" data-look="${l.id}" ${dis}>${thumb ? `<img src="${thumb}" style="filter:${LOOK_CSS[l.id] || ""}" alt="">` : `<i style="filter:${LOOK_CSS[l.id] || ""}"></i>`}<small>${esc(l.label)}</small></button>`).join("")}</div>
       <div class="box"><b>Extras</b><div class="irow" style="flex-wrap:wrap">${(S.presets?.extras || []).map((x) => `<label class="chk small"><input type="checkbox" data-extra="${x.id}" ${(fx.extras || []).includes(x.id) ? "checked" : ""} ${dis}> ${esc(x.label)}</label>`).join("")}</div></div>`;
+  } else if (t === "body") {
+    const b = fx.body; const alpha = E.p.assets.find((a) => a.kind === "alpha"); const mj = E.p.jobs?.find((j) => j.kind === "matte" && ["queued", "running"].includes(j.status));
+    const lib = E.lib || [];
+    h = `<div class="ph"><h3>Body effects</h3><span class="small muted">person cutout</span></div>
+      <div class="box">${alpha ? `<p class="small">✅ cutout तैयार (${alpha.meta?.frames || ""} frames)</p>` : mj ? `<p class="small">⏳ cutout बन रहा है… ${mj.progress || 0}%</p><div class="progress"><i style="width:${mj.progress || 0}%"></i></div>` : `<p class="small muted">CapCut के "Auto cutout / Body effects" जैसा — पहले cutout बनता है (CPU पर, 10 min video ≈ 15–25 min, एक बार)।</p>`}
+        <div class="row"><button class="btn small ${alpha ? "quiet" : "primary"}" id="bd-matte" ${dis || (mj ? "disabled" : "")}>${alpha ? "cutout दोबारा बनाएँ" : "cutout बनाएँ"}</button><label class="chk small"><input type="checkbox" id="bd-on" ${b.enabled ? "checked" : ""} ${dis}> <b>Body effects चालू</b></label></div>
+        <p class="small muted">preview में नहीं दिखता (render में बनता है) — "Preview frame" से एक frame देखें।</p></div>
+      <h4>Background</h4><div class="irow">${field("", `<select id="bd-bg" ${dis}>${(S.presets?.body_bg || []).map((o) => `<option value="${o.id}" ${b.bg === o.id ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`)}
+        ${b.bg === "blur" ? field("blur", `<input type="range" id="bd-blur" min="4" max="40" step="1" value="${b.bg_blur}" ${dis}>`) : ""}
+        ${["flat", "gradient"].includes(b.bg) ? field("रंग", `<input type="color" id="bd-c1" value="${b.bg_color}" ${dis}>`) : ""}${b.bg === "gradient" ? field("रंग 2", `<input type="color" id="bd-c2" value="${b.bg_color2}" ${dis}>`) : ""}
+        ${b.bg === "image" ? field("image (library)", `<select id="bd-img" ${dis}><option value="">—</option>${lib.filter((x) => x.kind === "image").map((x) => `<option value="${x.id}" ${b.bg_image === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`) : ""}
+        ${b.bg === "video" ? field("video (library)", `<select id="bd-vid" ${dis}><option value="">—</option>${lib.filter((x) => x.kind === "broll").map((x) => `<option value="${x.id}" ${b.bg_video === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`) : ""}</div>
+      <h4>Outline & glow</h4><div class="irow"><label class="chk small"><input type="checkbox" id="bd-stroke" ${b.stroke ? "checked" : ""} ${dis}> Stroke</label>${field("रंग", `<input type="color" id="bd-sc" value="${b.stroke_color}" ${dis}>`)}${field("मोटाई", `<input type="range" id="bd-sw" min="2" max="30" step="1" value="${b.stroke_width}" ${dis}>`)}</div>
+      <div class="irow"><label class="chk small"><input type="checkbox" id="bd-glow" ${b.glow ? "checked" : ""} ${dis}> Glow / Neon</label>${field("रंग", `<input type="color" id="bd-gc" value="${b.glow_color}" ${dis}>`)}${field("फैलाव", `<input type="range" id="bd-gs" min="6" max="60" step="2" value="${b.glow_size}" ${dis}>`)}</div>
+      <h4>Motion</h4><div class="irow">${field("entrance / blink", `<select id="bd-anim" ${dis}>${(S.presets?.body_anims || []).map((o) => `<option value="${o.id}" ${b.anim === o.id ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`)}${field("सेकंड", `<input type="range" id="bd-as" min="0.3" max="2" step="0.1" value="${b.anim_seconds}" ${dis}>`)}</div>
+      <div class="irow"><label class="chk small"><input type="checkbox" id="bd-after" ${b.afterimage ? "checked" : ""} ${dis}> Afterimage (ghost trail)</label>${field("clones", `<select id="bd-clones" ${dis}>${[0, 1, 2, 3, 4].map((n) => `<option value="${n}" ${b.clones == n ? "selected" : ""}>${n}</option>`).join("")}</select>`)}</div>
+      <p class="small muted">Text को person के पीछे रखने के लिए: Text item चुनें → "person के पीछे"।</p>
+      <h4>Quick presets</h4><div class="irow" style="flex-wrap:wrap">${[["pop_white", "White stroke pop"], ["neon", "Neon glow"], ["sky", "आसमान से गिरे"], ["blink", "Blink cutout"], ["ghost", "Ghost trail"], ["flat", "Flat colour + outline"]].map(([k, l]) => `<button class="btn small quiet" data-bdp="${k}" ${dis}>${l}</button>`).join("")}</div>`;
   } else if (t === "color") {
     const cat = S.presets?.catalog || { grade_params: [], grade_presets: {} }; const g = fx.grade || {}; const def = GRADE_DEF();
     const thumb = (E.p.assets.find((a) => a.kind === "thumb") || {}).url;
@@ -726,6 +754,21 @@ function bindPanel() {
   $$("[data-fxup]", panel).forEach((b) => (b.onclick = () => { const i = +b.dataset.fxup; if (i > 0) { [fx.stack[i - 1], fx.stack[i]] = [fx.stack[i], fx.stack[i - 1]]; touch(); renderPanel(); } }));
   $$("[data-fxdown]", panel).forEach((b) => (b.onclick = () => { const i = +b.dataset.fxdown; if (i < fx.stack.length - 1) { [fx.stack[i + 1], fx.stack[i]] = [fx.stack[i], fx.stack[i + 1]]; touch(); renderPanel(); } }));
   $$("[data-fxp]", panel).forEach((inp) => (inp.oninput = () => { const [i, k] = inp.dataset.fxp.split(":"); const it = fx.stack[+i]; it.params = it.params || {}; it.params[k] = inp.type === "color" ? inp.value : +inp.value; const b = inp.parentElement.querySelector("b"); if (b) b.textContent = inp.value; touch(); layoutFrame(); }));
+  // body
+  if (fx.body) {
+    const b = fx.body; const { api: api2, load: load2 } = E.ctx;
+    on("#bd-matte", "onclick", async () => { try { await api2("POST", `/projects/${E.pid}/matte`); toast("cutout बन रहा है"); await load2(); renderPanel(); } catch (err) { toast(err.message); } });
+    on("#bd-on", "onchange", (e) => { b.enabled = e.target.checked; touch(); });
+    on("#bd-bg", "onchange", (e) => { b.bg = e.target.value; touch(); renderPanel(); });
+    on("#bd-blur", "oninput", (e) => { b.bg_blur = +e.target.value; touch(); });
+    on("#bd-c1", "oninput", (e) => { b.bg_color = e.target.value; touch(); }); on("#bd-c2", "oninput", (e) => { b.bg_color2 = e.target.value; touch(); });
+    on("#bd-img", "onchange", (e) => { b.bg_image = e.target.value; touch(); }); on("#bd-vid", "onchange", (e) => { b.bg_video = e.target.value; touch(); });
+    on("#bd-stroke", "onchange", (e) => { b.stroke = e.target.checked; touch(); }); on("#bd-sc", "oninput", (e) => { b.stroke_color = e.target.value; touch(); }); on("#bd-sw", "oninput", (e) => { b.stroke_width = +e.target.value; touch(); });
+    on("#bd-glow", "onchange", (e) => { b.glow = e.target.checked; touch(); }); on("#bd-gc", "oninput", (e) => { b.glow_color = e.target.value; touch(); }); on("#bd-gs", "oninput", (e) => { b.glow_size = +e.target.value; touch(); });
+    on("#bd-anim", "onchange", (e) => { b.anim = e.target.value; touch(); }); on("#bd-as", "oninput", (e) => { b.anim_seconds = +e.target.value; touch(); });
+    on("#bd-after", "onchange", (e) => { b.afterimage = e.target.checked; touch(); }); on("#bd-clones", "onchange", (e) => { b.clones = +e.target.value; touch(); });
+    $$("[data-bdp]", panel).forEach((btn) => (btn.onclick = () => { const P = { pop_white: { bg: "blur", stroke: true, stroke_color: "#FFFFFF", stroke_width: 10, glow: false, anim: "pop" }, neon: { bg: "dim", stroke: true, stroke_color: "#00FFD0", stroke_width: 4, glow: true, glow_color: "#00FFD0", glow_size: 30, anim: "none" }, sky: { bg: "blur", stroke: true, stroke_color: "#FFFFFF", stroke_width: 8, anim: "drop", anim_seconds: 0.9 }, blink: { bg: "flat", bg_color: "#0b0b0b", stroke: true, stroke_color: "#F2B33D", stroke_width: 6, anim: "blink", blink_period: 0.35 }, ghost: { bg: "dim", afterimage: true, after_decay: 0.92, clones: 0, anim: "none" }, flat: { bg: "flat", bg_color: "#F2B33D", stroke: true, stroke_color: "#111111", stroke_width: 6, glow: false } }[btn.dataset.bdp]; Object.assign(b, P, { enabled: true }); touch(); renderPanel(); }));
+  }
   // color
   const setGrade = (name, val) => { fx.grade = fx.grade || {}; fx.grade[name] = val; fx.grade_preset = ""; touch(); layoutFrame(); };
   $$("[data-g]", panel).forEach((inp) => (inp.oninput = () => { setGrade(inp.dataset.g, +inp.value); inp.parentElement.querySelector("b").textContent = (+inp.value).toFixed(2).replace(/\.?0+$/, ""); $$(".look", panel).forEach((x) => x.classList.remove("on")); }));

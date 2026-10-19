@@ -40,7 +40,7 @@ def _progress(client: ApiClient, job_id: str):
     return cb
 
 
-def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path) -> dict:
+def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets: list[dict] | None = None) -> dict:
     """Download library items the render refers to; replace ids with local paths."""
     e = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
          for k, v in (effects or {}).items()}
@@ -58,6 +58,18 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path) -> dict
         p = fetch(look[4:])
         e["lut_path"] = str(p) if p else None
         e["look"] = "none"
+    body = e.get("body") if isinstance(e.get("body"), dict) else None
+    if body and body.get("enabled"):
+        alpha = next((a for a in (assets or []) if a["kind"] == "alpha"), None)
+        if alpha:
+            body["alpha_path"] = str(client.download(alpha["id"], tmp / "alpha.mp4"))
+            for key in ("bg_image", "bg_video"):
+                if body.get(key):
+                    p = fetch(body[key])
+                    body[key + "_path"] = str(p) if p else None
+        else:
+            body["enabled"] = False
+        e["body"] = body
     for key in ("music", "watermark", "frame"):
         d = e.get(key) or {}
         if isinstance(d, dict) and d.get("id"):
@@ -129,7 +141,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 focus_x=float(p.get("focus_x", 0.5)), focus_y=float(p.get("focus_y", 0.5)),
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
-                effects=_resolve_effects(client, p.get("effects"), tmp),
+                effects=_resolve_effects(client, p.get("effects"), tmp, assets),
                 encoder_preset=os.getenv("X264_PRESET") or None,
                 on_progress=_progress(client, job["id"]),
             )
@@ -186,6 +198,17 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 files.append({**f, "path": up["path"]})
             return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": []}
 
+        if kind == "matte":
+            from ..engine import matting
+            proxy = _fetch(client, assets, "proxy", tmp)
+            info = ffmpeg.probe(proxy)
+            out = tmp / "alpha.mp4"
+            r = matting.matte(proxy, out, width=info["width"], height=info["height"], fps=float(info["fps"]),
+                              duration=float(info["duration"]), downsample=float(job["payload"].get("downsample", 0.375)),
+                              on_progress=_progress(client, job["id"]))
+            up = client.upload(job["id"], out, "alpha")
+            return {"files": [{"kind": "alpha", "path": up["path"], "mime": "video/mp4", "meta": r}]}
+
         if kind == "shorts_plan":
             o = job["payload"].get("options") or {}
             clips = shorts.plan(project.get("transcript") or {}, float(project["meta"].get("duration") or 0),
@@ -208,6 +231,11 @@ def main() -> None:
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
     kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage"]
+    try:
+        import onnxruntime  # noqa: F401
+        kinds.append("matte")
+    except ImportError:
+        log.warning("onnxruntime नहीं — cutout (matte) jobs इस worker पर नहीं चलेंगे")
     if os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes"):
         kinds.append("transcribe")
     client = ApiClient(base, token, name)

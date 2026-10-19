@@ -315,3 +315,109 @@ def text_anim_tags(anim: str, an: int, w: int, h: int, dur_ms: int) -> str:
     if anim == "typewriter":
         return ""
     return "\\fad(150,150)"
+
+
+# ---------------------------------------------------------------------------
+# Body effects (need the cached alpha video from engine/matting.py)
+BODY_BG = {"none": "जैसा है", "blur": "Blur", "dim": "Dark", "flat": "Solid colour", "image": "Image (library)",
+           "video": "Video (library)", "gradient": "Gradient"}
+BODY_ANIMS = {"none": "कोई नहीं", "drop": "आसमान से गिरे (drop-in)", "pop": "Pop out", "slide": "Slide in", "blink": "Blink / strobe",
+              "rise": "नीचे से उठे"}
+
+
+def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str, *, extra_inputs: dict,
+               ass_behind: str | None = None, fonts_dir: str | None = None) -> list[str]:
+    """Compose: background → glow → stroke → text-behind → subject (animated) → clones.
+    v_in: cut video label; a_in: cut alpha (gray, same size). extra_inputs: {'bg_image': idx, 'bg_video': idx}."""
+    ch: list[str] = []
+    bg_mode = body.get("bg", "blur")
+    # --- background
+    if bg_mode == "blur":
+        ch.append(f"{v_in}split[bsrc][bsub];[bsrc]gblur=sigma={float(body.get('bg_blur', 18)):.1f},eq=brightness=-0.04[bg0]")
+        v_sub = "[bsub]"
+    elif bg_mode == "dim":
+        ch.append(f"{v_in}split[bsrc][bsub];[bsrc]eq=brightness=-0.35:saturation=0.6[bg0]")
+        v_sub = "[bsub]"
+    elif bg_mode == "flat":
+        ch.append(f"color=c={_c(body.get('bg_color', '#111111'))}:s={w}x{h}:r=30,format=yuv420p[bg0]")
+        ch.append(f"{v_in}copy[bsub]")
+        v_sub = "[bsub]"
+    elif bg_mode == "gradient":
+        c1, c2 = _c(body.get("bg_color", "#1b1f3a")), _c(body.get("bg_color2", "#f2b33d"))
+        ch.append(f"gradients=s={w}x{h}:c0={c1}:c1={c2}:x0=0:y0=0:x1={w}:y1={h}:speed=0.02:r=30,format=yuv420p[bg0]")
+        ch.append(f"{v_in}copy[bsub]")
+        v_sub = "[bsub]"
+    elif bg_mode in ("image", "video") and extra_inputs.get("bg_" + bg_mode) is not None:
+        idx = extra_inputs["bg_" + bg_mode]
+        ch.append(f"[{idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,format=yuv420p[bg0]")
+        ch.append(f"{v_in}copy[bsub]")
+        v_sub = "[bsub]"
+    else:
+        ch.append(f"{v_in}split[bg0][bsub]")
+        v_sub = "[bsub]"
+    # alpha copies
+    n_alpha = 1 + (1 if body.get("glow") else 0) + (1 if body.get("stroke") else 0)
+    labels = "".join(f"[al{i}]" for i in range(n_alpha))
+    ch.append(f"{a_in}format=gray,split={n_alpha}{labels}" if n_alpha > 1 else f"{a_in}format=gray[al0]")
+    ai = 1
+    cur = "[bg0]"
+    # --- glow (blurred, coloured alpha screened over bg)
+    if body.get("glow"):
+        gc = _c(body.get("glow_color", "#F2B33D")); gs = float(body.get("glow_size", 24))
+        ch.append(f"[al{ai}]boxblur={gs:.0f}:1,lutyuv=y='min(255\\,val*{float(body.get('glow_strength', 1.6)):.2f})'[glowa]")
+        ch.append(f"color=c={gc}:s={w}x{h}:r=30,format=rgba[glowc];[glowc][glowa]alphamerge[glow]")
+        ch.append(f"{cur}[glow]overlay=0:0:format=auto[bgg]")
+        cur = "[bgg]"
+        ai += 1
+    # --- stroke (ring = dilate(alpha) − alpha)
+    if body.get("stroke"):
+        sc = _c(body.get("stroke_color", "#FFFFFF")); sw = max(1, int(body.get("stroke_width", 8)))
+        ch.append(f"[al{ai}]split[sa1][sa2];[sa1]boxblur={sw}:1,lutyuv=y='if(gt(val\\,24)\\,255\\,0)'[dil];"
+                  f"[dil][sa2]blend=all_mode=subtract[ring]")
+        ch.append(f"color=c={sc}:s={w}x{h}:r=30,format=rgba[strc];[strc][ring]alphamerge[stroke]")
+        ch.append(f"{cur}[stroke]overlay=0:0:format=auto[bgs]")
+        cur = "[bgs]"
+        ai += 1
+    # --- text behind person
+    if ass_behind:
+        sub = f"subtitles=filename='{ass_behind}'" + (f":fontsdir='{fonts_dir}'" if fonts_dir else "")
+        ch.append(f"{cur}{sub}[bgt]")
+        cur = "[bgt]"
+    # --- subject
+    ch.append(f"{v_sub}format=rgba[vsub];[vsub][al0]alphamerge[subj0]")
+    subj = "[subj0]"
+    if body.get("afterimage"):
+        ch.append(f"{subj}split[sa][sb];[sa]lagfun=decay={float(body.get('after_decay', 0.9)):.2f},colorchannelmixer=aa=0.6[trail];"
+                  f"{cur}[trail]overlay=0:0:format=auto[bga]")
+        cur = "[bga]"
+        subj = "[sb]"
+    clones = int(body.get("clones", 0) or 0)
+    if clones:
+        ch.append(f"{subj}split={clones + 1}" + "".join(f"[cl{i}]" for i in range(clones + 1)))
+        for i in range(clones):
+            off = int(w * 0.22 * (i + 1)) * (-1 if i % 2 else 1)
+            ch.append(f"[cl{i + 1}]colorchannelmixer=aa=0.45[clo{i}];{cur}[clo{i}]overlay={off}:0:format=auto[bgc{i}]")
+            cur = f"[bgc{i}]"
+        subj = "[cl0]"
+    anim = body.get("anim", "none"); T = float(body.get("anim_seconds", 0.9))
+    enable = ""
+    x, y = "0", "0"
+    if anim == "drop":
+        y = f"'if(lt(t\\,{T})\\,-{h}*(1-pow(t/{T}\\,2))\\,0)'"
+    elif anim == "rise":
+        y = f"'if(lt(t\\,{T})\\,{h}*(1-pow(t/{T}\\,2))\\,0)'"
+    elif anim == "slide":
+        x = f"'if(lt(t\\,{T})\\,-{w}*(1-pow(t/{T}\\,2))\\,0)'"
+    elif anim == "blink":
+        P = float(body.get("blink_period", 0.4))
+        enable = f":enable='lt(mod(t\\,{P})\\,{P * 0.55:.3f})'"
+    if anim == "pop":
+        ch.append(f"{subj}scale=w='trunc(iw*if(lt(t\\,{T})\\,0.6+0.5*min(1\\,t/{T})\\,1.0)/2)*2':h=-2:eval=frame[subjp]")
+        subj = "[subjp]"
+        x, y = "'(W-w)/2'", "'(H-h)/2'"
+    ch.append(f"{cur}{subj}overlay=x={x}:y={y}:format=auto:eval=frame{enable}{out_label}")
+    return ch
+
+
+def _c(hex_color: str) -> str:
+    return "0x" + str(hex_color or "#000000").lstrip("#")[:6]

@@ -118,6 +118,19 @@ def _atempo(rate: float) -> str:
     return ",".join(parts)
 
 
+def _body(body: dict, w: int, h: int, v_in: str, a_in: str, out: str, extra_in: dict, work: Path, e: dict, dur: float) -> list[str]:
+    behind = [t for t in (e.get("titles") or []) if t.get("text") and t.get("behind")]
+    ass_path = None
+    if behind:
+        from .captions import build_ass
+        t_style, t_events = fx.title_events(behind, w, h, "Poppins")
+        p = work / "behind.ass"
+        p.write_text(build_ass([], {}, w, h, margin_v_ratio=0.2, extra_styles=[t_style], extra_events=t_events), encoding="utf-8")
+        ass_path = ffmpeg.escape_filter_path(p)
+    return fx.body_chain(body, w, h, v_in, a_in, out, extra_inputs=extra_in, ass_behind=ass_path,
+                         fonts_dir=ffmpeg.escape_filter_path(FONTS_DIR) if FONTS_DIR.exists() else None)
+
+
 def _cut_points(keep: list[tuple[float, float]]) -> list[float]:
     """Output-timeline times where a jump cut happens."""
     pts, t = [], 0.0
@@ -178,21 +191,41 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     # ---- video base: cuts → frame fit → zoom → look → flash
     sel = _select_expr(keep, fps)
     seg_audio_label = None
+    body = (e.get("body") or {}) if e.get("body", {}).get("enabled") and e.get("body", {}).get("alpha_path") else None
+    src_w0, src_h0 = int(meta.get("width", w)), int(meta.get("height", h))
+    if body:
+        inputs += ["-i", str(body["alpha_path"])]
+        body_alpha_in = next_in
+        next_in += 1
+        extra_in = {}
+        for key in ("bg_image", "bg_video"):
+            if body.get(key + "_path"):
+                if key == "bg_image":
+                    inputs += ["-loop", "1", "-i", str(body[key + "_path"])]
+                else:
+                    inputs += ["-stream_loop", "-1", "-i", str(body[key + "_path"])]
+                extra_in[key] = next_in
+                next_in += 1
     if use_segments:
         # trim/concat/xfade path: real transitions and speed ramps
         a_src = "[1:a]" if audio is not None else ("[0:a]" if meta.get("has_audio") else None)
         if audio is not None:
             inputs += ["-i", str(audio)]
             next_in += 1
-        vlabels, alabels = [], []
+        vlabels, alabels, mlabels = [], [], []
         for i, sg in enumerate(segs):
             chains.append(f"[0:v]trim=start={sg['a']:.3f}:end={sg['b']:.3f},setpts=(PTS-STARTPTS)/{sg['rate']:.4f},fps={fps},settb=AVTB,format=yuv420p[sv{i}]")
             vlabels.append(f"[sv{i}]")
+            if body:
+                chains.append(f"[{body_alpha_in}:v]scale={src_w0}:{src_h0},trim=start={sg['a']:.3f}:end={sg['b']:.3f},"
+                              f"setpts=(PTS-STARTPTS)/{sg['rate']:.4f},fps={fps},settb=AVTB,format=gray[sm{i}]")
+                mlabels.append(f"[sm{i}]")
             if a_src:
                 chains.append(f"{a_src}atrim=start={sg['a']:.3f}:end={sg['b']:.3f},asetpts=PTS-STARTPTS,"
                               f"{_atempo(sg['rate'])},aformat=sample_rates=48000:channel_layouts=mono[sa{i}]")
                 alabels.append(f"[sa{i}]")
         cur_v, cur_a = vlabels[0], (alabels[0] if alabels else None)
+        cur_m = mlabels[0] if body else None
         acc = segs[0]["out_dur"]
         for i in range(1, len(segs)):
             sg = segs[i]
@@ -200,17 +233,28 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                 d = acc - sg["out_start"]  # overlap length
                 chains.append(f"{cur_v}{vlabels[i]}xfade=transition={sg['tr'][2:]}:duration={d:.3f}:offset={sg['out_start']:.3f},settb=AVTB[xv{i}]")
                 cur_v = f"[xv{i}]"
+                if body:
+                    chains.append(f"{cur_m}{mlabels[i]}xfade=transition=fade:duration={d:.3f}:offset={sg['out_start']:.3f},settb=AVTB[xm{i}]")
+                    cur_m = f"[xm{i}]"
                 if cur_a:
                     chains.append(f"{cur_a}{alabels[i]}acrossfade=d={d:.3f}:c1=tri:c2=tri[xa{i}]")
                     cur_a = f"[xa{i}]"
             else:
                 chains.append(f"{cur_v}{vlabels[i]}concat=n=2:v=1:a=0,settb=AVTB[xv{i}]")
                 cur_v = f"[xv{i}]"
+                if body:
+                    chains.append(f"{cur_m}{mlabels[i]}concat=n=2:v=1:a=0,settb=AVTB[xm{i}]")
+                    cur_m = f"[xm{i}]"
                 if cur_a:
                     chains.append(f"{cur_a}{alabels[i]}concat=n=2:v=0:a=1[xa{i}]")
                     cur_a = f"[xa{i}]"
             acc = sg["out_start"] + sg["out_dur"]
-        chains.append(f"{cur_v}setpts=PTS-STARTPTS[vseg]")
+        if body:
+            chains.append(f"{cur_v}setpts=PTS-STARTPTS[vseg0]")
+            chains.append(f"{cur_m}setpts=PTS-STARTPTS[mseg]")
+            chains.extend(_body(body, src_w0, src_h0, "[vseg0]", "[mseg]", "[vseg]", extra_in, work, e, new_dur))
+        else:
+            chains.append(f"{cur_v}setpts=PTS-STARTPTS[vseg]")
         if cur_a:
             chains.append(f"{cur_a}asetpts=PTS-STARTPTS[voice]")
             seg_audio_label = "[voice]"
@@ -236,7 +280,13 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         track_cmds = work / "face.cmd"
         track_cmds.write_text(crop_commands(kf, scaled_w, w, to_out_fn, focus_x), encoding="utf-8")
     frame = _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
-    v = (f"[vseg]{frame}" if use_segments else f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}")
+    if body and not use_segments:
+        chains.append(f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB[vcut0]")
+        chains.append(f"[{body_alpha_in}:v]scale={src_w0}:{src_h0},fps={fps},select='{sel}',setpts=N/({fps})/TB,format=gray[mcut]")
+        chains.extend(_body(body, src_w0, src_h0, "[vcut0]", "[mcut]", "[vseg]", extra_in, work, e, new_dur))
+        v = f"[vseg]{frame}"
+    else:
+        v = (f"[vseg]{frame}" if use_segments else f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}")
     # transitions: per-cut kind (edl cut.transition) or the global default
     default_tr = e.get("transition") or ("flash" if e.get("flash") else "none")
     tr_cuts = []
@@ -303,7 +353,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         next_in += 1
 
     # ---- captions + hook + titles (one ASS file)
-    titles = [t for t in (e.get("titles") or []) if t.get("text")]
+    titles = [t for t in (e.get("titles") or []) if t.get("text") and not (t.get("behind") and body)]
     has_text = (burn and words and style) or (hook and hook.get("text")) or titles
     tail = ""
     if has_text:
