@@ -122,3 +122,18 @@ th { color: var(--muted); font-weight: 500; }
 .drop { border: 2px dashed var(--line); border-radius: var(--radius); padding: 2rem 1rem; text-align: center; cursor: pointer; }
 .drop.over { border-color: var(--amber); background: rgba(242,179,61,.06); }
 .actionbar { margin-top: 1.25rem; display: flex; gap: .6rem; justify-content: flex-end; flex-wrap: wrap; }
+
+/* caption style picker */
+.styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .6rem; }
+.stylecard { cursor: pointer; border: 2px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.stylecard.on { border-color: var(--amber); }
+.stylecard input { display: none; }
+.stylecard .scr { height: 110px; display: flex; align-items: center; padding: .5rem; background: linear-gradient(160deg, #3b4f6b, #22304a); overflow: hidden; }
+.stylecard b { display: block; padding: .35rem .5rem; font-size: .85rem; font-weight: 500; }
+.capopts { margin: .25rem 0 1rem; }
+.capopts input[type=color] { width: 48px; height: 36px; padding: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.capopts input[type=range] { width: 160px; }
+@font-face { font-family: "Poppins"; src: url("/assets/Poppins-ExtraBold.ttf"); font-weight: 800; }
+@font-face { font-family: "Baloo 2"; src: url("/assets/Baloo2.ttf"); font-weight: 400 800; }
+@font-face { font-family: "Mukta"; src: url("/assets/Mukta-ExtraBold.ttf"); font-weight: 800; }
+@font-face { font-family: "Hind"; src: url("/assets/Hind-Bold.ttf"); font-weight: 700; }

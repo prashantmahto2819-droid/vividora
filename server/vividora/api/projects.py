@@ -44,7 +44,7 @@ async def create_project(request: Request, user: dict):
     need(data, "title")
     p = {"id": db.new_id(), "workspace_id": user["workspace_id"], "created_by": user["id"],
          "title": data["title"].strip()[:200], "kind": data.get("kind", "talking_head"),
-         "language": data.get("language", "hi"), "status": "uploading", "status_note": "upload का इंतज़ार",
+         "language": data.get("language") or "auto", "status": "uploading", "status_note": "upload का इंतज़ार",
          "meta": {}, "transcript": None, "edl": None,
          "settings": {"render": data.get("render", {}), "autocut": data.get("autocut", {})},
          "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
@@ -193,7 +193,9 @@ async def media(request: Request):
 
 @require("viewer")
 async def presets(request: Request, user: dict):
+    fonts = ["Noto Sans Devanagari", "Poppins", "Baloo 2", "Mukta", "Hind"]
     return ok({"platforms": list(platforms().values()), "caption_styles": list(caption_styles().values()),
+               "fonts": fonts,
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
 

@@ -1,9 +1,9 @@
 {
   "id": "pop",
-  "label": "पॉप (Shorts स्टाइल)",
-  "description": "2–3 बड़े शब्द, बोला जा रहा शब्द उछलकर पीला होता है",
+  "label": "पॉप",
+  "description": "2–3 बड़े शब्द, शब्द उछलकर पीला होता है",
   "mode": "pop",
-  "font": "Noto Sans Devanagari",
+  "font": "Baloo 2",
   "bold": true,
   "size": 0.095,
   "primary": "#FFFFFF",
@@ -11,10 +11,9 @@
   "outline_color": "#000000",
   "outline": 0.008,
   "shadow": 0.003,
-  "box": false,
   "max_words": 3,
   "max_chars": 14,
   "max_lines": 1,
   "pop_scale": 118,
-  "size_note": "size, outline, shadow are fractions of the short side of the video (1080 for both 9:16 and 16:9)"
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
 }

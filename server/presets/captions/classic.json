@@ -1,19 +1,18 @@
 {
   "id": "classic",
   "label": "क्लासिक",
-  "description": "सफ़ेद अक्षर, काली बॉर्डर — हर वीडियो पर साफ़ पढ़ने लायक",
+  "description": "सफ़ेद अक्षर, काली बॉर्डर — हर वीडियो पर साफ़",
   "mode": "line",
   "font": "Noto Sans Devanagari",
   "bold": true,
-  "size": 0.062,
+  "size": 0.06,
   "primary": "#FFFFFF",
   "highlight": "#FFFFFF",
   "outline_color": "#000000",
   "outline": 0.0055,
   "shadow": 0.002,
-  "box": false,
   "max_words": 7,
   "max_chars": 24,
   "max_lines": 2,
-  "size_note": "size, outline, shadow are fractions of the short side of the video (1080 for both 9:16 and 16:9)"
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
 }

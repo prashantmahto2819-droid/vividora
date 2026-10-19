@@ -1,9 +1,9 @@
 {
   "id": "karaoke",
   "label": "कराओके",
-  "description": "पूरी लाइन दिखती है, बोला जा रहा शब्द पीला",
+  "description": "पूरी लाइन, बोला जा रहा शब्द पीला",
   "mode": "karaoke",
-  "font": "Noto Sans Devanagari",
+  "font": "Mukta",
   "bold": true,
   "size": 0.066,
   "primary": "#FFFFFF",
@@ -11,9 +11,8 @@
   "outline_color": "#000000",
   "outline": 0.006,
   "shadow": 0.002,
-  "box": false,
   "max_words": 5,
   "max_chars": 22,
   "max_lines": 2,
-  "size_note": "size, outline, shadow are fractions of the short side of the video (1080 for both 9:16 and 16:9)"
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
 }

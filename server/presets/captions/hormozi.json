@@ -1,0 +1,21 @@
+{
+  "id": "hormozi",
+  "label": "बोल्ड येलो",
+  "description": "Hormozi स्टाइल — मोटे अक्षर, पीला highlight, हल्का glow",
+  "mode": "pop",
+  "font": "Poppins",
+  "bold": true,
+  "uppercase": true,
+  "size": 0.085,
+  "primary": "#FFFFFF",
+  "highlight": "#FFE600",
+  "outline_color": "#000000",
+  "outline": 0.009,
+  "shadow": 0.004,
+  "glow": 0.0008,
+  "max_words": 3,
+  "max_chars": 15,
+  "max_lines": 1,
+  "pop_scale": 112,
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
+}

@@ -109,7 +109,7 @@ function bindLogin() {
 function newView() {
   return `<h1>नई recording</h1><p class="muted">पहले नाम दें, फिर फ़ाइल चुनें। upload बीच में टूटे तो वहीं से आगे बढ़ता है।</p>
     <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का"></div>
-    <div class="field"><label>भाषा</label><select name="language"><option value="hi">हिंदी</option><option value="en">English</option><option value="auto">अपने-आप पहचानें</option></select></div>
+    <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
     <div class="drop" id="drop"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" hidden><b>फ़ाइल यहाँ छोड़ें या चुनें</b><br><span class="muted small">mp4, mov, mkv, webm · 20 GB तक</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
     <div id="up-progress"></div>
     <div class="actionbar"><a class="btn" href="#/">रद्द</a><button class="btn primary" id="start" disabled>upload शुरू करें</button></div></form>`;
@@ -145,6 +145,29 @@ async function uploadFile(pid, file, onProgress) {
   return api("POST", `/projects/${pid}/uploads/${up.upload_id}/finish`);
 }
 
+function hasOverrides(c) { return c && (c.position || c.primary || c.font || (c.size_scale && c.size_scale != 1)); }
+function stylePreview(cs, on) {
+  const words = ["मेहनत", "कभी", "बेकार", "नहीं"];
+  const hiIdx = cs.mode === "line" ? -1 : 2;
+  const box = cs.box === "line" ? `background:${cs.box_color || "#000"}CC;padding:.15em .4em;border-radius:4px;` : "";
+  const glow = cs.glow ? `text-shadow:0 0 6px ${cs.outline_color}, 0 0 12px ${cs.outline_color};` : "";
+  const stroke = cs.outline ? `-webkit-text-stroke:${Math.max(0.5, cs.outline * 160)}px ${cs.outline_color || "#000"};paint-order:stroke fill;` : "";
+  const size = Math.round(10 + (cs.size || 0.06) * 120);
+  const n = Math.min(words.length, cs.max_words || 4);
+  const txt = words.slice(0, n).map((w, i) => {
+    const t = cs.uppercase ? w : w;
+    if (i === hiIdx || (hiIdx >= n && i === n - 1)) {
+      if (cs.box === "word") return `<span style="background:${cs.box_color};color:${cs.highlight};padding:0 .2em;border-radius:.2em;${stroke}">${t}</span>`;
+      return `<span style="color:${cs.highlight};${cs.mode === "pop" ? "transform:scale(1.15);display:inline-block;" : ""}${stroke}">${t}</span>`;
+    }
+    return `<span style="${stroke}">${t}</span>`;
+  }).join(" ");
+  const pos = cs.position === "center" ? "center" : cs.position === "top" ? "flex-start" : "flex-end";
+  return `<label class="stylecard ${on ? "on" : ""}" title="${esc(cs.description || "")}"><input type="radio" name="cstyle" value="${cs.id}" ${on ? "checked" : ""}>
+    <div class="scr" style="justify-content:${pos}"><div style="font-family:'${cs.font}',var(--font);font-weight:${cs.bold === false ? 400 : 800};font-size:${size}px;color:${cs.primary};line-height:1.15;${box}${glow}text-align:center">${txt}</div></div>
+    <b>${esc(cs.label)}</b></label>`;
+}
+
 // ---------- project ----------
 function projectView(p) {
   const [label, cls] = STATUS[p.status] || [p.status, ""];
@@ -159,7 +182,7 @@ function projectView(p) {
   return `<div class="row between"><div><a class="btn quiet" href="#/" style="padding-left:0">← सभी</a><h1 id="title" ${canEdit ? 'contenteditable="true" spellcheck="false"' : ""}>${esc(p.title)}</h1>
       <span class="status ${cls}">${label}</span> <span class="muted small">${esc(p.status_note || "")}</span></div>
       ${canEdit ? `<button class="btn danger quiet" id="del">हटाएँ</button>` : ""}</div>
-    ${p.meta.duration ? `<p class="muted small">${fmt(p.meta.duration)} · ${p.meta.width}×${p.meta.height} · ${p.meta.fps} fps · आवाज़ ${p.meta.denoise === "deepfilternet" ? "DeepFilterNet से साफ़" : p.meta.denoise === "ffmpeg" ? "साफ़ की गई" : "जैसी थी"}</p>` : ""}
+    ${p.meta.duration ? `<p class="muted small">${fmt(p.meta.duration)} · ${p.meta.width}×${p.meta.height} · ${p.meta.fps} fps · भाषा ${{hi:"हिंदी",en:"English",auto:"पहचान बाकी"}[p.language] || p.language} · आवाज़ ${p.meta.denoise === "deepfilternet" ? "DeepFilterNet से साफ़" : p.meta.denoise === "ffmpeg" ? "साफ़ की गई" : "जैसी थी"}</p>` : ""}
     ${body}`;
 }
 function workingView(p, job) {
@@ -197,7 +220,16 @@ function renderSection(p, canEdit) {
   const d = p.render_defaults;
   return `<div class="section"><h2>render</h2>
     <div class="field"><label>कहाँ के लिए</label><div class="choices">${S.presets.platforms.map((pl) => `<label class="chip ${d.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${d.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
-    <div class="field"><label>caption style</label><div class="choices">${S.presets.caption_styles.map((cs) => `<label class="chip ${d.caption_style === cs.id ? "on" : ""}" title="${esc(cs.description)}"><input type="radio" name="cstyle" value="${cs.id}" ${d.caption_style === cs.id ? "checked" : ""}>${esc(cs.label)}</label>`).join("")}</div></div>
+    <div class="field"><label>caption style</label><div class="styles">${S.presets.caption_styles.map((cs) => stylePreview(cs, d.caption_style === cs.id)).join("")}</div></div>
+    <details class="capopts" ${hasOverrides(d.captions) ? "open" : ""}><summary class="muted">caption को अपने हिसाब से बदलें (आकार, जगह, रंग, font)</summary>
+      <div class="row" style="margin-top:.6rem">
+        <div class="field"><label>आकार</label><input type="range" id="cap-size" min="0.6" max="1.8" step="0.05" value="${d.captions?.size_scale ?? 1}"></div>
+        <div class="field"><label>जगह</label><select id="cap-pos"><option value="">style जैसी</option><option value="bottom" ${d.captions?.position === "bottom" ? "selected" : ""}>नीचे</option><option value="center" ${d.captions?.position === "center" ? "selected" : ""}>बीच में</option><option value="top" ${d.captions?.position === "top" ? "selected" : ""}>ऊपर</option></select></div>
+        <div class="field"><label>अक्षर का रंग</label><input type="color" id="cap-primary" value="${d.captions?.primary || "#ffffff"}"></div>
+        <div class="field"><label>highlight रंग</label><input type="color" id="cap-highlight" value="${d.captions?.highlight || "#ffd400"}"></div>
+        <div class="field"><label>font</label><select id="cap-font"><option value="">style जैसा</option>${(S.presets.fonts || []).map((f) => `<option ${d.captions?.font === f ? "selected" : ""}>${f}</option>`).join("")}</select></div>
+        <label class="small muted" style="align-self:end;padding-bottom:1rem"><input type="checkbox" id="cap-usecolors" ${d.captions?.primary ? "checked" : ""}> ऊपर के रंग लागू करें</label>
+      </div></details>
     <div class="row"><div class="field" style="flex:1;min-width:200px"><label>शुरुआत का hook (3 सेकंड, खाली छोड़ें तो नहीं लगेगा)</label><input id="hook" value="${esc(d.hook?.text || "")}" placeholder="4 बजे उठने वाला लड़का"></div>
       <div class="field"><label>9:16 में चेहरा कहाँ</label><select id="focus"><option value="0.5" ${d.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${d.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${d.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select></div></div>
     <div class="actionbar"><button class="btn primary" id="render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा है…" : "render करें"}</button></div></div>`;
@@ -237,11 +269,15 @@ function bindProject(p) {
   }));
   const save = $("#save-cuts"); if (save) save.onclick = async () => { await api("PATCH", `/projects/${p.id}`, { edl: { cuts: p.edl.cuts } }); toast("कट सेव हुए"); load().then(render); };
   const recut = $("#recut"); if (recut) recut.onclick = async () => { await api("POST", `/projects/${p.id}/recut`, { options: { max_pause: +$("#max-pause").value } }); load().then(render); };
+  document.querySelectorAll(".stylecard input").forEach((i) => (i.onchange = () => { document.querySelectorAll(".stylecard").forEach((c) => c.classList.remove("on")); i.closest(".stylecard").classList.add("on"); }));
   document.querySelectorAll(".chip input").forEach((i) => (i.onchange = () => { if (i.type === "radio") i.closest(".choices").querySelectorAll(".chip").forEach((c) => c.classList.remove("on")); i.closest(".chip").classList.toggle("on", i.checked); }));
   const rb = $("#render"); if (rb) rb.onclick = async () => {
     const presets = [...document.querySelectorAll('input[name=preset]:checked')].map((i) => i.value);
     const caption_style = $('input[name=cstyle]:checked')?.value;
-    try { await api("POST", `/projects/${p.id}/render`, { presets, caption_style, hook: { text: $("#hook").value.trim(), seconds: 3 }, focus_x: +$("#focus").value }); toast("render शुरू"); load().then(render); }
+    const useColors = $("#cap-usecolors")?.checked;
+    const captions = { size_scale: +($("#cap-size")?.value || 1), position: $("#cap-pos")?.value || "", font: $("#cap-font")?.value || "",
+      primary: useColors ? $("#cap-primary").value : "", highlight: useColors ? $("#cap-highlight").value : "" };
+    try { await api("POST", `/projects/${p.id}/render`, { presets, caption_style, captions, hook: { text: $("#hook").value.trim(), seconds: 3 }, focus_x: +$("#focus").value }); toast("render शुरू"); load().then(render); }
     catch (err) { toast(err.message); }
   };
   const ap = $("#approve"); if (ap) ap.onclick = async () => { if (confirm("यह वीडियो मंज़ूर करें? इसके बाद download/publish किया जा सकेगा।")) { await api("POST", `/projects/${p.id}/approve`); toast("मंज़ूर"); load().then(render); } };

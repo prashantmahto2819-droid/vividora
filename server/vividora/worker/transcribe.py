@@ -36,6 +36,7 @@ def transcribe_file(audio: Path, *, language: str = "hi", on_progress: ProgressF
         vad_filter=True, vad_parameters={"min_silence_duration_ms": 400},
         beam_size=int(os.getenv("WHISPER_BEAM", "5")), condition_on_previous_text=False,
         initial_prompt=os.getenv("WHISPER_PROMPT") or None,
+        language_detection_segments=3,
     )
     total = float(info.duration or 0) or 1.0
     out_segs = []

@@ -1,0 +1,22 @@
+{
+  "id": "minimal",
+  "label": "मिनिमल",
+  "description": "छोटे, पतले अक्षर नीचे — documentary जैसा",
+  "mode": "line",
+  "font": "Hind",
+  "bold": false,
+  "size": 0.042,
+  "primary": "#F5F5F5",
+  "highlight": "#F5F5F5",
+  "outline_color": "#000000",
+  "outline": 0.0025,
+  "shadow": 0.0015,
+  "box": "line",
+  "box_color": "#000000",
+  "box_alpha": 0.4,
+  "max_words": 9,
+  "max_chars": 32,
+  "max_lines": 2,
+  "fade": 120,
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
+}

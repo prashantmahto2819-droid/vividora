@@ -1,0 +1,20 @@
+{
+  "id": "wordbox-green",
+  "label": "वर्ड बॉक्स हरा",
+  "description": "बोला जा रहा शब्द हरे बॉक्स में",
+  "mode": "wordbox",
+  "font": "Poppins",
+  "bold": true,
+  "size": 0.072,
+  "primary": "#FFFFFF",
+  "highlight": "#0B1A0B",
+  "outline_color": "#000000",
+  "outline": 0.005,
+  "shadow": 0.002,
+  "box": "word",
+  "box_color": "#22C55E",
+  "max_words": 4,
+  "max_chars": 18,
+  "max_lines": 2,
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
+}

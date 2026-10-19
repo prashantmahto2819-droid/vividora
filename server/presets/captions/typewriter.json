@@ -1,0 +1,18 @@
+{
+  "id": "typewriter",
+  "label": "टाइपराइटर",
+  "description": "शब्द एक-एक करके जुड़ते हैं",
+  "mode": "typewriter",
+  "font": "Mukta",
+  "bold": true,
+  "size": 0.064,
+  "primary": "#FFFFFF",
+  "highlight": "#FFD400",
+  "outline_color": "#000000",
+  "outline": 0.0055,
+  "shadow": 0.002,
+  "max_words": 5,
+  "max_chars": 22,
+  "max_lines": 2,
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
+}

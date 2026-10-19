@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import ffmpeg
 from .autocut import keep_segments, remap_words, words_of
-from .captions import build_ass, build_srt
+from .captions import build_ass, build_srt, resolve_style
 from .ffmpeg import ProgressFn
 
 FONTS_DIR = Path(__file__).resolve().parent.parent.parent / "fonts"
@@ -46,6 +46,7 @@ def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: flo
 def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript: dict | None,
            preset: dict, style: dict | None, out_dir: Path, name: str, hook: dict | None = None,
            focus_x: float = 0.5, focus_y: float = 0.5, burn_captions: bool | None = None,
+           caption_overrides: dict | None = None,
            encoder_preset: str | None = None, on_progress: ProgressFn | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     w, h = int(preset["width"]), int(preset["height"])
@@ -61,6 +62,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     new_dur = sum(b - a for a, b in keep)
 
     words = remap_words(words_of(transcript), keep) if transcript else []
+    style = resolve_style(style, caption_overrides) if style else style
     burn = preset.get("burn_captions", True) if burn_captions is None else burn_captions
     work = out_dir / f".{name}"
     work.mkdir(exist_ok=True)

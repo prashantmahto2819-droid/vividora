@@ -76,6 +76,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 out_dir=tmp / "out", name=preset["id"], hook=p.get("hook"),
                 focus_x=float(p.get("focus_x", 0.5)), focus_y=float(p.get("focus_y", 0.5)),
                 burn_captions=p.get("burn_captions"),
+                caption_overrides=p.get("captions"),
                 encoder_preset=os.getenv("X264_PRESET") or None,
                 on_progress=_progress(client, job["id"]),
             )

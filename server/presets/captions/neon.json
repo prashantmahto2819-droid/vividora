@@ -1,0 +1,19 @@
+{
+  "id": "neon",
+  "label": "नियॉन",
+  "description": "चमकती cyan आउटलाइन, नीली रोशनी",
+  "mode": "karaoke",
+  "font": "Poppins",
+  "bold": true,
+  "size": 0.07,
+  "primary": "#FFFFFF",
+  "highlight": "#00F0FF",
+  "outline_color": "#0066FF",
+  "outline": 0.0045,
+  "shadow": 0,
+  "glow": 0.0025,
+  "max_words": 4,
+  "max_chars": 18,
+  "max_lines": 2,
+  "size_note": "size, outline, shadow, glow are fractions of the short side of the frame"
+}

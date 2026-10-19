@@ -18,6 +18,7 @@ from .engine.presets import caption_styles, platforms
 DEFAULT_RENDER = {
     "presets": ["yt-long", "yt-short"],
     "caption_style": "karaoke",
+    "captions": {"size_scale": 1.0, "position": "", "primary": "", "highlight": "", "font": ""},
     "burn_captions": True,
     "focus_x": 0.5,
     "focus_y": 0.5,
@@ -105,7 +106,11 @@ def after_job(c, job: dict, result: dict) -> None:
             set_status(c, pid, "review_cuts", "कोई आवाज़ नहीं मिली — सीधे render करें")
 
     elif kind == "transcribe":
-        db.update(c, "projects", pid, {"transcript": result.get("transcript"), "updated_at": db.now()})
+        tr = result.get("transcript") or {}
+        changes = {"transcript": tr, "updated_at": db.now()}
+        if tr.get("language"):
+            changes["language"] = tr["language"]  # detected when the project was set to auto
+        db.update(c, "projects", pid, changes)
         set_status(c, pid, "cutting", "कट ढूँढे जा रहे हैं")
         queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {})})
 
