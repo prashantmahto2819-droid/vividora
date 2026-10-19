@@ -40,6 +40,16 @@ def _progress(client: ApiClient, job_id: str):
     return cb
 
 
+def _is_image(p: Path) -> bool:
+    """Library files are downloaded without an extension — sniff the header."""
+    try:
+        head = p.open("rb").read(16)
+    except OSError:
+        return False
+    return (head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff" or head[:4] == b"GIF8"
+            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
+
+
 def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets: list[dict] | None = None) -> dict:
     """Download library items the render refers to; replace ids with local paths."""
     e = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
@@ -81,8 +91,8 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
             if isinstance(item, dict) and item.get("id"):
                 p = fetch(item["id"])
                 if p:
-                    kind = "image" if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif") else "video"
-                    out.append({**item, "path": str(p), "type": item.get("type") or kind})
+                    kind = "image" if (p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif") or _is_image(p)) else "video"
+                    out.append({**item, "path": str(p), "type": kind})
         e[key] = out
     return e
 
@@ -181,7 +191,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             clips = []
             for item in p.get("clips") or []:
                 path = client.download_library(item["id"], lib / item["id"])
-                kind_ = "image" if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") else "video"
+                kind_ = "image" if (path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") or _is_image(path)) else "video"
                 clips.append({"path": path, "type": kind_, "duration": item.get("duration")})
             music = client.download_library(p["music"], lib / p["music"])
             wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None

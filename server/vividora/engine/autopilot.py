@@ -78,7 +78,7 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
     if cta and out_dur > 8 and brand.get("cta_popup", True):
         at = max(2.0, out_dur * (0.72 if not is_short_source else 0.82))
         effects["broll"].append({"_id": "ap_cta", "id": cta, "start": round(at, 2), "end": round(min(out_dur, at + 2.8), 2),
-                                 "fit": "free", "x": 0.5, "y": 0.78, "scale": 0.55, "opacity": 1, "rotate": 0, "anim": "pop"})
+                                 "fit": "free", "x": 0.5, "y": 0.6, "scale": 0.6, "opacity": 1, "rotate": 0, "anim": "pop"})
         if sfx.get("pop"):
             effects["sfx"].append({"_id": "ap_pop", "id": sfx["pop"], "at": round(at, 2), "volume": 0.7})
     if hook and sfx.get("whoosh"):
@@ -86,7 +86,7 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
     if not is_short_source and out_dur > 40 and brand.get("cta_popup", True):
         bell = find(["like sub bell"])
         if bell:
-            effects["broll"].append({"_id": "ap_bell", "id": bell, "start": 6.0, "end": 9.0, "fit": "free", "x": 0.5, "y": 0.86,
+            effects["broll"].append({"_id": "ap_bell", "id": bell, "start": 6.0, "end": 9.0, "fit": "free", "x": 0.5, "y": 0.62,
                                      "scale": 0.7, "opacity": 1, "rotate": 0, "anim": "slide_up"})
     effects["zoom"]["mode"] = "punch" if is_short_source else "push"
     presets = ["yt-short", "ig-reel", "fb-reel"] if is_short_source else ["yt-long", "yt-short"]
