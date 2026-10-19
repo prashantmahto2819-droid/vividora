@@ -32,7 +32,7 @@ def transcribe_file(audio: Path, *, language: str = "hi", on_progress: ProgressF
                          cpu_threads=int(os.getenv("WHISPER_THREADS", "0") or 0),
                          download_root=os.getenv("WHISPER_CACHE") or None)
     segments, info = model.transcribe(
-        str(audio), language=None if language == "auto" else language, word_timestamps=True,
+        _load_wav(audio), language=None if language == "auto" else language, word_timestamps=True,
         vad_filter=True, vad_parameters={"min_silence_duration_ms": 400},
         beam_size=int(os.getenv("WHISPER_BEAM", "5")), condition_on_previous_text=False,
         initial_prompt=os.getenv("WHISPER_PROMPT") or None,
@@ -48,6 +48,21 @@ def transcribe_file(audio: Path, *, language: str = "hi", on_progress: ProgressF
             on_progress(min(0.98, 0.05 + 0.93 * s.end / total), f"{int(s.end)}s / {int(total)}s")
     return {"language": info.language, "model": model_name,
             "text": " ".join(s["text"] for s in out_segs), "segments": out_segs}
+
+
+def _load_wav(path: Path):
+    """Read a 16 kHz mono PCM WAV (what prepare.py writes) as float32 samples.
+
+    Passing an array skips faster-whisper's PyAV decoder, whose API keeps
+    changing between releases."""
+    import wave
+    import numpy as np
+
+    with wave.open(str(path), "rb") as w:
+        if w.getframerate() != 16000 or w.getnchannels() != 1 or w.getsampwidth() != 2:
+            raise ValueError("audio_asr must be 16 kHz mono 16-bit PCM")
+        frames = w.readframes(w.getnframes())
+    return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
 
 
 def _stub(audio: Path) -> dict:
