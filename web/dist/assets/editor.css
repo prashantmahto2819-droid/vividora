@@ -155,3 +155,13 @@
 .clipmark span { position: absolute; top: 0; left: 3px; font-size: .6rem; color: var(--ed-accent); background: rgba(15,19,25,.8); padding: 0 3px; border-radius: 3px; white-space: nowrap; }
 .plist.caps li { padding: .25rem .2rem; } .plist.caps input { flex: 1; font-size: .8rem; }
 .plist.refs li { align-items: flex-start; }
+.fxgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .45rem; }
+.fxcard { background: var(--ed-bg); border: 1px solid var(--ed-line); border-radius: 8px; padding: 0; cursor: pointer; color: var(--text); overflow: hidden; text-align: center; }
+.fxcard img, .fxcard i { display: block; width: 100%; aspect-ratio: 16/10; object-fit: cover; background: linear-gradient(135deg, #2b3b55, #4a2b55); }
+.fxcard span { display: block; font-size: .7rem; padding: .2rem .2rem 0; } .fxcard small { display: block; font-size: .6rem; color: var(--muted); padding-bottom: .25rem; min-height: .9rem; }
+.fxcard:hover { border-color: var(--ed-accent); }
+.fxp { display: grid; grid-template-columns: 90px 1fr 42px; align-items: center; gap: .4rem; margin: .15rem 0; } .fxp b { text-align: right; font-size: .75rem; color: var(--text); }
+.fxp.grade { grid-template-columns: 100px 1fr 46px; }
+.fxstack li { flex-direction: column; align-items: stretch; }
+.seg.wrap { display: flex; }
+.wave { position: absolute; left: 0; top: 0; pointer-events: none; }

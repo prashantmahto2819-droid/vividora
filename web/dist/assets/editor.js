@@ -18,6 +18,9 @@ const ICON = {
   audio: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
   overlay: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>',
   montage: '<svg viewBox="0 0 24 24"><path d="M4 18V8M9 18V4M14 18v-8M19 18v-5"/><path d="M3 21h18"/></svg>',
+  color: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 010 18c-2.5 0-3-2-1.5-3.5S13 15 11 13s-4-3-2.5-5S12 3 12 3z"/></svg>',
+  undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg>',
+  redo: '<svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/></svg>',
   refs: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>',
   shorts: '<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg>',
   export: '<svg viewBox="0 0 24 24"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>',
@@ -29,7 +32,7 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
-const TABS_ALL = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["refs", "Refs"]];
+const TABS_ALL = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["color", "Color"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["refs", "Refs"]];
 const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
 const TITLE_PRESETS = [
@@ -48,7 +51,7 @@ export function mount(root, project, ctx) {
   if (E && E.pid === project.id && root.contains(E.root)) { update(project); return; }
   unmount();
   const rs = JSON.parse(JSON.stringify(project.render_defaults || {}));
-  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, transition: "none", extras: [], music: { id: "", volume: 0.18, duck: true },
+  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, transition: "none", extras: [], grade: {}, grade_preset: "", stack: [], music: { id: "", volume: 0.18, duck: true },
     broll: [], titles: [], watermark: { id: "", opacity: 0.75, size: 0.14, pos: "tr" }, sfx: [], ...(rs.effects || {}) };
   if (rs.effects.flash && (!rs.effects.transition || rs.effects.transition === "none")) rs.effects.transition = "flash";
   rs.captions = { size_scale: 1, position: "", primary: "", highlight: "", font: "", italic: "", uppercase: "", letter_spacing: "", outline_scale: "", shadow_scale: "", outline_color: "", ...(rs.captions || {}) };
@@ -64,6 +67,7 @@ export function mount(root, project, ctx) {
   E.montage = project.kind === "montage";
   TABS = E.montage ? TABS_MONTAGE : TABS_ALL;
   if (E.montage) { E.tab = "montage"; E.mo = { clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); }
+  E.hist = []; E.redo = [];
   E.dur = project.edl?.duration || project.meta?.duration || 1;
   E.pps = clamp(Math.floor(900 / E.dur), 6, 120);
   root.innerHTML = skeleton();
@@ -116,6 +120,7 @@ function skeleton() {
       <a class="ibtn" href="#/" title="सभी projects">${ICON.back}</a>
       <div class="ed-title"><span id="ed-name" ${E.canEdit ? 'contenteditable="true" spellcheck="false"' : ""}>${esc(E.p.title)}</span><span id="ed-status" class="small muted"></span></div>
       <div class="ed-top-right">
+        <button class="ibtn" id="ed-undo" title="Undo (Ctrl+Z)" disabled>${ICON.undo}</button><button class="ibtn" id="ed-redo" title="Redo (Ctrl+Y)" disabled>${ICON.redo}</button>
         <span id="ed-save" class="small muted"></span>
         <div class="seg" id="ratio"><button data-r="9:16" class="on">9:16</button><button data-r="16:9">16:9</button><button data-r="1:1">1:1</button></div>
         <button class="btn primary" id="ed-export">${ICON.export} Export</button>
@@ -181,6 +186,8 @@ function bindStatic() {
   $$(".ed-tabs button", E.root).forEach((b) => (b.onclick = () => { E.tab = b.dataset.tab; $$(".ed-tabs button", E.root).forEach((x) => x.classList.toggle("on", x === b)); renderPanel(); }));
   $$("#ratio button", E.root).forEach((b) => (b.onclick = () => { E.ratio = b.dataset.r; $$("#ratio button", E.root).forEach((x) => x.classList.toggle("on", x === b)); layoutFrame(); renderOverlay(); }));
   $("#ed-export", E.root).onclick = () => { E.exportOpen = true; renderExport(); };
+  $("#ed-undo", E.root).onclick = undo; $("#ed-redo", E.root).onclick = redo;
+  E.last = snapshot();
   const name = $("#ed-name", E.root);
   if (name.isContentEditable) name.onblur = async () => { const t = name.textContent.trim(); if (t && t !== E.p.title) { await api("PATCH", `/projects/${E.pid}`, { title: t }); toast("नाम बदला"); E.p.title = t; } };
   const v = $("#pv", E.root);
@@ -211,6 +218,8 @@ function onKey(e) {
   else if (e.key === "Delete" || e.key === "Backspace") { if (E.sel) { e.preventDefault(); deleteSel(); } }
   else if (e.key === "x" || e.key === "X") addCutFromMarks();
   else if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(true); }
+  else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); undo(); }
+  else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); redo(); }
   else if (e.key === "Escape") { if (E.exportOpen) { E.exportOpen = false; renderExport(); } else select(null); }
   else if (e.key === "Home") seek(0);
   else if (e.key === "End") seek(E.dur);
@@ -258,7 +267,22 @@ function layoutFrame() {
   mask.style.cssText = `left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;box-shadow:0 0 0 9999px rgba(10,13,18,.72)`;
   safe.style.cssText = `left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;display:${E.ratio === "9:16" ? "block" : "none"}`;
   $("#ovl", E.root).style.cssText = `left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px`;
-  v.style.filter = LOOK_CSS[E.rs.effects.look] || "";
+  v.style.filter = E.bypass ? "" : [LOOK_CSS[E.rs.effects.look] || "", gradeCss(E.rs.effects.grade), stackCss(E.rs.effects.stack)].filter(Boolean).join(" ");
+}
+const GRADE_DEF = () => Object.fromEntries((E.ctx.S.presets?.catalog?.grade_params || []).map((p) => [p.name, p.default]));
+function gradeCss(g) {
+  if (!g || !Object.keys(g).length) return "";
+  const v = { ...GRADE_DEF(), ...Object.fromEntries(Object.entries(g).filter(([k, x]) => x !== "" && x != null).map(([k, x]) => [k, +x])) };
+  const css = [`brightness(${(1 + v.exposure * 0.35 + v.whites * 0.08 - v.blacks * 0.05).toFixed(3)})`, `contrast(${(1 + v.contrast * 0.6 - v.fade * 0.25 - v.shadows * 0.1).toFixed(3)})`, `saturate(${Math.max(0, 1 + v.saturation + v.vibrance * 0.6).toFixed(3)})`];
+  if (v.hue) css.push(`hue-rotate(${v.hue}deg)`);
+  if (v.temperature > 0) css.push(`sepia(${(v.temperature * 0.35).toFixed(3)})`); else if (v.temperature < 0) css.push(`hue-rotate(${Math.round(v.temperature * 12)}deg)`);
+  return css.join(" ");
+}
+function fxDef(id) { return (E.ctx.S.presets?.catalog?.effects || []).find((e) => e.id === id); }
+function fxParams(def, given) { const o = {}; for (const p of def.params || []) { let v = given?.[p.name] ?? p.default; if (p.type !== "color") v = Math.max(p.min, Math.min(p.max, +v || 0)); o[p.name] = v; } return o; }
+function stackCss(stack) {
+  return (stack || []).filter((it) => it.enabled !== false).map((it) => { const d = fxDef(it.id); if (!d || d.preview !== "css" || !d.css) return ""; const pr = fxParams(d, it.params);
+    return d.css.replace(/\{(\w+)(?::([\w.]+))?\}/g, (m, k, mode) => { let v = pr[k]; if (mode && /^px/.test(mode)) return (v * +mode.slice(2)) + "px"; if (mode && /^n/.test(mode)) return v * +mode.slice(1); return v; }); }).filter(Boolean).join(" ");
 }
 function captionChunks() {
   const cs = styleOf(); if (!cs || !E.words.length) return [];
@@ -352,7 +376,15 @@ function deleteSel() {
   else return;
   touch(); select(null);
 }
-function touch() { E.dirty = true; $("#ed-save", E.root).textContent = "बदलाव सेव हो रहे…"; clearTimeout(E.saveT); E.saveT = setTimeout(() => save(false), 1500); renderTimeline(); renderOverlay(); }
+function snapshot() { return JSON.stringify({ rs: E.rs, cuts: E.cuts, shorts: E.shorts }); }
+function restore(snap) { const o = JSON.parse(snap); E.rs = o.rs; E.cuts = o.cuts; E.shorts = o.shorts; E.shortsDirty = true; E.sel = null; E.last = snap; E.dirty = true; clearTimeout(E.saveT); E.saveT = setTimeout(() => save(false), 800); renderPanel(); renderInspector(); renderTimeline(); layoutFrame(); renderOverlay(); updateHistoryButtons(); }
+function updateHistoryButtons() { const u = $("#ed-undo", E.root), r = $("#ed-redo", E.root); if (u) u.disabled = !E.hist.length; if (r) r.disabled = !E.redo.length; }
+function undo() { if (!E.hist.length) return; E.redo.push(snapshot()); restore(E.hist.pop()); }
+function redo() { if (!E.redo.length) return; E.hist.push(snapshot()); restore(E.redo.pop()); }
+function touch() {
+  const now = snapshot(); if (E.last == null) E.last = now;
+  if (now !== E.last) { clearTimeout(E.histT); if (!E.histPending) { E.histPending = E.last; } E.histT = setTimeout(() => { if (E.histPending != null && E.histPending !== snapshot()) { E.hist.push(E.histPending); if (E.hist.length > 60) E.hist.shift(); E.redo = []; updateHistoryButtons(); } E.histPending = null; }, 400); E.last = now; }
+  E.dirty = true; $("#ed-save", E.root).textContent = "बदलाव सेव हो रहे…"; clearTimeout(E.saveT); E.saveT = setTimeout(() => save(false), 1500); renderTimeline(); renderOverlay(); }
 async function save(loud) {
   if (!E || !E.canEdit) return;
   const { api, toast } = E.ctx;
@@ -544,16 +576,31 @@ function renderPanel() {
         <label class="chk small"><input type="checkbox" id="sh-face" ${E.rs.face_track !== "off" ? "checked" : ""} ${dis}> चेहरा track करें</label></div>
         <button class="btn primary" id="sh-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.shorts.filter((x) => x.selected !== false).length} Shorts render करें</button></div>` : ""}`;
   } else if (t === "effects") {
-    const looks = S.presets?.looks || Object.keys(LOOK_CSS).map((id) => ({ id, label: id }));
+    const cat = S.presets?.catalog || { categories: {}, effects: [] }; const q = (E.fxq || "").toLowerCase(); const fc = E.fxcat || "";
+    const looks = S.presets?.looks || [];
     const thumb = (E.p.assets.find((a) => a.kind === "thumb") || {}).url;
-    h = `<div class="ph"><h3>Effects</h3></div>
-      <div class="box"><label class="chk"><input type="checkbox" id="fx-zoom" ${fx.zoom.enabled ? "checked" : ""} ${dis}> <b>Auto zoom / punch-in</b></label><p class="small muted">हर कट पर हल्का zoom — jump cut की जगह deliberate लगता है।</p>
+    const list = cat.effects.filter((e) => (!fc || e.cat === fc) && (!q || e.label.toLowerCase().includes(q) || (e.tags || []).some((tg) => tg.includes(q)) || e.id.includes(q)));
+    const stack = fx.stack || [];
+    h = `<div class="ph"><h3>Effects</h3><span class="small muted">${stack.length} लगे</span></div>
+      <div class="box"><label class="chk"><input type="checkbox" id="fx-zoom" ${fx.zoom.enabled ? "checked" : ""} ${dis}> <b>Auto zoom / punch-in</b></label>
         ${field("कितना", `<input type="range" id="fx-zoom-str" min="0.3" max="2" step="0.1" value="${fx.zoom.strength}" ${dis}>`)}</div>
-      <div class="box"><b>Transition (हर कट पर)</b><p class="small muted">default यहाँ; किसी एक कट के लिए अलग — timeline पर कट चुनकर inspector में।</p>
-        <div class="trgrid">${(S.presets?.transitions || []).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-${t.id}"></i>${esc(t.label)}</button>`).join("")}</div></div>
-      <div class="box"><b>Extras</b><div class="irow" style="flex-wrap:wrap">${(S.presets?.extras || []).map((x) => `<label class="chk small"><input type="checkbox" data-extra="${x.id}" ${(fx.extras || []).includes(x.id) ? "checked" : ""} ${dis}> ${esc(x.label)}</label>`).join("")}</div></div>
-      <h4>Color look</h4><div class="looks">${looks.map((l) => `<button class="look ${fx.look === l.id ? "on" : ""}" data-look="${l.id}" ${dis}>${thumb ? `<img src="${thumb}" style="filter:${LOOK_CSS[l.id] || ""}" alt="">` : `<i style="filter:${LOOK_CSS[l.id] || ""}"></i>`}<small>${esc(l.label)}</small></button>`).join("")}</div>
-      <p class="small muted">LUT फ़ाइल (.cube) Overlay → LUT से लगाएँ।</p>`;
+      <div class="box"><b>Transition (हर कट पर)</b><div class="trgrid">${(S.presets?.transitions || []).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-${t.id}"></i>${esc(t.label)}</button>`).join("")}</div><p class="small muted">एक कट के लिए अलग: timeline पर कट चुनें → inspector।</p></div>
+      ${stack.length ? `<h4>लगे हुए effects (ऊपर से नीचे)</h4><ul class="plist fxstack">${stack.map((it, i) => { const d = fxDef(it.id); if (!d) return ""; const pr = fxParams(d, it.params);
+        return `<li class="${it.enabled === false ? "off" : ""}" data-fxi="${i}"><div class="grow"><div class="row between"><label class="chk small"><input type="checkbox" data-fxon="${i}" ${it.enabled === false ? "" : "checked"} ${dis}> <b>${esc(d.label)}</b> <span class="tag">${d.preview === "css" ? "preview ≈" : "सिर्फ़ render में"}</span></label><span class="row" style="gap:0"><button class="ibtn" data-fxup="${i}" title="ऊपर">↑</button><button class="ibtn" data-fxdown="${i}" title="नीचे">↓</button><button class="ibtn" data-fxdel="${i}">${ICON.trash}</button></span></div>
+        ${(d.params || []).map((p) => p.type === "color" ? `<label class="small muted">${esc(p.label)} <input type="color" data-fxp="${i}:${p.name}" value="${pr[p.name]}" ${dis}></label>` : `<label class="small muted fxp"><span>${esc(p.label)}</span><input type="range" data-fxp="${i}:${p.name}" min="${p.min}" max="${p.max}" step="${p.step || 1}" value="${pr[p.name]}" ${dis}><b>${pr[p.name]}</b></label>`).join("")}</div></li>`; }).join("")}</ul>` : ""}
+      <h4>Catalog</h4><div class="irow"><input id="fx-q" placeholder="खोजें… glitch, blur, film" value="${esc(E.fxq || "")}" style="flex:1"></div>
+      <div class="seg wrap" style="flex-wrap:wrap;margin:.4rem 0"><button data-fxcat="" class="${!fc ? "on" : ""}">सब</button>${Object.entries(cat.categories).map(([k, v]) => `<button data-fxcat="${k}" class="${fc === k ? "on" : ""}">${esc(v)}</button>`).join("")}</div>
+      <div class="fxgrid">${list.map((e) => `<button class="fxcard" data-fxadd="${e.id}" title="${esc((e.tags || []).join(", "))}" ${dis}>${thumb ? `<img src="${thumb}" alt="" style="filter:${e.preview === "css" && e.css ? stackCss([{ id: e.id }]) : ""}">` : `<i></i>`}<span>${esc(e.label)}</span><small>${e.preview === "css" ? "" : "render only"}</small></button>`).join("") || `<p class="small muted">कुछ नहीं मिला</p>`}</div>
+      <h4>Quick looks</h4><div class="looks">${looks.map((l) => `<button class="look ${fx.look === l.id ? "on" : ""}" data-look="${l.id}" ${dis}>${thumb ? `<img src="${thumb}" style="filter:${LOOK_CSS[l.id] || ""}" alt="">` : `<i style="filter:${LOOK_CSS[l.id] || ""}"></i>`}<small>${esc(l.label)}</small></button>`).join("")}</div>
+      <div class="box"><b>Extras</b><div class="irow" style="flex-wrap:wrap">${(S.presets?.extras || []).map((x) => `<label class="chk small"><input type="checkbox" data-extra="${x.id}" ${(fx.extras || []).includes(x.id) ? "checked" : ""} ${dis}> ${esc(x.label)}</label>`).join("")}</div></div>`;
+  } else if (t === "color") {
+    const cat = S.presets?.catalog || { grade_params: [], grade_presets: {} }; const g = fx.grade || {}; const def = GRADE_DEF();
+    const thumb = (E.p.assets.find((a) => a.kind === "thumb") || {}).url;
+    h = `<div class="ph"><h3>Color</h3><span class="row" style="gap:.3rem"><button class="btn small quiet" id="gr-ab" title="दबाए रखें = original">A/B</button><button class="btn small quiet" id="gr-copy">copy</button><button class="btn small quiet" id="gr-paste">paste</button><button class="btn small quiet" id="gr-reset">reset</button></span></div>
+      <h4>Presets (editable)</h4><div class="looks">${Object.entries(cat.grade_presets).map(([k, p]) => `<button class="look ${fx.grade_preset === k ? "on" : ""}" data-gpre="${k}" ${dis}>${thumb ? `<img src="${thumb}" style="filter:${gradeCss(p)}" alt="">` : `<i></i>`}<small>${esc(p.label)}</small></button>`).join("")}</div>
+      <h4>Adjust</h4>${cat.grade_params.map((p) => `<label class="small muted fxp grade"><span>${esc(p.label)}</span><input type="range" data-g="${p.name}" min="${p.min}" max="${p.max}" step="${p.step}" value="${g[p.name] ?? p.default}" ${dis}><b>${(+(g[p.name] ?? p.default)).toFixed(2).replace(/\.?0+$/, "")}</b></label>`).join("")}
+      <p class="small muted">preview में अनुमान (CSS); असली grade render में ffmpeg से — exposure, curves, colortemperature, vibrance, hue, vignette, unsharp।</p>
+      <h4>LUT</h4><p class="small muted">अपनी .cube LUT Overlay → LUT tab से लगाएँ; grade उसके बाद लगता है। ${fx.look?.startsWith("lut:") ? `<b>अभी: ${esc(libItem(fx.look.slice(4))?.name || "LUT")}</b>` : ""}</p>`;
   }
   panel.innerHTML = h;
   bindPanel();
@@ -636,6 +683,22 @@ function bindPanel() {
   // effects
   on("#fx-zoom", "onchange", (e) => { fx.zoom.enabled = e.target.checked; touch(); });
   on("#fx-zoom-str", "oninput", (e) => { fx.zoom.strength = +e.target.value; touch(); });
+  on("#fx-q", "oninput", (e) => { E.fxq = e.target.value; const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; $("#fx-q", panel).focus(); const v = $("#fx-q", panel); v.setSelectionRange(v.value.length, v.value.length); });
+  $$("[data-fxcat]", panel).forEach((b) => (b.onclick = () => { E.fxcat = b.dataset.fxcat; renderPanel(); }));
+  $$("[data-fxadd]", panel).forEach((b) => (b.onclick = () => { fx.stack = fx.stack || []; if (fx.stack.length >= 8) return toast("एक साथ 8 effects तक"); fx.stack.push({ id: b.dataset.fxadd, params: {}, enabled: true }); touch(); layoutFrame(); renderPanel(); panel.scrollTop = 0; }));
+  $$("[data-fxon]", panel).forEach((cb) => (cb.onchange = () => { fx.stack[+cb.dataset.fxon].enabled = cb.checked; touch(); layoutFrame(); renderPanel(); }));
+  $$("[data-fxdel]", panel).forEach((b) => (b.onclick = () => { fx.stack.splice(+b.dataset.fxdel, 1); touch(); layoutFrame(); renderPanel(); }));
+  $$("[data-fxup]", panel).forEach((b) => (b.onclick = () => { const i = +b.dataset.fxup; if (i > 0) { [fx.stack[i - 1], fx.stack[i]] = [fx.stack[i], fx.stack[i - 1]]; touch(); renderPanel(); } }));
+  $$("[data-fxdown]", panel).forEach((b) => (b.onclick = () => { const i = +b.dataset.fxdown; if (i < fx.stack.length - 1) { [fx.stack[i + 1], fx.stack[i]] = [fx.stack[i], fx.stack[i + 1]]; touch(); renderPanel(); } }));
+  $$("[data-fxp]", panel).forEach((inp) => (inp.oninput = () => { const [i, k] = inp.dataset.fxp.split(":"); const it = fx.stack[+i]; it.params = it.params || {}; it.params[k] = inp.type === "color" ? inp.value : +inp.value; const b = inp.parentElement.querySelector("b"); if (b) b.textContent = inp.value; touch(); layoutFrame(); }));
+  // color
+  const setGrade = (name, val) => { fx.grade = fx.grade || {}; fx.grade[name] = val; fx.grade_preset = ""; touch(); layoutFrame(); };
+  $$("[data-g]", panel).forEach((inp) => (inp.oninput = () => { setGrade(inp.dataset.g, +inp.value); inp.parentElement.querySelector("b").textContent = (+inp.value).toFixed(2).replace(/\.?0+$/, ""); $$(".look", panel).forEach((x) => x.classList.remove("on")); }));
+  $$("[data-gpre]", panel).forEach((b) => (b.onclick = () => { const p = S.presets.catalog.grade_presets[b.dataset.gpre]; fx.grade = Object.fromEntries(Object.entries(p).filter(([k]) => k !== "label")); fx.grade_preset = b.dataset.gpre; touch(); layoutFrame(); renderPanel(); }));
+  on("#gr-reset", "onclick", () => { fx.grade = {}; fx.grade_preset = ""; touch(); layoutFrame(); renderPanel(); });
+  on("#gr-copy", "onclick", () => { try { localStorage.setItem("vividora_grade", JSON.stringify(fx.grade || {})); toast("grade copy हुआ"); } catch {} });
+  on("#gr-paste", "onclick", () => { try { const g = JSON.parse(localStorage.getItem("vividora_grade") || "{}"); fx.grade = g; fx.grade_preset = ""; touch(); layoutFrame(); renderPanel(); } catch {} });
+  const ab = $("#gr-ab", panel); if (ab) { ab.onmousedown = () => { E.bypass = true; layoutFrame(); }; ab.onmouseup = ab.onmouseleave = () => { E.bypass = false; layoutFrame(); }; }
   $$("[data-tr]", panel).forEach((b) => (b.onclick = () => { fx.transition = b.dataset.tr; fx.flash = false; $$(".trbtn", panel).forEach((x) => x.classList.toggle("on", x === b)); touch(); }));
   $$("[data-extra]", panel).forEach((cb) => (cb.onchange = () => { fx.extras = $$("[data-extra]:checked", panel).map((x) => x.dataset.extra); touch(); }));
   $$("[data-look]", panel).forEach((b) => (b.onclick = () => { fx.look = b.dataset.look; $$(".look", panel).forEach((x) => x.classList.toggle("on", x === b)); layoutFrame(); touch(); }));
@@ -694,11 +757,14 @@ function renderTimeline() {
   const audio = (fx.music.id ? `<div class="itm music ${sel("music", "m")}" data-item="music:m" style="left:0;width:${(E.dur * pps).toFixed(1)}px"><span>♪ ${esc(libItem(fx.music.id)?.name || "music")} · ${Math.round(fx.music.volume * 100)}%${fx.music.duck !== false ? " · duck" : ""}</span></div>` : "")
     + fx.sfx.map((s) => `<div class="itm sfx ${sel("sfx", s._id)}" data-item="sfx:${s._id}" style="left:${OX(s.at)}px;width:${Math.max(14, 0.6 * pps).toFixed(1)}px" title="${esc(libItem(s.id)?.name || "sfx")}"><span>${esc(libItem(s.id)?.name || "sfx")}</span></div>`).join("");
   const shortsRow = E.shorts.map((sc) => `<div class="itm short ${sc.selected === false ? "off" : ""} ${sel("short", sc.id)}" data-item="short:${sc.id}" style="left:${X(sc.start)}px;width:${Math.max(8, (sc.end - sc.start) * pps).toFixed(1)}px"><i class="h l"></i><span>${esc(sc.title || sc.id)} · ${(sc.end - sc.start).toFixed(0)}s</span><i class="h r"></i></div>`).join("");
-  const rows = { video, captions: caps, text, broll, audio, shorts: shortsRow };
+  const peaks = E.p.meta?.peaks || [];
+  const wave = peaks.length ? `<canvas class="wave" width="${Math.ceil(E.dur * pps)}" height="46"></canvas>` : "";
+  const rows = { video, captions: caps, text, broll, audio: wave + audio, shorts: shortsRow };
   labels.innerHTML = `<div class="tl-ruler-l"></div>` + TRACKS.map(([id, l]) => `<div class="tl-l">${l}</div>`).join("");
   body.style.width = W + "px";
   body.innerHTML = `<div class="tl-ruler" id="tl-ruler">${ruler}</div>` + TRACKS.map(([id]) => `<div class="tl-track ${id}" data-track="${id}">${rows[id]}</div>`).join("")
     + `<div class="tl-play" id="tl-play" style="left:${X(E.t)}px"><i></i></div>`;
+  const cv = $(".wave", body); if (cv) { const ctx2 = cv.getContext("2d"); ctx2.fillStyle = "rgba(127,196,138,.45)"; const n = peaks.length; const W2 = cv.width; for (let i = 0; i < n; i++) { const x = i / n * W2, w2 = Math.max(1, W2 / n - 0.5), hh = peaks[i] / 100 * 40; ctx2.fillRect(x, 23 - hh / 2, w2, hh); } }
   bindTimeline();
   $("#tl-info", E.root).textContent = `${fmt(E.dur)} source → ${fmt(outDur())} output · ${E.cuts.filter((c) => c.enabled !== false).length} कट · ${fx.titles.length} text · ${fx.broll.length} B-roll`;
   $("#t-dur", E.root).textContent = fmt(E.dur);

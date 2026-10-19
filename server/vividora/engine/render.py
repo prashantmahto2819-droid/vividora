@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+from . import catalog
 from . import effects as fx
 from . import ffmpeg
 from .autocut import keep_segments, remap_words, words_of
@@ -147,9 +148,15 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     look = fx.look_filter(e.get("look"), Path(e["lut_path"]) if e.get("lut_path") else None)
     if look:
         v += "," + look
+    grade = catalog.grade_filter(e.get("grade"))
+    if grade:
+        v += "," + grade
     extras = fx.extras_filter([x for x in (e.get("extras") or []) if isinstance(x, str)])
     if extras:
         v += "," + extras
+    stack = catalog.stack_filter(e.get("stack"), w, h, fps)
+    if stack:
+        v += "," + stack
     if tr_filters:
         v += "," + tr_filters
     v += "[vbase]"

@@ -20,6 +20,9 @@ DEFAULT_EFFECTS = {
     "look": "none",                                   # colour look id, or lut:<library_id>
     "flash": False,                                   # (legacy) white flash at cuts
     "transition": "none",                             # default per-cut transition: none|flash|dip|punch|whip|glitch|flashpunch
+    "grade": {},                                      # colour grading sliders (engine/catalog.py GRADE_PARAMS)
+    "grade_preset": "",
+    "stack": [],                                      # effects stack [{id, params, enabled}] from engine/catalog.py
     "extras": [],                                     # global extras: vignette, grain, sharpen, mirror, letterbox, shake, soft_glow, fade_in
     "music": {"id": "", "volume": 0.18, "duck": True},
     "broll": [],        # [{id, start, end, fit: cover|pip, pos: tl|tr|bl|br}]

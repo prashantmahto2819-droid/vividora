@@ -31,6 +31,21 @@ def _deepfilter(src_wav: Path, out_wav: Path) -> bool:
     return True
 
 
+def waveform_peaks(wav: Path, duration: float, per_second: int = 20, max_points: int = 6000) -> list[int]:
+    """Compact loudness envelope (0–100) for the timeline, ~20 points per second."""
+    import numpy as np
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(wav), "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+                         capture_output=True).stdout
+    y = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+    if not len(y):
+        return []
+    n = min(max_points, max(1, int(duration * per_second)))
+    chunks = np.array_split(np.abs(y), n)
+    peaks = np.array([c.max() if len(c) else 0 for c in chunks])
+    peaks = np.sqrt(peaks / 32768.0)  # perceptual-ish
+    return [int(round(float(p) * 100)) for p in peaks]
+
+
 def merge(clips: list[Path], out: Path, *, on_progress: ProgressFn | None = None) -> dict:
     """Join several recordings into one file (same size/fps as the largest clip).
     Returns {"path", "boundaries": [{"name", "start", "end"}]}."""
@@ -96,6 +111,10 @@ def prepare(raw: Path, work: Path, *, denoise: bool = True, on_progress: Progres
         ffmpeg.run(["-i", str(raw), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(asr)],
                    label="audio")
         files.append({"kind": "audio_asr", "path": asr, "mime": "audio/wav"})
+        try:
+            info["peaks"] = waveform_peaks(asr, dur)
+        except Exception:  # noqa: BLE001
+            pass
         if report:
             report(0.75, "आवाज़ साफ़ हो रही है")
 
