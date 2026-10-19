@@ -1,5 +1,6 @@
 // Vividora dashboard — plain JS, no build step. Served by the API from web/dist.
 import * as ED from "./editor.js";
+import * as REC from "./record.js";
 
 const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null,
             route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null };
@@ -28,7 +29,7 @@ function logout() { S.token = null; S.user = null; localStorage.removeItem("vivi
 function toast(msg, ms = 2600) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
 
 // ---------- routing ----------
-function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
+function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
 function go(path) { location.hash = path; }
 window.addEventListener("hashchange", () => { S.route = parseRoute(); load().then(render); });
 
@@ -62,6 +63,11 @@ function render() {
   if (!S.token) { ED.unmount(); app.innerHTML = loginView(); bindLogin(); return; }
   const r = S.route;
   const detail = r.kind === "projects" && r.id;
+  if (r.kind === "record") {
+    if (app.dataset.mode !== "record") { ED.unmount(); app.dataset.mode = "record"; app.innerHTML = `<div id="recroot"></div>`; REC.mount($("#recroot"), { S, api, esc, toast, go, uploadFile }); }
+    return;
+  }
+  if (app.dataset.mode === "record") REC.unmount();
   if (detail && S.project && EDITOR_STATUS.includes(S.project.status) && S.presets) {
     const key = "editor:" + S.project.id;
     if (app.dataset.mode !== key) { app.dataset.mode = key; app.innerHTML = `<div id="edroot"></div>`; }
@@ -72,7 +78,7 @@ function render() {
   app.innerHTML = `<div class="shell">
     <aside class="rail ${detail || r.kind !== "home" ? "hidden-mobile" : ""}">
       <div class="rail-head"><a class="brand" href="#/"><i></i>Vividora</a>
-        ${S.user.role !== "viewer" ? `<a class="btn primary" href="#/new">+ नया</a>` : ""}</div>
+        ${S.user.role !== "viewer" ? `<span class="row" style="gap:.3rem"><a class="btn quiet" href="#/record" title="camera + teleprompter">⏺</a><a class="btn primary" href="#/new">+ नया</a></span>` : ""}</div>
       <div class="rail-list">${S.projects.length ? S.projects.map(projRow).join("") : `<p class="muted" style="padding:1rem">अभी कोई project नहीं। "+ नया" से पहली recording डालें।</p>`}</div>
       <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
         <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/analytics">analytics</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
