@@ -31,7 +31,13 @@ services:
     environment:
       API_URL: http://api:8000
       WORKER_NAME: cpu@docker
-      # TRANSCRIBE_LOCAL: "1"   # CPU transcription when the GPU PC is off (slow)
+      # transcribe on the VM's CPU (no NVIDIA GPU needed). Models: small / medium / large-v3
+      TRANSCRIBE_LOCAL: ${TRANSCRIBE_LOCAL:-1}
+      WHISPER_MODEL: ${WHISPER_MODEL:-medium}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE: int8
+      WHISPER_THREADS: ${WHISPER_THREADS:-12}
+      WHISPER_CACHE: /models
     command: ["python", "-m", "vividora.worker.cpu"]
     depends_on:
       api:
@@ -41,6 +47,8 @@ services:
     mem_limit: ${WORKER_MEM:-16g}
     volumes:
       - worker-tmp:/tmp
+      - whisper-models:/models
 
 volumes:
   worker-tmp:
+  whisper-models:

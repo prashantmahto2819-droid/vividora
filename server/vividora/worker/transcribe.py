@@ -29,6 +29,7 @@ def transcribe_file(audio: Path, *, language: str = "hi", on_progress: ProgressF
     if on_progress:
         on_progress(0.02, f"model {model_name} लोड हो रहा है")
     model = WhisperModel(model_name, device=device, compute_type=compute,
+                         cpu_threads=int(os.getenv("WHISPER_THREADS", "0") or 0),
                          download_root=os.getenv("WHISPER_CACHE") or None)
     segments, info = model.transcribe(
         str(audio), language=None if language == "auto" else language, word_timestamps=True,

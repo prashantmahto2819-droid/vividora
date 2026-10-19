@@ -2,5 +2,5 @@ starlette>=0.40
 uvicorn[standard]>=0.30
 PyJWT>=2.8
 python-multipart>=0.0.9
-# optional, only when TRANSCRIBE_LOCAL=1 (CPU transcription fallback):
-# faster-whisper>=1.1.0
+# CPU transcription inside the worker (TRANSCRIBE_LOCAL=1)
+faster-whisper>=1.1.0
