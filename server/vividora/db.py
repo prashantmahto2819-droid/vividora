@@ -18,7 +18,7 @@ from typing import Any, Iterator
 
 from .config import settings
 
-JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info", "secrets"}
+JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info", "secrets", "extra"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS ideas (
   status TEXT NOT NULL DEFAULT 'new', source TEXT, project_id TEXT, due_at TEXT, meta TEXT NOT NULL DEFAULT '{}',
   created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ideas_ws ON ideas(workspace_id, status, updated_at);
+CREATE TABLE IF NOT EXISTS stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, publication_id TEXT NOT NULL REFERENCES publications(id) ON DELETE CASCADE,
+  fetched_at TEXT NOT NULL, views INTEGER NOT NULL DEFAULT 0, likes INTEGER NOT NULL DEFAULT 0,
+  comments INTEGER NOT NULL DEFAULT 0, extra TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS stats_pub ON stats(publication_id, fetched_at);
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);

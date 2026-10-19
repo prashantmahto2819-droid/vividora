@@ -152,6 +152,16 @@ def after_job(c, job: dict, result: dict) -> None:
         db.update(c, "projects", pid, {"status_note": f"{job['payload'].get('platform')} पर publish हुआ", "updated_at": db.now()})
         notify.on_event("published", project, f"{job['payload'].get('platform')}: {result.get('url') or ''}")
 
+    elif kind == "montage":
+        for f in result.get("files", []):
+            replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
+            add_asset(c, pid, f["kind"], f["path"], label=f.get("label"), mime=f.get("mime"), meta=f.get("meta"))
+        meta = {**project.get("meta", {}), "duration": result.get("duration"), "bpm": result.get("bpm"),
+                "segments": result.get("segments")}
+        db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now()})
+        set_status(c, pid, "review_output", f"montage तैयार · {result.get('bpm')} BPM · {result.get('segments')} cuts")
+        notify.on_event("review_output", project, "montage")
+
     elif kind == "render":
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
@@ -238,6 +248,29 @@ def request_shorts_render(c, project: dict, clips: list[dict], settings_in: dict
                        hook={"text": cl.get("hook") or "", "seconds": 3}, title=cl.get("title"))
         jobs.append(queue.enqueue(c, pid, "render", payload))
     return jobs
+
+
+def request_montage(c, project: dict, opts: dict) -> dict:
+    clips = [cl for cl in (opts.get("clips") or []) if isinstance(cl, dict) and cl.get("id")]
+    if not clips:
+        raise ValueError("कम से कम एक clip/image चुनें")
+    if not opts.get("music"):
+        raise ValueError("music चुनें")
+    preset = opts.get("preset") or "ig-reel"
+    if preset not in platforms():
+        raise ValueError("unknown preset")
+    payload = {"clips": clips[:60], "music": opts["music"], "texts": [str(t)[:120] for t in (opts.get("texts") or [])][:12],
+               "preset": preset, "look": opts.get("look") or "none", "every": max(1, min(8, int(opts.get("every", 2)))),
+               "max_seconds": max(5.0, min(180.0, float(opts.get("max_seconds", 30)))), "flash": bool(opts.get("flash", True)),
+               "watermark": opts.get("watermark") or None, "font": opts.get("font") or "Poppins",
+               "text_color": opts.get("text_color") or "#FFFFFF", "text_size": max(0.03, min(0.14, float(opts.get("text_size", 0.07)))),
+               "seed": int(opts.get("seed", 7))}
+    db.update(c, "projects", project["id"], {"settings": {**project.get("settings", {}), "montage": payload},
+                                             "updated_at": db.now()})
+    c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? AND kind='montage' AND status='queued'",
+              (db.now(), project["id"]))
+    set_status(c, project["id"], "rendering", "montage बन रहा है")
+    return queue.enqueue(c, project["id"], "montage", payload)
 
 
 def delete_project(c, project: dict) -> None:

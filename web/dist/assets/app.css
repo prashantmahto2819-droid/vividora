@@ -147,3 +147,8 @@ th { color: var(--muted); font-weight: 500; }
 .trlist a { text-decoration: none; } .trlist a:hover { text-decoration: underline; }
 .ideas li { padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 8px; margin-bottom: .4rem; cursor: pointer; display: flex; flex-direction: column; }
 .ideas li:hover { background: var(--panel-2); } .ideas li.sel { border-color: var(--amber); }
+.dims { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+.dim { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .75rem; }
+.dim > b { display: block; margin-bottom: .5rem; }
+.bar { display: grid; grid-template-columns: 1fr 90px 40px; gap: .5rem; align-items: center; font-size: .85rem; padding: .2rem 0; }
+.bar .progress { height: 8px; }

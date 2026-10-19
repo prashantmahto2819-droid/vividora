@@ -17,6 +17,7 @@ const ICON = {
   effects: '<svg viewBox="0 0 24 24"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM19 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></svg>',
   audio: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
   overlay: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>',
+  montage: '<svg viewBox="0 0 24 24"><path d="M4 18V8M9 18V4M14 18v-8M19 18v-5"/><path d="M3 21h18"/></svg>',
   shorts: '<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg>',
   export: '<svg viewBox="0 0 24 24"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z" fill="currentColor" stroke="none"/></svg>',
@@ -27,7 +28,9 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
-const TABS = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["overlay", "Overlay"], ["shorts", "Shorts"]];
+const TABS_ALL = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["overlay", "Overlay"], ["shorts", "Shorts"]];
+const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"]];
+let TABS = TABS_ALL;
 const TITLE_PRESETS = [
   { id: "headline", label: "Headline", pos: "top", size: 0.08, color: "#FFFFFF", bg: "", text: "यहाँ बड़ा टाइटल" },
   { id: "lower3", label: "Lower third", pos: "bottom", size: 0.05, color: "#FFFFFF", bg: "#000000", text: "नाम | पहचान" },
@@ -56,6 +59,9 @@ export function mount(root, project, ctx) {
     tab: "cuts", sel: null, pps: 40, t: 0, markIn: null, markOut: null, skipCuts: true, ratio: "9:16", dirty: false, saveT: null,
     lib: null, libKind: "music", exportOpen: false, drag: null, raf: null, canEdit: ctx.S.user.role !== "viewer" };
   E.shorts = JSON.parse(JSON.stringify(project.meta?.shorts || []));
+  E.montage = project.kind === "montage";
+  TABS = E.montage ? TABS_MONTAGE : TABS_ALL;
+  if (E.montage) { E.tab = "montage"; E.mo = { clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); }
   E.dur = project.edl?.duration || project.meta?.duration || 1;
   E.pps = clamp(Math.floor(900 / E.dur), 6, 120);
   root.innerHTML = skeleton();
@@ -76,6 +82,7 @@ function update(project) {
   if (E.transcriptDirty) project.transcript = E.p.transcript;
   E.p = project;
   if (project.edl?.duration) E.dur = project.edl.duration;
+  if (E.montage) { const r = project.assets.find((a) => a.kind === "render"); const v = $("#pv", E.root); if (r && v && !v.src.includes(r.id)) { v.src = r.url; E.dur = project.meta?.duration || E.dur; renderTimeline(); } if (E.tab === "montage") renderPanel(); }
   const fresh = JSON.stringify(project.meta?.shorts || []);
   if (fresh !== E.shortsSeen) { E.shortsSeen = fresh; if (!E.shortsDirty) { E.shorts = JSON.parse(fresh); if (E.tab === "shorts") renderPanel(); renderTimeline(); } }
   renderTop();
@@ -117,7 +124,7 @@ function skeleton() {
     <section class="ed-stage">
       <div class="ed-viewport" id="viewport">
         <div class="ed-frame" id="frame">
-          <video id="pv" playsinline preload="auto" src="${(E.p.assets.find((a) => a.kind === "proxy") || {}).url || ""}"></video>
+          <video id="pv" playsinline preload="auto" src="${(E.p.assets.find((a) => a.kind === (E.montage ? "render" : "proxy")) || {}).url || ""}" ${E.montage ? "controls" : ""}></video>
           <div class="ed-mask" id="mask"></div>
           <div class="ed-safe" id="safe"></div>
           <div class="ed-ovl" id="ovl"><div id="ovl-media"></div><div id="ovl-text"></div></div>
@@ -343,6 +350,7 @@ function num(id, v, step = 0.1, min = 0, max = 9999) { return `<input type="numb
 function renderInspector() {
   const ins = $("#inspector", E.root); const { esc } = E.ctx; const it = selItem(); const dis = E.canEdit ? "" : "disabled";
   if (!E.sel || !it) {
+    if (E.montage) { ins.innerHTML = `<h3>Montage</h3><div class="ikv"><span>लंबाई</span><b>${fmt(E.p.meta?.duration || 0)}</b></div><div class="ikv"><span>BPM</span><b>${E.p.meta?.bpm || "—"}</b></div><div class="ikv"><span>cuts</span><b>${E.p.meta?.segments || "—"}</b></div><p class="small muted" style="margin-top:1rem">clips/music/text बाएँ panel में बदलकर "Montage बनाएँ" दबाएँ; फिर Export से download/publish।</p>`; return; }
     ins.innerHTML = `<h3>Project</h3><div class="ikv"><span>लंबाई</span><b>${fmt(E.dur)} → ${fmt(outDur())}</b></div><div class="ikv"><span>कट</span><b>${E.cuts.filter((c) => c.enabled !== false).length}</b></div>
       <div class="ikv"><span>भाषा</span><b>${{ hi: "हिंदी", en: "English", auto: "पहचान बाकी" }[E.p.language] || E.p.language}</b></div><div class="ikv"><span>source</span><b>${E.p.meta?.width}×${E.p.meta?.height} · ${E.p.meta?.fps} fps</b></div>
       <p class="small muted" style="margin-top:1rem">timeline पर किसी कट, caption, title या B-roll पर क्लिक करें — उसकी settings यहाँ आएँगी।<br><br><b>Keys:</b> Space चलाएँ · I/O हिस्सा चुनें · X हटाएँ · ←/→ frame · Del चुना हुआ हटाएँ · Ctrl+S सेव</p>`;
@@ -467,6 +475,23 @@ function renderPanel() {
         ${x.kind === "music" || x.kind === "sfx" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
         <button class="btn small primary" data-add="${x.id}" ${dis}>${{ music: "लगाएँ", logo: "लगाएँ", lut: "लगाएँ" }[x.kind] || "+ जोड़ें"}</button>
         <button class="ibtn" data-del="${x.id}" title="library से हटाएँ" ${dis}>${ICON.trash}</button></li>`).join("") || `<li class="muted small">अभी कुछ नहीं — ऊपर से upload करें।</li>`}</ul>`;
+  } else if (t === "montage") {
+    const mo = E.mo; const lib = E.lib || []; const clips = lib.filter((x) => x.kind === "broll" || x.kind === "image"); const musics = lib.filter((x) => x.kind === "music"); const logos = lib.filter((x) => x.kind === "logo");
+    const vert = (S.presets?.platforms || []); const chosen = mo.clips.map((c) => lib.find((x) => x.id === c.id)).filter(Boolean);
+    const looks = S.presets?.looks || [];
+    h = `<div class="ph"><h3>Montage</h3><span class="small muted">${E.p.meta?.bpm ? `${E.p.meta.bpm} BPM · ${E.p.meta.segments} cuts` : "beat-synced"}</span></div>
+      <p class="small muted">Media tab से clips/images upload करें, Audio tab से music। फिर यहाँ चुनें — हर beat पर cut, ऊपर text lines।</p>
+      <h4>Clips (क्रम में) · ${chosen.length}</h4><ul class="plist">${chosen.map((x, i) => `<li data-moclip="${i}"><span class="small muted">${i + 1}.</span><span class="grow small">${esc(x.name)}</span><button class="ibtn" data-moup="${i}" title="ऊपर">↑</button><button class="ibtn" data-model="${i}">${ICON.trash}</button></li>`).join("") || `<li class="muted small">नीचे से जोड़ें</li>`}</ul>
+      <div class="irow" style="flex-wrap:wrap">${clips.filter((x) => !mo.clips.some((c) => c.id === x.id)).map((x) => `<button class="btn small quiet" data-moadd="${x.id}" ${dis}>+ ${esc(x.name.slice(0, 18))}</button>`).join("") || `<span class="small muted">library में कोई clip/image नहीं — Media tab में upload करें</span>`}</div>
+      <h4>Music</h4>${field("", `<select id="mo-music" ${dis}><option value="">— चुनें —</option>${musics.map((m) => `<option value="${m.id}" ${mo.music === m.id ? "selected" : ""}>${esc(m.name)}${m.meta?.duration ? ` (${fmt(m.meta.duration)})` : ""}</option>`).join("")}</select>`)}
+      <h4>Text lines (एक line = एक message, | से line break)</h4>${field("", `<textarea id="mo-texts" rows="4" ${dis}>${esc(mo.texts)}</textarea>`)}
+      <div class="irow">${field("font", `<select id="mo-font" ${dis}>${(S.presets?.fonts || []).map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field("आकार", `<input type="range" id="mo-size" min="0.04" max="0.12" step="0.005" value="${mo.text_size}" ${dis}>`)}</div>
+      <h4>Cut</h4><div class="irow">${field("हर कितने beat पर", `<select id="mo-every" ${dis}>${[1, 2, 4, 8].map((n) => `<option value="${n}" ${mo.every == n ? "selected" : ""}>${n} beat</option>`).join("")}</select>`)}${field("लंबाई", `<select id="mo-max" ${dis}>${[15, 20, 30, 45, 60, 90].map((n) => `<option value="${n}" ${mo.max_seconds == n ? "selected" : ""}>${n}s</option>`).join("")}</select>`)}
+        ${field("format", `<select id="mo-preset" ${dis}>${vert.map((pl) => `<option value="${pl.id}" ${mo.preset === pl.id ? "selected" : ""}>${esc(pl.label)}</option>`).join("")}</select>`)}</div>
+      <div class="irow">${field("look", `<select id="mo-look" ${dis}>${looks.map((l) => `<option value="${l.id}" ${mo.look === l.id ? "selected" : ""}>${esc(l.label)}</option>`).join("")}</select>`)}<label class="chk small"><input type="checkbox" id="mo-flash" ${mo.flash ? "checked" : ""} ${dis}> beat flash</label>
+        ${field("logo", `<select id="mo-wm" ${dis}><option value="">नहीं</option>${logos.map((l) => `<option value="${l.id}" ${mo.watermark === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>`)}</div>
+      <button class="btn primary" id="mo-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.p.status === "rendering" ? "बन रहा है…" : "Montage बनाएँ"}</button>
+      ${E.p.status === "rendering" ? `<div class="progress" style="margin-top:.5rem"><i style="width:${E.p.jobs?.find((j) => j.kind === "montage" && j.status === "running")?.progress || 0}%"></i></div>` : ""}`;
   } else if (t === "shorts") {
     const planning = E.p.jobs?.some((j) => j.kind === "shorts_plan" && ["queued", "running"].includes(j.status));
     const vert = (S.presets?.platforms || []).filter((pl) => pl.height > pl.width);
@@ -526,6 +551,17 @@ function bindPanel() {
   on("#wm-size", "oninput", (e) => { fx.watermark.size = +e.target.value; touch(); });
   on("#wm-pos", "onchange", (e) => { fx.watermark.pos = e.target.value; touch(); });
   on("#wm-clear", "onclick", () => { fx.watermark.id = ""; touch(); renderPanel(); });
+  // montage
+  if (E.montage && E.mo) {
+    const mo = E.mo; const lib = E.lib || [];
+    const sync = () => { mo.music = $("#mo-music", panel)?.value || mo.music; mo.texts = $("#mo-texts", panel)?.value ?? mo.texts; mo.font = $("#mo-font", panel)?.value || mo.font; mo.text_color = $("#mo-color", panel)?.value || mo.text_color; mo.text_size = +($("#mo-size", panel)?.value || mo.text_size); mo.every = +($("#mo-every", panel)?.value || mo.every); mo.max_seconds = +($("#mo-max", panel)?.value || mo.max_seconds); mo.preset = $("#mo-preset", panel)?.value || mo.preset; mo.look = $("#mo-look", panel)?.value || mo.look; mo.flash = $("#mo-flash", panel)?.checked ?? mo.flash; mo.watermark = $("#mo-wm", panel)?.value ?? mo.watermark; };
+    ["#mo-music", "#mo-texts", "#mo-font", "#mo-color", "#mo-size", "#mo-every", "#mo-max", "#mo-preset", "#mo-look", "#mo-flash", "#mo-wm"].forEach((sel) => on(sel, "onchange", sync));
+    $$("[data-moadd]", panel).forEach((b) => (b.onclick = () => { sync(); const x = lib.find((y) => y.id === b.dataset.moadd); mo.clips.push({ id: x.id, duration: x.meta?.duration }); renderPanel(); }));
+    $$("[data-model]", panel).forEach((b) => (b.onclick = () => { sync(); mo.clips.splice(+b.dataset.model, 1); renderPanel(); }));
+    $$("[data-moup]", panel).forEach((b) => (b.onclick = () => { sync(); const i = +b.dataset.moup; if (i > 0) { [mo.clips[i - 1], mo.clips[i]] = [mo.clips[i], mo.clips[i - 1]]; renderPanel(); } }));
+    on("#mo-render", "onclick", async () => { sync(); const body = { ...mo, texts: mo.texts.split("\n").map((t) => t.trim()).filter(Boolean) };
+      try { await api("POST", `/projects/${E.pid}/montage`, body); toast("montage बन रहा है"); await load(); renderPanel(); } catch (err) { toast(err.message); } });
+  }
   // shorts
   on("#sh-plan", "onclick", async () => { await save(false); try { await api("POST", `/projects/${E.pid}/shorts/plan`, { options: { count: +$("#sh-count", panel).value } }); toast("Shorts ढूँढे जा रहे हैं"); E.shortsDirty = false; await load(); renderPanel(); } catch (err) { toast(err.message); } });
   on("#sh-add", "onclick", () => { if (E.markIn == null || E.markOut == null) return toast("पहले I और O से हिस्सा चुनें"); const sc = { id: "m" + uid().slice(0, 4), start: +E.markIn.toFixed(2), end: +E.markOut.toFixed(2), title: "", hook: "", selected: true }; E.shorts.push(sc); E.shortsDirty = true; E.markIn = E.markOut = null; $("#t-marks", E.root).textContent = ""; touch(); select({ type: "short", id: sc.id }); renderPanel(); });
@@ -542,7 +578,7 @@ function bindPanel() {
   $$("[data-look]", panel).forEach((b) => (b.onclick = () => { fx.look = b.dataset.look; $$(".look", panel).forEach((x) => x.classList.toggle("on", x === b)); layoutFrame(); touch(); }));
 }
 function libItem(id) { return (E.lib || []).find((x) => x.id === id); }
-async function loadLib() { try { E.lib = await E.ctx.api("GET", "/library"); } catch { E.lib = []; } if (E && ["media", "audio", "overlay"].includes(E.tab)) renderPanel(); else renderOverlay(); }
+async function loadLib() { try { E.lib = await E.ctx.api("GET", "/library"); } catch { E.lib = []; } if (E && ["media", "audio", "overlay", "montage"].includes(E.tab)) renderPanel(); else renderOverlay(); }
 async function libUpload(kind, file) {
   const { toast } = E.ctx; const prog = $("#lib-progress", E.root);
   prog.innerHTML = `<p class="small muted">${file.name} upload हो रहा…</p><div class="progress"><i style="width:30%"></i></div>`;
@@ -567,6 +603,7 @@ function libAdd(x) {
 const TRACKS = [["video", "Video"], ["captions", "Caption"], ["text", "Text"], ["broll", "B-roll"], ["audio", "Audio"], ["shorts", "Shorts"]];
 function renderTimeline() {
   const body = $("#tl-body", E.root), labels = $("#tl-labels", E.root); if (!body) return;
+  if (E.montage) { labels.innerHTML = ""; body.innerHTML = `<p class="small muted" style="padding:1rem">Montage beat पर अपने-आप कटता है — settings बाएँ panel में। Export से platform चुनें।</p>`; $("#tl-info", E.root).textContent = E.p.meta?.bpm ? `${E.p.meta.bpm} BPM · ${fmt(E.p.meta.duration || 0)}` : ""; return; }
   const { esc } = E.ctx; const pps = E.pps; const W = Math.ceil(E.dur * pps) + 80; const fx = E.rs.effects;
   const X = (src) => (src * pps).toFixed(1); const OX = (out) => X(srcOf(out)); const OW = (a, b) => Math.max(6, (srcOf(b) - srcOf(a)) * pps).toFixed(1);
   const step = pps >= 80 ? 0.5 : pps >= 40 ? 1 : pps >= 16 ? 2 : pps >= 8 ? 5 : 10;
@@ -662,15 +699,15 @@ function renderExport() {
   m.hidden = false;
   m.innerHTML = `<div class="modal"><div class="row between"><h2>Export</h2><button class="ibtn" id="mx">✕</button></div>
     <p class="small muted">${esc(summary)} · output ${fmt(outDur())}</p>
-    <div class="ifield"><label>कहाँ के लिए</label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
-    <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>
+    ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए</label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
+    <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>`}
     ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="small muted">${esc(job?.message || "queue में")}</p>` : ""}
     ${outs.length ? `<h3>तैयार वीडियो</h3><div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
       return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(a.label?.startsWith("short-") ? (a.meta.title || a.label) : pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}</span></div><div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}${p.status === "approved" && E.canEdit && (E.conns?.connections || []).length ? `<button class="btn small primary" data-pub="${a.id}">Publish</button>` : ""}</div>
         ${(E.pubs || []).filter((x) => x.asset_id === a.id).map((x) => `<div class="small pubrow ${x.status}">${PLAT[x.platform] || x.platform}: ${x.status === "done" ? `<a href="${x.url}" target="_blank" rel="noopener">${esc(x.url || "हो गया")}</a>` : x.status === "failed" ? `<span class="muted">असफल — ${esc((x.error || "").slice(0, 120))}</span>` : "upload हो रहा…"}</div>`).join("")}</div>`; }).join("")}</div>` : ""}
     ${E.pubFor ? publishForm(E.pubFor) : ""}
     <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? "मंज़ूर ✓" : ""}</span>
-      <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit ? `<button class="btn primary" id="go-render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा…" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
+      <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit && !E.montage ? `<button class="btn primary" id="go-render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा…" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };
   $$("[data-pub]", m).forEach((b) => (b.onclick = () => { const a = p.assets.find((x) => x.id === b.dataset.pub); E.pubFor = { asset: a, title: "", description: "", tags: "", conn: "", privacy: "private", when: "" }; renderExport(); $("#pubform", m)?.scrollIntoView({ behavior: "smooth" }); }));
   bindPublishForm(m);

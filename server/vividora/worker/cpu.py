@@ -13,7 +13,7 @@ import socket
 import tempfile
 from pathlib import Path
 
-from ..engine import autocut, ffmpeg, prepare, render, shorts
+from ..engine import autocut, ffmpeg, montage, prepare, render, shorts
 from ..engine.presets import caption_style, platform
 from .client import ApiClient, run_loop
 
@@ -147,6 +147,29 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 raise err from None
             return r
 
+        if kind == "montage":
+            p = job["payload"]
+            lib = tmp / "lib"
+            clips = []
+            for item in p.get("clips") or []:
+                path = client.download_library(item["id"], lib / item["id"])
+                kind_ = "image" if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") else "video"
+                clips.append({"path": path, "type": kind_, "duration": item.get("duration")})
+            music = client.download_library(p["music"], lib / p["music"])
+            wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None
+            preset = platform(p.get("preset", "ig-reel"))
+            out = montage.render(clips=clips, music=music, out_dir=tmp / "out", name=preset["id"], preset=preset,
+                                 texts=p.get("texts") or [], look=p.get("look", "none"), every=int(p.get("every", 2)),
+                                 max_seconds=float(p.get("max_seconds", 30)), flash=bool(p.get("flash", True)),
+                                 font=p.get("font") or "Poppins", text_color=p.get("text_color") or "#FFFFFF",
+                                 text_size=float(p.get("text_size", 0.07)), watermark=wm, seed=int(p.get("seed", 7)),
+                                 encoder_preset=os.getenv("X264_PRESET") or None, on_progress=_progress(client, job["id"]))
+            files = []
+            for f in out["files"]:
+                up = client.upload(job["id"], f["path"], f["kind"], f.get("label"))
+                files.append({**f, "path": up["path"]})
+            return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": []}
+
         if kind == "shorts_plan":
             o = job["payload"].get("options") or {}
             clips = shorts.plan(project.get("transcript") or {}, float(project["meta"].get("duration") or 0),
@@ -168,7 +191,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage"]
     if os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes"):
         kinds.append("transcribe")
     client = ApiClient(base, token, name)

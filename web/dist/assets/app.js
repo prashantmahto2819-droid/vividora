@@ -28,7 +28,7 @@ function logout() { S.token = null; S.user = null; localStorage.removeItem("vivi
 function toast(msg, ms = 2600) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
 
 // ---------- routing ----------
-function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
+function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
 function go(path) { location.hash = path; }
 window.addEventListener("hashchange", () => { S.route = parseRoute(); load().then(render); });
 
@@ -43,6 +43,7 @@ async function load() {
   if (S.route.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (S.route.kind === "users") S.users = await api("GET", "/users").catch(() => []);
   if (S.route.kind === "plan") { const [t, i, n] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", "/ideas").catch(() => []), api("GET", "/notify").catch(() => ({}))]); S.trends = t; S.ideas = i; S.notify = n; }
+  if (S.route.kind === "analytics") S.analytics = await api("GET", "/analytics").catch(() => ({ videos: [], learn: {} }));
   if (S.route.kind === "settings") S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} }));
   schedulePoll();
 }
@@ -74,12 +75,12 @@ function render() {
         ${S.user.role !== "viewer" ? `<a class="btn primary" href="#/new">+ नया</a>` : ""}</div>
       <div class="rail-list">${S.projects.length ? S.projects.map(projRow).join("") : `<p class="muted" style="padding:1rem">अभी कोई project नहीं। "+ नया" से पहली recording डालें।</p>`}</div>
       <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
-        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
+        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/analytics">analytics</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
     </aside>
-    <main class="main">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
+    <main class="main">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : r.kind === "analytics" ? analyticsView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
   </div>`;
   $("#logout").onclick = logout;
-  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan();
+  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics();
   if (detail && S.project) bindProject(S.project);
 }
 
@@ -120,9 +121,10 @@ function bindLogin() {
 function newView() {
   const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; const idea = ideaId && (S.ideas || []).find((i) => i.id === ideaId);
   return `<h1>नई recording</h1>${idea ? `<div class="note">idea: <b>${esc(idea.title)}</b> — upload के बाद यह "record हो गया" में चला जाएगा।</div>` : ""}<p class="muted">पहले नाम दें, फिर फ़ाइल चुनें। upload बीच में टूटे तो वहीं से आगे बढ़ता है।</p>
+    <div class="choices" style="margin-bottom:1rem"><label class="chip on"><input type="radio" name="ptype" value="talking_head" checked>🎙️ Recording (मेरी आवाज़ वाला वीडियो)</label><label class="chip"><input type="radio" name="ptype" value="montage">🎵 Montage (music + clips, बिना voice)</label></div>
     <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का" value="${idea ? esc(idea.title) : ""}"></div>
     <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
-    <div class="drop" id="drop"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" hidden><b>फ़ाइल यहाँ छोड़ें या चुनें</b><br><span class="muted small">mp4, mov, mkv, webm · 20 GB तक</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
+    <div class="drop" id="drop" data-upload="1"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" hidden><b>फ़ाइल यहाँ छोड़ें या चुनें</b><br><span class="muted small">mp4, mov, mkv, webm · 20 GB तक</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
     <div id="up-progress"></div>
     <div class="actionbar"><a class="btn" href="#/">रद्द</a><button class="btn primary" id="start" disabled>upload शुरू करें</button></div></form>`;
 }
@@ -134,9 +136,14 @@ function bindNew() {
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); chosen = e.dataTransfer.files[0]; pick(); };
   file.onchange = () => { chosen = file.files[0]; pick(); };
   function pick() { if (!chosen) return; $("#fname").textContent = `${chosen.name} · ${gb(chosen.size)}`; $("#start").disabled = false; }
+  let ptype = "talking_head";
+  document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage"; drop.style.display = mont ? "none" : ""; $("#start").textContent = mont ? "montage project बनाएँ" : "upload शुरू करें"; $("#start").disabled = mont ? false : !chosen; }));
   $("#new").onsubmit = async (e) => {
-    e.preventDefault(); if (!chosen) return;
-    const f = e.target; $("#start").disabled = true;
+    e.preventDefault();
+    const f = e.target;
+    if (ptype === "montage") { $("#start").disabled = true; try { const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, kind: "montage" }); go("/projects/" + p.id); } catch (err) { toast(err.message); $("#start").disabled = false; } return; }
+    if (!chosen) return;
+    $("#start").disabled = true;
     try {
       const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value });
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
@@ -396,6 +403,24 @@ function bindPlan() {
   const drop = $("#idea-drop"); if (drop) drop.onclick = async () => { if (confirm("यह idea हटाएँ?")) { await api("PATCH", `/ideas/${id}`, { status: "dropped" }); S.ideaOpen = null; load().then(render); } };
   const sc = $("#idea-script"); if (sc) sc.onclick = async () => { sc.disabled = true; sc.textContent = "लिख रहा है…"; await api("PATCH", `/ideas/${id}`, collect()); try { const r = await api("POST", `/ideas/${id}/script`, { seconds: $("#script-secs").value || null }); toast(r.source === "llm" ? "script तैयार" : "template बना (AI key नहीं)"); } catch (e) { toast(e.message); } load().then(render); };
   $("#idea-status").onchange = async () => { await api("PATCH", `/ideas/${id}`, { status: $("#idea-status").value }); load().then(render); };
+}
+
+// ---------- analytics ----------
+function analyticsView() {
+  const a = S.analytics || { videos: [], learn: {} }; const L = a.learn || {}; const canEdit = S.user.role !== "viewer";
+  const n = (x) => (x || 0).toLocaleString("en-IN");
+  const rec = L.recommend || {}; const recLabels = { caption_style: "caption style", hook: "hook", zoom: "auto zoom", look: "look", length: "लंबाई", music: "music", weekday: "दिन", hour: "समय" };
+  return `<div class="row between"><h1>Analytics</h1>${canEdit ? `<button class="btn small" id="an-refresh">stats ताज़ा करें</button>` : ""}</div>
+    <p class="muted">published videos का हाल, और उससे सीख: कौन-सा style / hook / लंबाई ज़्यादा चलती है (index 1.0 = औसत)।</p>
+    ${Object.keys(rec).length ? `<div class="note"><b>सीख:</b> ${Object.entries(rec).map(([k, v]) => `${recLabels[k] || k} → <b>${esc(v)}</b>`).join(" · ")}
+      ${S.user.role === "admin" ? `<br><button class="btn small primary" id="an-apply" style="margin-top:.5rem">नए projects के लिए यही default बनाएँ</button>` : ""}
+      ${a.defaults && Object.keys(a.defaults).length ? `<span class="small muted" style="margin-left:.5rem">अभी default: ${esc(JSON.stringify(a.defaults))}</span>` : ""}</div>` : `<p class="small muted">${L.note || "अभी सीखने के लिए data कम है।"}</p>`}
+    ${Object.keys(L.dimensions || {}).length ? `<div class="section"><h2>क्या काम कर रहा है</h2><div class="dims">${Object.entries(L.dimensions).map(([k, d]) => `<div class="dim"><b>${esc(d.label)}</b>${Object.entries(d.groups).sort((x, y) => y[1].index - x[1].index).map(([g, v]) => `<div class="bar"><span>${esc(g)} <i class="muted">(${v.n})</i></span><div class="progress"><i style="width:${Math.min(100, v.index * 50).toFixed(0)}%"></i></div><b>${v.index.toFixed(2)}</b></div>`).join("")}</div>`).join("")}</div></div>` : ""}
+    <div class="section"><h2>Published videos · ${a.videos.length}</h2>${a.videos.length ? `<table><tr><th>video</th><th>platform</th><th>views</th><th>likes</th><th>comments</th><th>style</th><th>published</th></tr>${a.videos.map((v) => `<tr><td><a href="${v.url}" target="_blank" rel="noopener">${esc(v.title)}</a> <span class="small muted">${esc(v.label || "")}</span></td><td>${v.platform}</td><td>${n(v.views)}</td><td>${n(v.likes)}</td><td>${n(v.comments)}</td><td class="small">${esc(v.features?.caption_style || "")}${v.features?.hook === "yes" ? " · hook" : ""} · ${esc(v.features?.length || "")}</td><td class="small muted">${v.published_at ? new Date(v.published_at).toLocaleDateString("hi-IN") : ""}${v.fetched_at ? "" : " · stats नहीं"}</td></tr>`).join("")}</table>` : `<p class="muted">अभी कुछ publish नहीं हुआ।</p>`}</div>`;
+}
+function bindAnalytics() {
+  const r = $("#an-refresh"); if (r) r.onclick = async () => { r.disabled = true; r.textContent = "ला रहा है…"; try { const x = await api("POST", "/analytics/refresh"); toast(`${x.updated} videos · ${(x.errors || []).join("; ") || "ok"}`); } catch (e) { toast(e.message); } load().then(render); };
+  const ap = $("#an-apply"); if (ap) ap.onclick = async () => { const x = await api("POST", "/analytics/apply"); toast("default बदले"); load().then(render); };
 }
 
 // ---------- boot ----------

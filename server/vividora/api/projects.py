@@ -45,9 +45,12 @@ async def create_project(request: Request, user: dict):
     need(data, "title")
     p = {"id": db.new_id(), "workspace_id": user["workspace_id"], "created_by": user["id"],
          "title": data["title"].strip()[:200], "kind": data.get("kind", "talking_head"),
-         "language": data.get("language") or "auto", "status": "uploading", "status_note": "upload का इंतज़ार",
+         "language": data.get("language") or "auto",
+         "status": "review_cuts" if data.get("kind") == "montage" else "uploading",
+         "status_note": "clips, music और text चुनकर montage बनाएँ" if data.get("kind") == "montage" else "upload का इंतज़ार",
          "meta": {}, "transcript": None, "edl": None,
-         "settings": {"render": data.get("render", {}), "autocut": data.get("autocut", {})},
+         "settings": {"render": {**((db.get("workspaces", user["workspace_id"]) or {}).get("settings", {}).get("render_defaults", {})),
+                                 **data.get("render", {})}, "autocut": data.get("autocut", {})},
          "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
     with db.tx() as c:
         db.insert(c, "projects", p)
@@ -141,6 +144,21 @@ async def render(request: Request, user: dict):
     except ValueError as e:
         raise ApiError(422, str(e))
     return ok({"jobs": jobs})
+
+
+@require("editor")
+async def montage_render(request: Request, user: dict):
+    p = own_project(request, user)
+    if p["status"] == "rendering":
+        raise ApiError(400, "पहले वाला render पूरा होने दें")
+    data = await body(request)
+    try:
+        with db.tx() as c:
+            job = service.request_montage(c, p, data)
+            service.log(c, user["workspace_id"], "montage.render", user_id=user["id"], project_id=p["id"])
+    except ValueError as e:
+        raise ApiError(422, str(e))
+    return ok({"job": job})
 
 
 @require("editor")
@@ -244,6 +262,7 @@ routes = [
     Route("/projects/{project_id}/render", render, methods=["POST"]),
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
+    Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
     Route("/projects/{project_id}/shorts/render", shorts_render, methods=["POST"]),
     Route("/projects/{project_id}/reopen", reopen, methods=["POST"]),
     Route("/projects/{project_id}/keep", preview_keep),
