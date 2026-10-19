@@ -85,3 +85,7 @@ M2 effects library · M3 Shorts factory (face tracking) · M4 platform
 publishing (YouTube / Instagram / Facebook APIs) · M5 planner & scripts ·
 M6 trend radar · M7 analytics + style learning · M8 WhatsApp notifications ·
 M9 asset library · M10 montage templates · M11 website.
+
+## Website (`site/`)
+Static marketing site (no build): index, features, how-it-works, pricing, about, contact, privacy, terms, refund, cookies.
+Deploy free on Cloudflare Pages (upload the `site/` folder) or serve from any static host. Screenshots in `site/assets/img`.
