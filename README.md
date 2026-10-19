@@ -19,6 +19,15 @@ Windows PC (NVIDIA GPU)            Ubuntu VM (Docker)
                                           ▲  dashboard (PWA) · phone / laptop
 ```
 
+## Modules
+- **Editor** — CapCut-style workspace (below)
+- **Shorts factory** — `engine/shorts.py`, face-tracking crop `engine/facetrack.py`
+- **Publishing** — `publish/` YouTube (OAuth, resumable), Instagram/Facebook (Graph API); `api/publish.py`
+- **Plan** — `engine/trends.py` (Google Trends RSS, YouTube top, watched channels), `engine/planner.py` (ideas → scripts), `api/plan.py`
+- **Notifications** — `notify.py` WhatsApp via Vivid Relay / any webhook; reply `ok <code>` approves
+- **AI** — `engine/llm.py` Gemini or Claude, optional; everything has an offline fallback
+- Setup guides: `docs/cloudflare-tunnel.md`
+
 ## Editor (CapCut-style)
 
 `web/dist/assets/editor.js` — side tools (कट · Caption · Text · Media · Audio · Effects · Overlay), live preview with 9:16/16:9/1:1 frame + safe zone, inspector, multi-track timeline (Video/Caption/Text/B-roll/Audio) with drag/resize, I/O/X manual cuts, keyboard shortcuts, autosave.

@@ -28,7 +28,7 @@ function logout() { S.token = null; S.user = null; localStorage.removeItem("vivi
 function toast(msg, ms = 2600) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
 
 // ---------- routing ----------
-function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
+function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
 function go(path) { location.hash = path; }
 window.addEventListener("hashchange", () => { S.route = parseRoute(); load().then(render); });
 
@@ -42,6 +42,7 @@ async function load() {
   } else S.project = null;
   if (S.route.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (S.route.kind === "users") S.users = await api("GET", "/users").catch(() => []);
+  if (S.route.kind === "plan") { const [t, i, n] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", "/ideas").catch(() => []), api("GET", "/notify").catch(() => ({}))]); S.trends = t; S.ideas = i; S.notify = n; }
   if (S.route.kind === "settings") S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} }));
   schedulePoll();
 }
@@ -73,12 +74,12 @@ function render() {
         ${S.user.role !== "viewer" ? `<a class="btn primary" href="#/new">+ नया</a>` : ""}</div>
       <div class="rail-list">${S.projects.length ? S.projects.map(projRow).join("") : `<p class="muted" style="padding:1rem">अभी कोई project नहीं। "+ नया" से पहली recording डालें।</p>`}</div>
       <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
-        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
+        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
     </aside>
-    <main class="main">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
+    <main class="main">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
   </div>`;
   $("#logout").onclick = logout;
-  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings();
+  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan();
   if (detail && S.project) bindProject(S.project);
 }
 
@@ -117,8 +118,9 @@ function bindLogin() {
 }
 
 function newView() {
-  return `<h1>नई recording</h1><p class="muted">पहले नाम दें, फिर फ़ाइल चुनें। upload बीच में टूटे तो वहीं से आगे बढ़ता है।</p>
-    <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का"></div>
+  const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; const idea = ideaId && (S.ideas || []).find((i) => i.id === ideaId);
+  return `<h1>नई recording</h1>${idea ? `<div class="note">idea: <b>${esc(idea.title)}</b> — upload के बाद यह "record हो गया" में चला जाएगा।</div>` : ""}<p class="muted">पहले नाम दें, फिर फ़ाइल चुनें। upload बीच में टूटे तो वहीं से आगे बढ़ता है।</p>
+    <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का" value="${idea ? esc(idea.title) : ""}"></div>
     <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
     <div class="drop" id="drop"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" hidden><b>फ़ाइल यहाँ छोड़ें या चुनें</b><br><span class="muted small">mp4, mov, mkv, webm · 20 GB तक</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
     <div id="up-progress"></div>
@@ -137,6 +139,7 @@ function bindNew() {
     const f = e.target; $("#start").disabled = true;
     try {
       const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value });
+      const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
       await uploadFile(p.id, chosen, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; });
       toast("upload पूरा — जाँच शुरू"); go("/projects/" + p.id);
     } catch (err) { $("#up-progress").innerHTML = `<div class="note err">${esc(err.message)} — दोबारा कोशिश करें, upload वहीं से चलेगा।</div>`; $("#start").disabled = false; }
@@ -342,6 +345,57 @@ function bindSettings() {
   const yt = $("#c-yt"); if (yt) yt.onclick = () => start("youtube");
   const mt = $("#c-meta"); if (mt) mt.onclick = () => start("meta");
   document.querySelectorAll(".c-del").forEach((b) => (b.onclick = async () => { if (confirm("यह connection हटाएँ?")) { await api("DELETE", `/connections/${b.dataset.id}`); load().then(render); } }));
+}
+
+// ---------- plan: trends + ideas + scripts ----------
+const ISTAT = { new: "विचार", approved: "बनाना है", recorded: "record हो गया", done: "हो गया" };
+const FMT = { short: "Short / Reel", long: "लंबा वीडियो", montage: "Montage" };
+function planView() {
+  const t = S.trends || { trends: [], setup: {} }; const ideas = S.ideas || []; const st = t.setup || {}; const canEdit = S.user.role !== "viewer";
+  const src = { google_trends: "Google Trends", yt_popular: "YouTube Top", yt_channel: "Channels" };
+  const bySrc = {}; for (const r of t.trends) (bySrc[r.source] = bySrc[r.source] || []).push(r);
+  const open = S.ideaOpen && ideas.find((i) => i.id === S.ideaOpen);
+  return `<div class="row between"><h1>Plan</h1><span class="small muted">${st.llm ? "AI: चालू" : "AI: key नहीं — offline सुझाव"}${S.notify?.enabled ? " · WhatsApp: चालू" : ""}</span></div>
+    <p class="muted">आज क्या चल रहा है → इस channel के लिए ideas → script → record → Vividora बाकी करेगा।</p>
+    <div class="plan">
+      <div class="section" style="margin-top:0;border:0;padding-top:0"><div class="row between"><h2>Trend radar</h2>${canEdit ? `<button class="btn small" id="tr-refresh">ताज़ा करें</button>` : ""}</div>
+        <p class="small muted">${t.fetched_at ? `आख़िरी: ${new Date(t.fetched_at).toLocaleString("hi-IN")}` : "अभी कुछ नहीं लिया"}${!st.yt_api_key ? " · YouTube Top के लिए .env में YT_API_KEY डालें" : ""}${!(st.watch_channels || []).length ? " · WATCH_CHANNELS=UC… से पसंदीदा channels देखें" : ""}</p>
+        ${Object.keys(bySrc).length ? Object.entries(bySrc).map(([k, rows]) => `<h3 class="small muted" style="margin:.75rem 0 .3rem">${src[k] || k}</h3><ul class="trlist">${rows.slice(0, 15).map((r) => `<li>${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="muted small">${r.meta?.traffic ? r.meta.traffic + "+" : r.meta?.views_per_day ? r.meta.views_per_day.toLocaleString("en-IN") + "/day" : r.meta?.views ? r.meta.views.toLocaleString("en-IN") : ""}${r.meta?.channel ? " · " + esc(r.meta.channel) : ""}</span></li>`).join("")}</ul>`).join("") : `<p class="muted small">“ताज़ा करें” दबाएँ — Google Trends बिना key के आता है।</p>`}</div>
+      <div class="section" style="margin-top:0;border:0;padding-top:0"><div class="row between"><h2>Ideas</h2></div>
+        ${canEdit ? `<form id="idea-gen" class="row" style="margin-bottom:.75rem"><input name="topic" placeholder="विषय (खाली = trends से)" style="flex:1;min-width:160px"><select name="format">${Object.entries(FMT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select><select name="count">${[4, 6, 8, 12].map((n) => `<option ${n === 6 ? "selected" : ""}>${n}</option>`).join("")}</select><button class="btn primary small">✨ ideas बनाएँ</button></form>
+        <form id="idea-add" class="row" style="margin-bottom:.75rem"><input name="title" placeholder="अपना idea लिखें…" style="flex:1;min-width:160px" required><button class="btn small">+ जोड़ें</button></form>` : ""}
+        ${["new", "approved", "recorded", "done"].map((stt) => { const list = ideas.filter((i) => i.status === stt); return list.length ? `<h3 class="small muted" style="margin:.75rem 0 .3rem">${ISTAT[stt]} · ${list.length}</h3><ul class="ideas">${list.map((i) => `<li class="${open && open.id === i.id ? "sel" : ""}" data-idea="${i.id}"><b>${esc(i.title)}</b><span class="small muted">${FMT[i.format] || i.format}${i.script ? " · script ✓" : ""}${i.source ? " · " + esc(i.source.slice(0, 40)) : ""}</span></li>`).join("")}</ul>` : ""; }).join("") || `<p class="muted small">अभी कोई idea नहीं।</p>`}</div>
+    </div>
+    ${open ? ideaPanel(open, canEdit) : ""}`;
+}
+function ideaPanel(i, canEdit) {
+  const m = i.meta || {};
+  return `<div class="ed-modal" id="idea-modal"><div class="modal"><div class="row between"><h2 ${canEdit ? 'contenteditable="true" id="idea-title"' : ""}>${esc(i.title)}</h2><button class="ibtn" id="idea-close">✕</button></div>
+    <div class="row" style="margin:.5rem 0 1rem"><select id="idea-status" ${canEdit ? "" : "disabled"}>${Object.entries(ISTAT).map(([k, v]) => `<option value="${k}" ${i.status === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+      <select id="idea-format" ${canEdit ? "" : "disabled"}>${Object.entries(FMT).map(([k, v]) => `<option value="${k}" ${i.format === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+      <input type="date" id="idea-due" value="${(i.due_at || "").slice(0, 10)}" ${canEdit ? "" : "disabled"}><span class="grow"></span>${canEdit ? `<button class="btn small quiet danger" id="idea-drop">हटाएँ</button>` : ""}</div>
+    <div class="field"><label>Hook (camera पर पहली लाइन)</label><textarea id="idea-hook" rows="2" ${canEdit ? "" : "disabled"}>${esc(i.hook || "")}</textarea></div>
+    <div class="field"><label>Angle</label><input id="idea-angle" value="${esc(i.angle || "")}" ${canEdit ? "" : "disabled"}></div>
+    <div class="field"><label>Outline</label><textarea id="idea-outline" rows="4" ${canEdit ? "" : "disabled"}>${esc(i.outline || "")}</textarea></div>
+    <div class="row between"><label class="small muted">Script${m.script_source ? ` (${m.script_source})` : ""}</label>${canEdit ? `<span class="row"><select id="script-secs"><option value="">लंबाई अपने-आप</option><option value="30">30s</option><option value="45">45s</option><option value="60">60s</option><option value="180">3 min</option><option value="480">8 min</option></select><button class="btn small" id="idea-script">✨ script लिखें</button></span>` : ""}</div>
+    <textarea id="idea-scripttext" rows="12" style="width:100%;font-family:var(--font)" ${canEdit ? "" : "disabled"}>${esc(i.script || "")}</textarea>
+    ${m.shotlist?.length ? `<p class="small muted" style="margin-top:.5rem"><b>Shots:</b> ${m.shotlist.map(esc).join(" · ")}</p>` : ""}${m.overlays?.length ? `<p class="small muted"><b>On-screen text:</b> ${m.overlays.map(esc).join(" · ")}</p>` : ""}${m.title_options?.length ? `<p class="small muted"><b>Title options:</b> ${m.title_options.map(esc).join(" / ")}</p>` : ""}
+    <div class="row between" style="margin-top:1rem"><span class="small muted">record करने के बाद "+ नया" से upload करें — यह idea link हो जाएगा।</span>${canEdit ? `<span class="row"><a class="btn small" href="#/new?idea=${i.id}">record हो गया → upload</a><button class="btn primary small" id="idea-save">सेव</button></span>` : ""}</div></div></div>`;
+}
+function bindPlan() {
+  const rf = $("#tr-refresh"); if (rf) rf.onclick = async () => { rf.disabled = true; rf.textContent = "ला रहा है…"; try { const r = await api("POST", "/trends/refresh"); toast(`${r.count} trends`); } catch (e) { toast(e.message); } load().then(render); };
+  const gen = $("#idea-gen"); if (gen) gen.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true; b.textContent = "सोच रहा है…";
+    try { await api("POST", "/ideas/generate", { topic: f.topic.value, format: f.format.value, count: +f.count.value }); toast("ideas आ गए"); } catch (err) { toast(err.message); } load().then(render); };
+  const add = $("#idea-add"); if (add) add.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const r = await api("POST", "/ideas", { title: f.title.value, format: "short" }); S.ideaOpen = r.id; load().then(render); };
+  document.querySelectorAll("[data-idea]").forEach((li) => (li.onclick = () => { S.ideaOpen = li.dataset.idea; render(); }));
+  const close = $("#idea-close"); if (close) close.onclick = () => { S.ideaOpen = null; render(); };
+  const modal = $("#idea-modal"); if (modal) modal.onclick = (e) => { if (e.target === modal) { S.ideaOpen = null; render(); } };
+  const id = S.ideaOpen; if (!id) return;
+  const collect = () => ({ title: $("#idea-title")?.textContent.trim(), status: $("#idea-status").value, format: $("#idea-format").value, due_at: $("#idea-due").value || null, hook: $("#idea-hook").value, angle: $("#idea-angle").value, outline: $("#idea-outline").value, script: $("#idea-scripttext").value });
+  const save = $("#idea-save"); if (save) save.onclick = async () => { await api("PATCH", `/ideas/${id}`, collect()); toast("सेव"); load().then(render); };
+  const drop = $("#idea-drop"); if (drop) drop.onclick = async () => { if (confirm("यह idea हटाएँ?")) { await api("PATCH", `/ideas/${id}`, { status: "dropped" }); S.ideaOpen = null; load().then(render); } };
+  const sc = $("#idea-script"); if (sc) sc.onclick = async () => { sc.disabled = true; sc.textContent = "लिख रहा है…"; await api("PATCH", `/ideas/${id}`, collect()); try { const r = await api("POST", `/ideas/${id}/script`, { seconds: $("#script-secs").value || null }); toast(r.source === "llm" ? "script तैयार" : "template बना (AI key नहीं)"); } catch (e) { toast(e.message); } load().then(render); };
+  $("#idea-status").onchange = async () => { await api("PATCH", `/ideas/${id}`, { status: $("#idea-status").value }); load().then(render); };
 }
 
 // ---------- boot ----------

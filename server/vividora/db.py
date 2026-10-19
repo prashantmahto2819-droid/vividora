@@ -72,6 +72,16 @@ CREATE TABLE IF NOT EXISTS publications (
   status TEXT NOT NULL DEFAULT 'queued', payload TEXT NOT NULL DEFAULT '{}', remote_id TEXT, url TEXT,
   error TEXT, created_by TEXT, created_at TEXT NOT NULL, finished_at TEXT);
 CREATE INDEX IF NOT EXISTS publications_project ON publications(project_id, created_at);
+CREATE TABLE IF NOT EXISTS trends (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, source TEXT NOT NULL, title TEXT NOT NULL, url TEXT,
+  score REAL NOT NULL DEFAULT 0, meta TEXT NOT NULL DEFAULT '{}', fetched_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS trends_ws ON trends(workspace_id, fetched_at);
+CREATE TABLE IF NOT EXISTS ideas (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  title TEXT NOT NULL, hook TEXT, angle TEXT, outline TEXT, script TEXT, format TEXT NOT NULL DEFAULT 'short',
+  status TEXT NOT NULL DEFAULT 'new', source TEXT, project_id TEXT, due_at TEXT, meta TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ideas_ws ON ideas(workspace_id, status, updated_at);
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);

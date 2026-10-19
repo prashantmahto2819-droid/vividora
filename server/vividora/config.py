@@ -61,6 +61,15 @@ class Settings:
     yt_client_secret: str = field(default_factory=lambda: os.getenv("YT_CLIENT_SECRET", ""))
     meta_app_id: str = field(default_factory=lambda: os.getenv("META_APP_ID", ""))
     meta_app_secret: str = field(default_factory=lambda: os.getenv("META_APP_SECRET", ""))
+    yt_api_key: str = field(default_factory=lambda: os.getenv("YT_API_KEY", ""))
+    trend_region: str = field(default_factory=lambda: os.getenv("TREND_REGION", "IN"))
+    watch_channels: list[str] = field(default_factory=lambda: [c.strip() for c in os.getenv("WATCH_CHANNELS", "").split(",") if c.strip()])
+    # WhatsApp / webhook notifications (Vivid Relay or any HTTP gateway)
+    notify_url: str = field(default_factory=lambda: os.getenv("NOTIFY_URL", ""))
+    notify_token: str = field(default_factory=lambda: os.getenv("NOTIFY_TOKEN", ""))
+    notify_to: str = field(default_factory=lambda: os.getenv("NOTIFY_TO", ""))
+    notify_template: str = field(default_factory=lambda: os.getenv("NOTIFY_TEMPLATE", '{"to": "{to}", "message": "{text}"}'))
+    notify_inbound_secret: str = field(default_factory=lambda: os.getenv("NOTIFY_INBOUND_SECRET", ""))
     publish_dry_run: bool = field(default_factory=lambda: _bool("PUBLISH_DRY_RUN"))
 
 

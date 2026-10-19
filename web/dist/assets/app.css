@@ -36,7 +36,8 @@ p { margin: 0 0 .75rem; } .muted { color: var(--muted); } .small { font-size: .8
 .brand i { width: 22px; height: 22px; border-radius: 6px; background: var(--text); position: relative; display: inline-block; }
 .brand i::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 2px; background: var(--amber); }
 .rail-list { overflow: auto; flex: 1; padding: 0 .5rem 1rem; }
-.rail-foot { padding: .6rem .75rem; border-top: 1px solid var(--line); display: flex; gap: .5rem; align-items: center; justify-content: space-between; font-size: .875rem; }
+.rail-foot { padding: .6rem .75rem; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
+.rail-foot .row { justify-content: flex-start; }
 .main { padding: 1.25rem 1.5rem 3rem; max-width: 980px; width: 100%; }
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; }
@@ -137,3 +138,12 @@ th { color: var(--muted); font-weight: 500; }
 @font-face { font-family: "Baloo 2"; src: url("/assets/Baloo2.ttf"); font-weight: 400 800; }
 @font-face { font-family: "Mukta"; src: url("/assets/Mukta-ExtraBold.ttf"); font-weight: 800; }
 @font-face { font-family: "Hind"; src: url("/assets/Hind-Bold.ttf"); font-weight: 700; }
+
+/* plan page */
+.plan { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+@media (max-width: 860px) { .plan { grid-template-columns: 1fr; } }
+.trlist, .ideas { list-style: none; margin: 0; padding: 0; }
+.trlist li { display: flex; justify-content: space-between; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.trlist a { text-decoration: none; } .trlist a:hover { text-decoration: underline; }
+.ideas li { padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 8px; margin-bottom: .4rem; cursor: pointer; display: flex; flex-direction: column; }
+.ideas li:hover { background: var(--panel-2); } .ideas li.sel { border-color: var(--amber); }

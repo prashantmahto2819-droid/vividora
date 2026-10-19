@@ -1,6 +1,6 @@
 /* Vividora editor — CapCut-style workspace */
-.ed { --ed-bg: #0F1319; --ed-panel: #171C25; --ed-panel-2: #1F2632; --ed-line: #2A3340; --ed-accent: var(--amber);
-  display: grid; height: 100vh; height: 100dvh; background: var(--ed-bg); color: var(--text); overflow: hidden;
+:root { --ed-bg: #0F1319; --ed-panel: #171C25; --ed-panel-2: #1F2632; --ed-line: #2A3340; --ed-accent: var(--amber); }
+.ed { display: grid; height: 100vh; height: 100dvh; background: var(--ed-bg); color: var(--text); overflow: hidden;
   grid-template-columns: 64px 320px 1fr 300px; grid-template-rows: 52px 1fr 300px;
   grid-template-areas: "top top top top" "tabs panel stage inspector" "tl tl tl tl"; }
 .ed svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }

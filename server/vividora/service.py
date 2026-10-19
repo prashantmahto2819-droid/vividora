@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from . import db, queue, storage
+from . import db, notify, queue, storage
 from .config import settings
 from .engine import autocut
 from .engine.presets import caption_styles, platforms
@@ -131,11 +131,13 @@ def after_job(c, job: dict, result: dict) -> None:
         st = result.get("edl", {}).get("stats", {})
         set_status(c, pid, "review_cuts",
                    f"{st.get('cuts', 0)} कट सुझाए, {st.get('removed_seconds', 0)}s हटेंगे — जाँचें")
+        notify.on_event("review_cuts", project)
 
     elif kind == "shorts_plan":
         meta = {**project.get("meta", {}), "shorts": result.get("clips") or []}
         db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now(),
                                        "status_note": f"{len(meta['shorts'])} Shorts सुझाए — Shorts tab में देखें"})
+        notify.on_event("shorts", project, str(len(meta["shorts"])))
 
     elif kind == "publish":
         pub_id = job["payload"].get("publication_id")
@@ -148,6 +150,7 @@ def after_job(c, job: dict, result: dict) -> None:
             if conn_id:
                 db.update(c, "connections", conn_id, {"secrets": result["secrets"], "updated_at": db.now()})
         db.update(c, "projects", pid, {"status_note": f"{job['payload'].get('platform')} पर publish हुआ", "updated_at": db.now()})
+        notify.on_event("published", project, f"{job['payload'].get('platform')}: {result.get('url') or ''}")
 
     elif kind == "render":
         for f in result.get("files", []):
@@ -161,6 +164,7 @@ def after_job(c, job: dict, result: dict) -> None:
         if pending == 0:
             warns = result.get("warnings") or []
             set_status(c, pid, "review_output", " · ".join(warns) if warns else "render तैयार — देखें और मंज़ूरी दें")
+            notify.on_event("review_output", project, " · ".join(warns))
 
 
 def fail_job(c, job: dict, error: str) -> None:
@@ -172,10 +176,12 @@ def fail_job(c, job: dict, error: str) -> None:
         if job["kind"] == "publish" and job["payload"].get("publication_id"):
             db.update(c, "publications", job["payload"]["publication_id"],
                       {"status": "failed", "error": error[-500:], "finished_at": db.now()})
+            notify.on_event("publish_failed", db.get("projects", pid) or {"id": pid}, error.splitlines()[-1][:160] if error else "")
         db.update(c, "projects", pid, {"status_note": f"{job['kind']} असफल: {error.splitlines()[-1][:160] if error else 'error'}",
                                        "updated_at": db.now()})
         return
     set_status(c, pid, "failed", f"{job['kind']}: {error.splitlines()[-1][:200] if error else 'error'}")
+    notify.on_event("failed", db.get("projects", pid) or {"id": pid}, f"{job['kind']}: {error.splitlines()[-1][:160] if error else ''}")
 
 
 def request_render(c, project: dict, settings_in: dict) -> list[dict]:
