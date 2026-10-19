@@ -113,7 +113,27 @@ async def update_user(request: Request, user: dict):
     return ok(public_user(db.get("users", target["id"])))
 
 
+@require("viewer")
+async def brand_get(request: Request, user: dict):
+    ws = db.get("workspaces", user["workspace_id"])
+    return ok((ws.get("settings") or {}).get("brand", {}))
+
+
+@require("admin")
+async def brand_set(request: Request, user: dict):
+    data = await body(request)
+    keys = ("name", "logo_id", "primary", "highlight", "font", "caption_style", "grade_preset", "music", "watermark_pos", "hashtags", "cta")
+    brand = {k: data[k] for k in keys if k in data}
+    ws = db.get("workspaces", user["workspace_id"])
+    with db.tx() as c:
+        db.update(c, "workspaces", ws["id"], {"settings": {**(ws.get("settings") or {}), "brand": {**((ws.get("settings") or {}).get("brand", {})), **brand}}})
+        service.log(c, ws["id"], "brand.update", user_id=user["id"], detail={"fields": list(brand)})
+    return ok(brand)
+
+
 routes = [
+    Route("/brand", brand_get),
+    Route("/brand", brand_set, methods=["PUT"]),
     Route("/auth/login", login, methods=["POST"]),
     Route("/auth/logout", logout, methods=["POST"]),
     Route("/auth/me", me),

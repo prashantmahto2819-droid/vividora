@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS refs (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   project_id TEXT, kind TEXT NOT NULL DEFAULT 'other', url TEXT, note TEXT, created_by TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS refs_ws ON refs(workspace_id, created_at);
+CREATE TABLE IF NOT EXISTS history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id TEXT, note TEXT, settings TEXT NOT NULL DEFAULT '{}', edl TEXT, meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS history_project ON history(project_id, id);
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);

@@ -44,14 +44,30 @@ async def list_projects(request: Request, user: dict):
 async def create_project(request: Request, user: dict):
     data = await body(request)
     need(data, "title")
+    ws_settings = (db.get("workspaces", user["workspace_id"]) or {}).get("settings", {}) or {}
+    brand = ws_settings.get("brand", {}) or {}
+    brand_render = {}
+    if brand.get("caption_style"):
+        brand_render["caption_style"] = brand["caption_style"]
+    if any(brand.get(k) for k in ("primary", "highlight", "font")):
+        brand_render["captions"] = {**service.DEFAULT_RENDER["captions"], "primary": brand.get("primary", ""), "highlight": brand.get("highlight", ""), "font": brand.get("font", "")}
+    if brand.get("logo_id") or brand.get("grade_preset"):
+        from ..engine.catalog import GRADE_PRESETS
+        eff = {**service.DEFAULT_EFFECTS}
+        if brand.get("logo_id"):
+            eff["watermark"] = {"id": brand["logo_id"], "opacity": 0.75, "size": 0.12, "pos": brand.get("watermark_pos", "tr")}
+        if brand.get("grade_preset") in GRADE_PRESETS:
+            eff["grade"] = {k: v for k, v in GRADE_PRESETS[brand["grade_preset"]].items() if k != "label"}
+            eff["grade_preset"] = brand["grade_preset"]
+        brand_render["effects"] = eff
     p = {"id": db.new_id(), "workspace_id": user["workspace_id"], "created_by": user["id"],
          "title": data["title"].strip()[:200], "kind": data.get("kind", "talking_head"),
          "language": data.get("language") or "auto",
          "status": "review_cuts" if data.get("kind") == "montage" else "uploading",
          "status_note": "clips, music और text चुनकर montage बनाएँ" if data.get("kind") == "montage" else "upload का इंतज़ार",
          "meta": {}, "transcript": None, "edl": None,
-         "settings": {"render": {**((db.get("workspaces", user["workspace_id"]) or {}).get("settings", {}).get("render_defaults", {})),
-                                 **data.get("render", {})}, "autocut": data.get("autocut", {}),
+         "settings": {"render": {**brand_render, **(ws_settings.get("render_defaults", {}) or {}), **data.get("render", {})},
+                      "autocut": data.get("autocut", {}),
                       "autopilot": bool(data.get("autopilot", False)) and data.get("kind") != "montage"},
          "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
     with db.tx() as c:
@@ -99,6 +115,15 @@ async def update_project(request: Request, user: dict):
     if changes:
         changes["updated_at"] = db.now()
         with db.tx() as c:
+            if "settings" in changes or "edl" in changes:
+                # version history: keep the state BEFORE this change (last 40 per project, 1 per ~30 s)
+                last = db.row(c.execute("SELECT created_at FROM history WHERE project_id = ? ORDER BY id DESC LIMIT 1", (p["id"],)).fetchone())
+                recent = last and (db.now()[:16] == last["created_at"][:16])
+                if not recent:
+                    db.insert(c, "history", {"project_id": p["id"], "user_id": user["id"], "note": data.get("note") or ", ".join(changes.keys() - {"updated_at"}),
+                                             "settings": p["settings"], "edl": p.get("edl"), "meta": {"shorts": (p.get("meta") or {}).get("shorts")},
+                                             "created_at": db.now()})
+                    c.execute("DELETE FROM history WHERE project_id = ? AND id NOT IN (SELECT id FROM history WHERE project_id = ? ORDER BY id DESC LIMIT 40)", (p["id"], p["id"]))
             db.update(c, "projects", p["id"], changes)
             service.log(c, user["workspace_id"], "project.update", user_id=user["id"],
                         project_id=p["id"], detail={"fields": list(changes)})
@@ -146,6 +171,31 @@ async def render(request: Request, user: dict):
     except ValueError as e:
         raise ApiError(422, str(e))
     return ok({"jobs": jobs})
+
+
+@require("viewer")
+async def history_list(request: Request, user: dict):
+    p = own_project(request, user)
+    rows = db.rows(db.conn().execute("SELECT h.id, h.note, h.created_at, u.name AS user_name FROM history h LEFT JOIN users u ON u.id = h.user_id "
+                                     "WHERE h.project_id = ? ORDER BY h.id DESC LIMIT 40", (p["id"],)))
+    return ok(rows)
+
+
+@require("editor")
+async def history_restore(request: Request, user: dict):
+    p = own_project(request, user)
+    h = db.get("history", int(request.path_params["hid"]))
+    if not h or h["project_id"] != p["id"]:
+        raise ApiError(404, "version not found")
+    with db.tx() as c:
+        db.insert(c, "history", {"project_id": p["id"], "user_id": user["id"], "note": "restore से पहले", "settings": p["settings"],
+                                 "edl": p.get("edl"), "meta": {"shorts": (p.get("meta") or {}).get("shorts")}, "created_at": db.now()})
+        meta = {**(p.get("meta") or {})}
+        if (h.get("meta") or {}).get("shorts") is not None:
+            meta["shorts"] = h["meta"]["shorts"]
+        db.update(c, "projects", p["id"], {"settings": h["settings"], "edl": h["edl"], "meta": meta, "updated_at": db.now()})
+        service.log(c, user["workspace_id"], "project.restore", user_id=user["id"], project_id=p["id"], detail={"history_id": h["id"]})
+    return ok(_with_urls(service.project_view(db.get("projects", p["id"]))))
 
 
 @require("editor")
@@ -296,6 +346,8 @@ routes = [
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
     Route("/projects/{project_id}/archive", archive_now, methods=["POST"]),
+    Route("/projects/{project_id}/history", history_list),
+    Route("/projects/{project_id}/history/{hid}/restore", history_restore, methods=["POST"]),
     Route("/projects/{project_id}/restore", restore_now, methods=["POST"]),
     Route("/projects/{project_id}/shorts/render", shorts_render, methods=["POST"]),
     Route("/projects/{project_id}/reopen", reopen, methods=["POST"]),
