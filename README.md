@@ -26,7 +26,12 @@ Windows PC (NVIDIA GPU)            Ubuntu VM (Docker)
 - **Plan** — `engine/trends.py` (Google Trends RSS, YouTube top, watched channels), `engine/planner.py` (ideas → scripts), `api/plan.py`
 - **Notifications** — `notify.py` WhatsApp via Vivid Relay / any webhook; reply `ok <code>` approves
 - **AI** — `engine/llm.py` Gemini or Claude, optional; everything has an offline fallback
-- Setup guides: `docs/cloudflare-tunnel.md`
+- **Channels** — multi-channel workspaces: brand kit, niche, connections, library, analytics per channel (`api/channels.py`)
+- **Library** — 248-item licence-safe starter pack (`server/starter/`), free online search/import (Openverse, Pixabay, Jamendo)
+- **Body effects** — RVM cutout (`engine/matting.py`), stroke/glow/afterimage/clones/drop-in/blink/text-behind (`engine/effects.py`)
+- **Recorder** — camera + teleprompter (`web/dist/assets/record.js`)
+- **Autopilot** — `engine/autopilot.py`
+- Setup guides: `docs/first-video.md`, `docs/cloudflare-tunnel.md`, `docs/google-drive.md`; research: `docs/research-editors-2026.md`
 
 ## Editor (CapCut-style)
 
