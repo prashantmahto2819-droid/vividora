@@ -1,10 +1,24 @@
-"""Turn the original recording + cut list + captions into a finished video for one platform."""
+"""Turn the original recording + cut list + captions + effects into a finished
+video for one platform.
+
+`effects` (already resolved by the worker: library ids → local paths):
+  zoom      {enabled, strength}            auto punch-in at every cut
+  look      colour look id                 lut_path: a .cube file instead
+  flash     bool                           white flash on cuts
+  music     {path, volume, duck}           background music, ducked under speech
+  broll     [{path, type: video|image, start, end, fit: cover|pip, pos}]
+  titles    [{start, end, text, pos, size, color, bg}]
+  watermark {path, opacity, size, pos}
+  sfx       [{path, at, volume}]
+Times are on the output (post-cut) timeline.
+"""
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
 
+from . import effects as fx
 from . import ffmpeg
 from .autocut import keep_segments, remap_words, words_of
 from .captions import build_ass, build_srt, resolve_style
@@ -43,12 +57,22 @@ def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: flo
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1")
 
 
+def _cut_points(keep: list[tuple[float, float]]) -> list[float]:
+    """Output-timeline times where a jump cut happens."""
+    pts, t = [], 0.0
+    for a, b in keep:
+        t += b - a
+        pts.append(t)
+    return pts[:-1]
+
+
 def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript: dict | None,
            preset: dict, style: dict | None, out_dir: Path, name: str, hook: dict | None = None,
            focus_x: float = 0.5, focus_y: float = 0.5, burn_captions: bool | None = None,
-           caption_overrides: dict | None = None,
+           caption_overrides: dict | None = None, effects: dict | None = None,
            encoder_preset: str | None = None, on_progress: ProgressFn | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
+    e = effects or {}
     w, h = int(preset["width"]), int(preset["height"])
     src_fps = float(meta.get("fps") or 30.0)
     fps_max = float(preset.get("video", {}).get("fps_max", 60))
@@ -60,6 +84,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     if not keep:
         raise ValueError("कट के बाद कुछ नहीं बचा — कुछ कट बंद करें")
     new_dur = sum(b - a for a, b in keep)
+    cuts = _cut_points(keep)
 
     words = remap_words(words_of(transcript), keep) if transcript else []
     style = resolve_style(style, caption_overrides) if style else style
@@ -67,40 +92,103 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     work = out_dir / f".{name}"
     work.mkdir(exist_ok=True)
 
+    inputs: list[str] = ["-i", str(video)]
+    next_in = 1
+    chains: list[str] = []
+
+    # ---- video base: cuts → frame fit → zoom → look → flash
     sel = _select_expr(keep, fps)
     frame = _frame_filter(int(meta.get("width", w)), int(meta.get("height", h)), w, h,
                           preset.get("fit", "crop"), focus_x, focus_y)
-    vchain = f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}"
-    has_text = (burn and words and style) or (hook and hook.get("text"))
+    v = f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}"
+    zoom = e.get("zoom") or {}
+    if zoom.get("enabled"):
+        plan = fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0)))
+        if len(plan) > 1:
+            v += "," + fx.zoom_filter(plan, w, h, fx=0.5, fy=min(0.9, max(0.1, focus_y)))
+    look = fx.look_filter(e.get("look"), Path(e["lut_path"]) if e.get("lut_path") else None)
+    if look:
+        v += "," + look
+    if e.get("flash") and cuts:
+        v += "," + fx.flash_filter(cuts)
+    v += "[vbase]"
+    chains.append(v)
+    cur = "[vbase]"
+
+    # ---- B-roll / image overlays
+    for i, item in enumerate(e.get("broll") or []):
+        path = item.get("path")
+        if not path or float(item.get("end", 0)) <= float(item.get("start", 0)):
+            continue
+        inputs += fx.overlay_input_args(item, Path(path))
+        chains.append(fx.overlay_filter(item, next_in, w, h, cur, f"[vo{i}]", i))
+        cur = f"[vo{i}]"
+        next_in += 1
+
+    # ---- watermark
+    wm = e.get("watermark") or {}
+    if wm.get("path"):
+        inputs += ["-i", str(wm["path"])]
+        chains.append(fx.watermark_filter(next_in, w, h, cur, "[vwm]", float(wm.get("opacity", 0.75)),
+                                          float(wm.get("size", 0.14)), wm.get("pos", "tr")))
+        cur = "[vwm]"
+        next_in += 1
+
+    # ---- captions + hook + titles (one ASS file)
+    titles = [t for t in (e.get("titles") or []) if t.get("text")]
+    has_text = (burn and words and style) or (hook and hook.get("text")) or titles
+    tail = ""
     if has_text:
+        t_style, t_events = fx.title_events(titles, w, h, (style or {}).get("font", "Poppins")) if titles else ("", [])
         ass = work / "captions.ass"
         ass.write_text(
             build_ass(words if (burn and style) else [], style or {}, w, h,
                       margin_v_ratio=float(preset.get("caption_margin_v", 0.2)),
-                      scale=float(preset.get("caption_scale", 1.0)), hook=hook, duration=new_dur),
+                      scale=float(preset.get("caption_scale", 1.0)), hook=hook, duration=new_dur,
+                      extra_styles=[t_style] if t_style else None, extra_events=t_events),
             encoding="utf-8",
         )
         sub = f"subtitles=filename='{ffmpeg.escape_filter_path(ass)}'"
         if FONTS_DIR.exists():
             sub += f":fontsdir='{ffmpeg.escape_filter_path(FONTS_DIR)}'"
-        vchain += f",{sub}"
-    vchain += ",format=yuv420p[v]"
-
-    inputs = ["-i", str(video)]
-    chains = [vchain]
+        tail += f"{sub},"
+    chains.append(f"{cur}{tail}format=yuv420p[v]")
     maps = ["-map", "[v]"]
+
+    # ---- audio: voice (cut) → music duck → sfx → loudnorm
     a_cfg = preset.get("audio", {})
     if audio is not None or meta.get("has_audio"):
         if audio is not None:
             inputs += ["-i", str(audio)]
-            a_in = "[1:a]"
+            a_in = f"[{next_in}:a]"
+            next_in += 1
         else:
             a_in = "[0:a]"
-        chains.append(
-            f"{a_in}aselect='{sel}',asetpts=N/SR/TB,"
-            f"loudnorm=I={a_cfg.get('loudness', -14)}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,"
-            f"aresample=48000[a]"
-        )
+        chains.append(f"{a_in}aselect='{sel}',asetpts=N/SR/TB,aformat=sample_rates=48000:channel_layouts=mono[voice]")
+        cur_a = "[voice]"
+        music = e.get("music") or {}
+        if music.get("path"):
+            inputs += ["-stream_loop", "-1", "-i", str(music["path"])]
+            chain, cur_a = fx.music_chain(cur_a, next_in, volume=float(music.get("volume", 0.18)),
+                                          duck=bool(music.get("duck", True)), duration=new_dur)
+            chains.append(chain)
+            next_in += 1
+        sfx_labels = []
+        for i, s in enumerate(e.get("sfx") or []):
+            if not s.get("path"):
+                continue
+            inputs += ["-i", str(s["path"])]
+            ms = int(float(s.get("at", 0)) * 1000)
+            chains.append(f"[{next_in}:a]aformat=sample_rates=48000:channel_layouts=mono,"
+                          f"volume={float(s.get('volume', 0.8)):.2f},adelay={ms}|{ms}[sfx{i}]")
+            sfx_labels.append(f"[sfx{i}]")
+            next_in += 1
+        if sfx_labels:
+            chains.append(f"{cur_a}{''.join(sfx_labels)}amix=inputs={1 + len(sfx_labels)}:duration=first:"
+                          f"dropout_transition=0:normalize=0[asfx]")
+            cur_a = "[asfx]"
+        chains.append(f"{cur_a}loudnorm=I={a_cfg.get('loudness', -14)}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,"
+                      f"aresample=48000[a]")
         maps += ["-map", "[a]"]
 
     script = work / "filter.txt"
@@ -120,7 +208,11 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
 
     files = [{"kind": "render", "path": out, "mime": "video/mp4", "label": preset["id"],
               "meta": {"preset": preset["id"], "width": w, "height": h, "duration": round(new_dur, 2),
-                       "fps": fps, "captions": style.get("id") if (burn and style) else None}}]
+                       "fps": fps, "captions": style.get("id") if (burn and style) else None,
+                       "effects": {"zoom": bool(zoom.get("enabled")), "look": e.get("look") or None,
+                                   "music": bool((e.get("music") or {}).get("path")),
+                                   "broll": len(e.get("broll") or []), "titles": len(titles),
+                                   "watermark": bool(wm.get("path"))}}}]
     if preset.get("sidecar_srt") and words:
         srt = out_dir / f"{name}.srt"
         srt.write_text(build_srt(words), encoding="utf-8")

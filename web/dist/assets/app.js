@@ -1,4 +1,5 @@
 // Vividora dashboard — plain JS, no build step. Served by the API from web/dist.
+import * as ED from "./editor.js";
 
 const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null,
             route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null };
@@ -52,11 +53,19 @@ function schedulePoll() {
 function renderSoft() { if (document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) { schedulePoll(); return; } render(); }
 
 // ---------- views ----------
+const EDITOR_STATUS = ["review_cuts", "rendering", "review_output", "approved"];
 function render() {
   const app = $("#app");
-  if (!S.token) { app.innerHTML = loginView(); bindLogin(); return; }
+  if (!S.token) { ED.unmount(); app.innerHTML = loginView(); bindLogin(); return; }
   const r = S.route;
   const detail = r.kind === "projects" && r.id;
+  if (detail && S.project && EDITOR_STATUS.includes(S.project.status) && S.presets) {
+    const key = "editor:" + S.project.id;
+    if (app.dataset.mode !== key) { app.dataset.mode = key; app.innerHTML = `<div id="edroot"></div>`; }
+    ED.mount($("#edroot"), S.project, { S, api, esc, fmt, toast, load, render, go, stylePreview });
+    return;
+  }
+  app.dataset.mode = "shell"; ED.unmount();
   app.innerHTML = `<div class="shell">
     <aside class="rail ${detail || r.kind !== "home" ? "hidden-mobile" : ""}">
       <div class="rail-head"><a class="brand" href="#/"><i></i>Vividora</a>

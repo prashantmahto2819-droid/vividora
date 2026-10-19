@@ -64,6 +64,14 @@ class ApiClient:
             shutil.copyfileobj(r, f, 1024 * 1024)
         return dest
 
+    def download_library(self, item_id: str, dest: Path) -> Path:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        req = urllib.request.Request(f"{self.base}/api/worker/library/{item_id}",
+                                     headers={"X-Worker-Token": self.token})
+        with urllib.request.urlopen(req, timeout=600) as r, dest.open("wb") as f:
+            shutil.copyfileobj(r, f, 1024 * 1024)
+        return dest
+
     def upload(self, job_id: str, path: Path, kind: str, label: str | None = None) -> dict:
         q = f"kind={kind}&name={urllib.request.quote(path.name)}"
         if label:

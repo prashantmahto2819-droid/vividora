@@ -40,6 +40,41 @@ def _progress(client: ApiClient, job_id: str):
     return cb
 
 
+def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path) -> dict:
+    """Download library items the render refers to; replace ids with local paths."""
+    e = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+         for k, v in (effects or {}).items()}
+    cache: dict[str, Path] = {}
+
+    def fetch(item_id: str) -> Path | None:
+        if not item_id:
+            return None
+        if item_id not in cache:
+            cache[item_id] = client.download_library(item_id, tmp / "lib" / item_id)
+        return cache[item_id]
+
+    look = e.get("look") or "none"
+    if isinstance(look, str) and look.startswith("lut:"):
+        p = fetch(look[4:])
+        e["lut_path"] = str(p) if p else None
+        e["look"] = "none"
+    for key in ("music", "watermark"):
+        d = e.get(key) or {}
+        if isinstance(d, dict) and d.get("id"):
+            p = fetch(d["id"])
+            e[key] = {**d, "path": str(p) if p else None}
+    for key in ("broll", "sfx"):
+        out = []
+        for item in e.get(key) or []:
+            if isinstance(item, dict) and item.get("id"):
+                p = fetch(item["id"])
+                if p:
+                    kind = "image" if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif") else "video"
+                    out.append({**item, "path": str(p), "type": item.get("type") or kind})
+        e[key] = out
+    return e
+
+
 def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> dict:
     with tempfile.TemporaryDirectory(prefix="vividora_") as td:
         tmp = Path(td)
@@ -77,6 +112,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 focus_x=float(p.get("focus_x", 0.5)), focus_y=float(p.get("focus_y", 0.5)),
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
+                effects=_resolve_effects(client, p.get("effects"), tmp),
                 encoder_preset=os.getenv("X264_PRESET") or None,
                 on_progress=_progress(client, job["id"]),
             )

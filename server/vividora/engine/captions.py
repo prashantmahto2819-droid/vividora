@@ -115,7 +115,8 @@ def resolve_style(style: dict, overrides: dict | None) -> dict:
 
 
 def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin_v_ratio: float,
-              scale: float = 1.0, hook: dict | None = None, duration: float | None = None) -> str:
+              scale: float = 1.0, hook: dict | None = None, duration: float | None = None,
+              extra_styles: list[str] | None = None, extra_events: list[str] | None = None) -> str:
     base = min(width, height)
     size = round(style.get("size", 0.06) * base * scale)
     outline = round(style.get("outline", 0.005) * base, 1)
@@ -164,9 +165,11 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
         f"Style: Hook,{hook_font},{hook_size},{ass_color('#111111')},{hl},{hl},{hl},-1,0,0,0,100,100,0,0,"
         f"3,{round(0.02 * base, 1)},0,8,{margin_lr},{margin_lr},"
         f"{round(0.13 * height if height > width else 0.06 * height)},1",
+        *(extra_styles or []),
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
+    lines.extend(extra_events or [])
 
     prefix = ""
     if glow:

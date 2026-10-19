@@ -19,6 +19,11 @@ Windows PC (NVIDIA GPU)            Ubuntu VM (Docker)
                                           ▲  dashboard (PWA) · phone / laptop
 ```
 
+## Editor (CapCut-style)
+
+`web/dist/assets/editor.js` — side tools (कट · Caption · Text · Media · Audio · Effects · Overlay), live preview with 9:16/16:9/1:1 frame + safe zone, inspector, multi-track timeline (Video/Caption/Text/B-roll/Audio) with drag/resize, I/O/X manual cuts, keyboard shortcuts, autosave.
+Render-time effects live in `server/vividora/engine/effects.py`: auto zoom/punch-in, colour looks + LUT, cut flash, background music with side-chain ducking, B-roll (cover / PiP), logo watermark, title overlays, SFX. Workspace library (`/api/library`) stores music, SFX, B-roll, images, logos, LUTs.
+
 ## Layout
 
 | folder | what |

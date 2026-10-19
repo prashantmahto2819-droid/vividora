@@ -15,6 +15,17 @@ from .config import settings
 from .engine import autocut
 from .engine.presets import caption_styles, platforms
 
+DEFAULT_EFFECTS = {
+    "zoom": {"enabled": False, "strength": 1.0},     # auto punch-in on cuts
+    "look": "none",                                   # colour look id, or lut:<library_id>
+    "flash": False,                                   # white flash at cuts
+    "music": {"id": "", "volume": 0.18, "duck": True},
+    "broll": [],        # [{id, start, end, fit: cover|pip, pos: tl|tr|bl|br}]
+    "titles": [],       # [{start, end, text, pos: top|center|bottom, size, color, bg}]
+    "watermark": {"id": "", "opacity": 0.75, "size": 0.14, "pos": "tr"},
+    "sfx": [],          # [{id, at, volume}]
+}
+
 DEFAULT_RENDER = {
     "presets": ["yt-long", "yt-short"],
     "caption_style": "karaoke",
@@ -23,6 +34,7 @@ DEFAULT_RENDER = {
     "focus_x": 0.5,
     "focus_y": 0.5,
     "hook": {"text": "", "seconds": 3},
+    "effects": DEFAULT_EFFECTS,
 }
 
 

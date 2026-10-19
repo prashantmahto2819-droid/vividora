@@ -8,6 +8,7 @@ from starlette.routing import Route
 
 from .. import db, service, storage
 from ..engine import autocut
+from ..engine.effects import LOOKS
 from ..engine.presets import caption_styles, platforms
 from ..security import media_token, read_token
 from .deps import ApiError, body, need, ok, own_project, require
@@ -195,7 +196,7 @@ async def media(request: Request):
 async def presets(request: Request, user: dict):
     fonts = ["Noto Sans Devanagari", "Poppins", "Baloo 2", "Mukta", "Hind"]
     return ok({"platforms": list(platforms().values()), "caption_styles": list(caption_styles().values()),
-               "fonts": fonts,
+               "fonts": fonts, "looks": [{"id": k, "label": v["label"]} for k, v in LOOKS.items()],
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
 
