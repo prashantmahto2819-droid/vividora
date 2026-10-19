@@ -849,7 +849,7 @@ function renderExport() {
       <ul class="plist">${p.meta.publish_plan.map((it, i) => `<li><input type="checkbox" data-pp="${i}" ${it.selected !== false ? "checked" : ""}><div class="grow" style="min-width:0"><b class="small">${PLAT[it.platform]} · ${esc(it.label)}</b><br><input class="small" data-ppt="${i}" value="${esc(it.title)}" style="width:100%"></div></li>`).join("")}</ul>
       <p class="small muted">title/description AI ने transcript से लिखे — बदलना हो तो यहीं बदलें; अलग से publish करने के लिए ऊपर हर output का Publish button।</p></div>` : ""}
     ${E.pubFor ? publishForm(E.pubFor) : ""}
-    <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? "मंज़ूर ✓" : ""}</span>
+    <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? `मंज़ूर ✓ ${p.meta?.archived_at ? `· archived (${esc(p.meta.archive || "")}) <button class="btn small quiet" id="restore">raw वापस लाएँ</button>` : E.canEdit ? `<button class="btn small quiet" id="archive" title="raw files को Drive/archive पर भेजें, server खाली">☁ archive</button>` : ""}` : ""}</span>
       <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit && !E.montage ? `<button class="btn primary" id="go-render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा…" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };
   $$("[data-pub]", m).forEach((b) => (b.onclick = () => { const a = p.assets.find((x) => x.id === b.dataset.pub); E.pubFor = { asset: a, title: "", description: "", tags: "", conn: "", privacy: "private", when: "" }; renderExport(); $("#pubform", m)?.scrollIntoView({ behavior: "smooth" }); }));
@@ -864,6 +864,8 @@ function renderExport() {
     await save(false);
     try { const rs = JSON.parse(JSON.stringify(E.rs)); await api("POST", `/projects/${E.pid}/render`, rs); toast("render शुरू"); await load(); } catch (err) { toast(err.message); }
   };
+  const ar = $("#archive", m); if (ar) ar.onclick = async () => { ar.disabled = true; ar.textContent = "भेज रहा है…"; try { const r = await api("POST", `/projects/${E.pid}/archive`); toast(`${r.moved} files archive, ${r.backed_up} renders backup`); await load(); } catch (e) { toast(e.message); ar.disabled = false; ar.textContent = "☁ archive"; } };
+  const rs0 = $("#restore", m); if (rs0) rs0.onclick = async () => { rs0.disabled = true; try { const r = await api("POST", `/projects/${E.pid}/restore`); toast(`${r.restored} files वापस`); await load(); } catch (e) { toast(e.message); rs0.disabled = false; } };
   const ap = $("#approve", m); if (ap) ap.onclick = async () => { if (confirm("यह वीडियो मंज़ूर करें?")) { await api("POST", `/projects/${E.pid}/approve`); toast("मंज़ूर"); await load(); } };
 }
 

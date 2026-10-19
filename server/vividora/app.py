@@ -33,6 +33,22 @@ async def spa(request: Request):
     return JSONResponse({"ok": True, "message": "Vividora API चालू है। dashboard build नहीं मिला (web-dist)."})
 
 
+async def _scheduler():
+    """Hourly housekeeping: requeue stale jobs, archive old approved projects."""
+    import asyncio
+    from . import archive, queue
+    from starlette.concurrency import run_in_threadpool
+    await asyncio.sleep(60)
+    while True:
+        try:
+            with db.tx() as c:
+                queue.requeue_stale(c)
+            await run_in_threadpool(archive.sweep)
+        except Exception as e:  # noqa: BLE001
+            log.warning("scheduler: %s", e)
+        await asyncio.sleep(3600)
+
+
 def create_app() -> Starlette:
     logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,7 +69,16 @@ def create_app() -> Starlette:
     if settings.cors_origins:
         middleware.append(Middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                                      allow_methods=["*"], allow_headers=["*"], allow_credentials=True))
-    app = Starlette(routes=routes, middleware=middleware,
+    import asyncio
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        task = asyncio.create_task(_scheduler())
+        yield
+        task.cancel()
+
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan,
                     exception_handlers={HTTPException: error_handler})
     log.info("Vividora %s · media=%s · db=%s", __version__, settings.media_root, settings.database_path)
     return app

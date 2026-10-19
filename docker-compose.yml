@@ -16,6 +16,7 @@ services:
       - ${MEDIA_DIR:-/srv/studio/media}:/media
       - ${ARCHIVE_DIR:-/srv/studio/archive}:/archive
       - ./web/dist:/app/web-dist:ro
+      - ${RCLONE_CONFIG_DIR:-/home/prashant/.config/rclone}:/root/.config/rclone
     ports:
       - "8000:8000"
     healthcheck:

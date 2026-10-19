@@ -113,7 +113,9 @@ async def upload(request: Request):
 async def workers_status(request: Request, user: dict):
     ws = db.rows(db.conn().execute("SELECT * FROM workers ORDER BY last_seen_at DESC"))
     q = db.conn().execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall()
-    return ok({"workers": ws, "jobs": {r[0]: r[1] for r in q}, "disk": storage.disk_usage()})
+    from .. import archive
+    return ok({"workers": ws, "jobs": {r[0]: r[1] for r in q}, "disk": storage.disk_usage(),
+               "archive": {"backend": archive.backend(), "remote": archive.REMOTE or None, "after_days": service.settings.archive_after_days}})
 
 
 @require("viewer")

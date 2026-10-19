@@ -149,6 +149,32 @@ async def render(request: Request, user: dict):
 
 
 @require("editor")
+async def archive_now(request: Request, user: dict):
+    from .. import archive
+    p = own_project(request, user)
+    if p["status"] != "approved":
+        raise ApiError(400, "सिर्फ़ मंज़ूर projects archive होते हैं")
+    from starlette.concurrency import run_in_threadpool
+    r = await run_in_threadpool(archive.archive_project, p["id"])
+    if r.get("error"):
+        raise ApiError(400, r["error"])
+    with db.tx() as c:
+        service.log(c, user["workspace_id"], "project.archive", user_id=user["id"], project_id=p["id"], detail=r)
+    return ok(r)
+
+
+@require("editor")
+async def restore_now(request: Request, user: dict):
+    from .. import archive
+    p = own_project(request, user)
+    from starlette.concurrency import run_in_threadpool
+    r = await run_in_threadpool(archive.restore_project, p["id"])
+    if r.get("error"):
+        raise ApiError(400, r["error"])
+    return ok(r)
+
+
+@require("editor")
 async def montage_render(request: Request, user: dict):
     p = own_project(request, user)
     if p["status"] == "rendering":
@@ -268,6 +294,8 @@ routes = [
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
+    Route("/projects/{project_id}/archive", archive_now, methods=["POST"]),
+    Route("/projects/{project_id}/restore", restore_now, methods=["POST"]),
     Route("/projects/{project_id}/shorts/render", shorts_render, methods=["POST"]),
     Route("/projects/{project_id}/reopen", reopen, methods=["POST"]),
     Route("/projects/{project_id}/keep", preview_keep),
