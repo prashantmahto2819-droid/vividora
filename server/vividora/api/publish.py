@@ -196,6 +196,40 @@ async def create_publication(request: Request, user: dict):
 
 
 @require("editor")
+async def publish_plan_run(request: Request, user: dict):
+    """Queue every selected item of the autopilot publish plan (after approval)."""
+    p = own_project(request, user)
+    if p["status"] != "approved":
+        raise ApiError(400, "पहले मंज़ूरी दें")
+    data = await body(request)
+    items = data.get("items") or (p.get("meta") or {}).get("publish_plan") or []
+    queued = []
+    with db.tx() as c:
+        for it in items:
+            if not it.get("selected", True):
+                continue
+            asset = db.get("assets", it.get("asset_id")); conn = db.get("connections", it.get("connection_id"))
+            if not asset or asset["project_id"] != p["id"] or not conn or conn["workspace_id"] != user["workspace_id"]:
+                continue
+            payload = {"title": str(it.get("title") or p["title"])[:100], "description": str(it.get("description") or "")[:5000],
+                       "tags": [str(t)[:40] for t in (it.get("tags") or [])][:60], "privacy": it.get("privacy") or "public",
+                       "publish_at": it.get("publish_at") or None, "scheduled_at": it.get("scheduled_at") or None,
+                       "category": "people", "language": p.get("language") if p.get("language") in ("hi", "en") else None,
+                       "kind": "video" if asset["meta"].get("width", 0) > asset["meta"].get("height", 0) else "reel"}
+            pub = {"id": db.new_id(), "workspace_id": user["workspace_id"], "project_id": p["id"], "asset_id": asset["id"],
+                   "connection_id": conn["id"], "platform": conn["platform"], "status": "queued", "payload": payload,
+                   "remote_id": None, "url": None, "error": None, "created_by": user["id"], "created_at": db.now(), "finished_at": None}
+            db.insert(c, "publications", pub)
+            queue.enqueue(c, p["id"], "publish", {
+                "publication_id": pub["id"], "platform": conn["platform"], "asset_id": asset["id"], "secrets": conn["secrets"],
+                "payload": payload, "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=48)}" if settings.public_url else None,
+                "thumb_asset_id": (service.asset_of(p["id"], "thumb") or {}).get("id"), "dry_run": settings.publish_dry_run})
+            queued.append(pub["id"])
+        service.log(c, user["workspace_id"], "publish.plan", user_id=user["id"], project_id=p["id"], detail={"count": len(queued)})
+    return ok({"queued": queued})
+
+
+@require("editor")
 async def suggest_metadata(request: Request, user: dict):
     """Title / description / tags drafted from the transcript (LLM if a key is set, else heuristics)."""
     p = own_project(request, user)
@@ -226,5 +260,6 @@ routes = [
     Route("/projects/{project_id}/publications", list_publications),
     Route("/projects/{project_id}/publications", create_publication, methods=["POST"]),
     Route("/projects/{project_id}/metadata", suggest_metadata, methods=["POST"]),
+    Route("/projects/{project_id}/publish-plan", publish_plan_run, methods=["POST"]),
 ]
 public_routes = [Route("/pub/{token}", public_file)]

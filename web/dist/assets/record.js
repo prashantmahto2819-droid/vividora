@@ -68,7 +68,7 @@ export function mount(root, ctx) {
     </div>
     <div class="rec-review" id="rec-review" hidden>
       <video id="rec-out" controls playsinline></video>
-      <div class="row" style="margin-top:.5rem"><input id="rec-title" placeholder="वीडियो का नाम" style="flex:1"><button class="btn primary" id="rec-upload">Upload → auto edit</button><button class="btn quiet" id="rec-discard">हटाएँ</button></div>
+      <div class="row" style="margin-top:.5rem"><input id="rec-title" placeholder="वीडियो का नाम" style="flex:1"><label class="chk small"><input type="checkbox" id="rec-ap" checked> ✈ autopilot</label><button class="btn primary" id="rec-upload">Upload → auto edit</button><button class="btn quiet" id="rec-discard">हटाएँ</button></div>
       <div id="rec-prog"></div>
     </div>
   </div>`;
@@ -186,7 +186,7 @@ async function upload() {
   const ext = R.blob.type.includes("mp4") ? "mp4" : "webm";
   const file = new File([R.blob], `recording_${Date.now()}.${ext}`, { type: R.blob.type });
   try {
-    const p = await api("POST", "/projects", { title: $("#rec-title", R.root).value.trim() || "Recording", language: R.language });
+    const p = await api("POST", "/projects", { title: $("#rec-title", R.root).value.trim() || "Recording", language: R.language, autopilot: $("#rec-ap", R.root)?.checked !== false });
     if (R.scriptIdea) api("PATCH", `/ideas/${R.scriptIdea.id}`, { project_id: p.id, status: "recorded" }).catch(() => {});
     await uploadFile(p.id, file, (d, t) => { $("#rec-prog", R.root).innerHTML = `<p class="small muted">upload ${(d / t * 100).toFixed(0)}%</p><div class="progress"><i style="width:${(d / t * 100).toFixed(0)}%"></i></div>`; });
     toast("upload पूरा — auto edit शुरू"); R.blob = null; go("/projects/" + p.id);

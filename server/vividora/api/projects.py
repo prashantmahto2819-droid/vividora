@@ -51,7 +51,8 @@ async def create_project(request: Request, user: dict):
          "status_note": "clips, music और text चुनकर montage बनाएँ" if data.get("kind") == "montage" else "upload का इंतज़ार",
          "meta": {}, "transcript": None, "edl": None,
          "settings": {"render": {**((db.get("workspaces", user["workspace_id"]) or {}).get("settings", {}).get("render_defaults", {})),
-                                 **data.get("render", {})}, "autocut": data.get("autocut", {})},
+                                 **data.get("render", {})}, "autocut": data.get("autocut", {}),
+                      "autopilot": bool(data.get("autopilot", False)) and data.get("kind") != "montage"},
          "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
     with db.tx() as c:
         db.insert(c, "projects", p)

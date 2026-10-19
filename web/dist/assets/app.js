@@ -38,6 +38,7 @@ async function load() {
   if (!S.token) return;
   if (!S.presets) S.presets = await api("GET", "/presets").catch(() => null);
   S.projects = await api("GET", "/projects");
+  if (S.route.kind === "home") { const [t, i, a] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [] })), api("GET", "/ideas").catch(() => []), api("GET", "/analytics").catch(() => ({ videos: [] }))]); S.homeTrends = t.trends || []; S.ideas = i; S.analytics = a; }
   if (S.route.kind === "projects" && S.route.id) {
     S.project = await api("GET", "/projects/" + S.route.id).catch(() => null);
   } else S.project = null;
@@ -83,7 +84,7 @@ function render() {
       <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
         <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/analytics">analytics</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
     </aside>
-    <main class="main">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : r.kind === "analytics" ? analyticsView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
+    <main class="main ${r.kind === "home" ? "wide" : ""}">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : r.kind === "analytics" ? analyticsView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
   </div>`;
   $("#logout").onclick = logout;
   if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics();
@@ -100,14 +101,28 @@ function projRow(p) {
 function homeView() {
   const review = S.projects.filter((p) => p.status === "review_cuts" || p.status === "review_output");
   const working = S.projects.filter((p) => ["preparing", "transcribing", "cutting", "rendering"].includes(p.status));
-  return `<h1>नमस्ते, ${esc(S.user.name.split(" ")[0])}</h1>
-    <p class="muted">${review.length ? `${review.length} वीडियो आपकी जाँच का इंतज़ार कर रहे हैं।` : working.length ? `${working.length} वीडियो पर काम चल रहा है।` : "सब शांत है। नई recording डालें।"}</p>
-    ${review.length ? `<div class="section"><h2>जाँच के लिए</h2>${review.map(projRow).join("")}</div>` : ""}
-    ${working.length ? `<div class="section"><h2>चल रहा है</h2>${working.map(projRow).join("")}</div>` : ""}
-    <div class="section"><h2>कैसे काम करता है</h2>
-      <ol class="muted"><li>recording upload करें (फ़ोन से भी)</li><li>Vividora आवाज़ साफ़ करता है, transcript बनाता है, चुप्पी और गलत take ढूँढता है</li><li>आप कट जाँचें, caption style और platform चुनें, render करें</li><li>वीडियो देखकर मंज़ूरी दें, फिर download या publish</li></ol></div>`;
+  const approved = S.projects.filter((p) => p.status === "approved");
+  const canEdit = S.user.role !== "viewer";
+  const vids = (S.analytics?.videos || []); const views = vids.reduce((a, v) => a + (v.views || 0), 0);
+  const ideas = (S.ideas || []).filter((i) => i.status === "approved").slice(0, 4);
+  const trends = (S.homeTrends || []).slice(0, 6);
+  const hour = new Date().getHours(); const greet = hour < 12 ? "सुप्रभात" : hour < 17 ? "नमस्ते" : "शुभ संध्या";
+  const card = (p) => { const [label, cls] = STATUS[p.status] || [p.status, ""]; return `<a class="pcard" href="#/projects/${p.id}">
+      <div class="pthumb">${p.thumb_url ? `<img src="${p.thumb_url}" alt="">` : `<div class="ph">${p.kind === "montage" ? "🎵" : "🎬"}</div>`}<span class="status ${cls}">${label}</span>${p.settings?.autopilot ? `<span class="ap">✈ autopilot</span>` : ""}</div>
+      <div class="pbody"><b>${esc(p.title)}</b><span class="small muted">${p.meta?.duration ? fmt(p.meta.duration) + " · " : ""}${new Date(p.updated_at).toLocaleDateString("hi-IN")}</span>${["preparing", "transcribing", "cutting", "rendering"].includes(p.status) ? `<div class="progress"><i class="indet"></i></div>` : ""}</div></a>`; };
+  return `<div class="home">
+    <div class="hhero"><div><p class="kicker">${greet}, ${esc(S.user.name.split(" ")[0])}</p><h1>${review.length ? `${review.length} वीडियो आपकी मंज़ूरी का इंतज़ार कर रहे हैं` : working.length ? `${working.length} वीडियो पर काम चल रहा है` : "आज क्या बनाएँ?"}</h1>
+      <p class="muted">Record करें या upload — Vividora cuts, captions, zoom, music, Shorts और titles तैयार कर देगा। आप सिर्फ़ approve करें।</p></div>
+      ${canEdit ? `<div class="hactions"><a class="hbtn" href="#/record"><i>⏺</i><b>Record</b><span>camera + teleprompter</span></a><a class="hbtn" href="#/new"><i>⬆</i><b>Upload</b><span>recording / clips</span></a><a class="hbtn" href="#/new?type=montage"><i>🎵</i><b>Montage</b><span>music + clips</span></a><a class="hbtn" href="#/plan"><i>✨</i><b>Plan</b><span>trends · ideas · script</span></a></div>` : ""}</div>
+    <div class="hstats"><div><b>${review.length}</b><span>मंज़ूरी बाकी</span></div><div><b>${working.length}</b><span>चल रहे</span></div><div><b>${approved.length}</b><span>मंज़ूर</span></div><div><b>${vids.length}</b><span>published</span></div><div><b>${views.toLocaleString("en-IN")}</b><span>views</span></div></div>
+    ${review.length ? `<div class="hsec"><div class="row between"><h2>जाँच के लिए</h2></div><div class="pgrid">${review.map(card).join("")}</div></div>` : ""}
+    ${working.length ? `<div class="hsec"><h2>चल रहा है</h2><div class="pgrid">${working.map(card).join("")}</div></div>` : ""}
+    <div class="hcols">
+      <div class="hsec"><div class="row between"><h2>हाल के projects</h2><a class="small muted" href="#/new">+ नया</a></div>${S.projects.length ? `<div class="pgrid">${S.projects.slice(0, 8).map(card).join("")}</div>` : `<div class="empty"><p>अभी कोई project नहीं।</p><a class="btn primary" href="#/record">पहली recording करें</a></div>`}</div>
+      <div class="hside"><div class="hsec"><div class="row between"><h2>Record करने के लिए</h2><a class="small muted" href="#/plan">सब</a></div>${ideas.length ? `<ul class="hlist">${ideas.map((i) => `<li><a href="#/record"><b>${esc(i.title)}</b>${i.script ? `<span class="tag manual">script ✓</span>` : ""}</a></li>`).join("")}</ul>` : `<p class="small muted">Plan में ideas बनाएँ → "बनाना है" में रखें, यहाँ दिखेंगे।</p>`}</div>
+      <div class="hsec"><div class="row between"><h2>आज trending</h2><a class="small muted" href="#/plan">radar</a></div>${trends.length ? `<ul class="hlist">${trends.map((r) => `<li>${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.traffic ? r.meta.traffic + "+" : r.meta?.channel ? esc(r.meta.channel) : ""}</span></li>`).join("")}</ul>` : `<p class="small muted">Plan → "ताज़ा करें"</p>`}</div></div>
+    </div></div>`;
 }
-
 function loginView() {
   return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका video studio</p>
     <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
@@ -131,6 +146,7 @@ function newView() {
     <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का" value="${idea ? esc(idea.title) : ""}"></div>
     <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
     <div class="drop" id="drop" data-upload="1"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" multiple hidden><b>फ़ाइल(ें) यहाँ छोड़ें या चुनें</b><br><span class="muted small">mp4, mov, mkv, webm · 20 GB तक · कई clips चुनें तो क्रम से एक timeline पर जुड़ेंगी</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
+    <label class="chk" style="margin:.5rem 0;display:flex;gap:.5rem;align-items:center"><input type="checkbox" name="autopilot" checked> <span><b>✈ Autopilot</b> — upload के बाद पूरा edit अपने-आप (cuts, captions, zoom, music, Shorts, titles); आप सिर्फ़ देखकर approve करें</span></label>
     <div id="up-progress"></div>
     <div class="actionbar"><a class="btn" href="#/">रद्द</a><button class="btn primary" id="start" disabled>upload शुरू करें</button></div></form>`;
 }
@@ -143,6 +159,7 @@ function bindNew() {
   file.onchange = () => { chosenAll = [...file.files]; chosen = chosenAll[0]; pick(); };
   function pick() { if (!chosen) return; $("#fname").innerHTML = chosenAll.length > 1 ? chosenAll.map((f, i) => `${i + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : `${esc(chosen.name)} · ${gb(chosen.size)}`; $("#start").disabled = false; }
   let ptype = "talking_head";
+  if (/type=montage/.test(location.hash)) { const r = document.querySelector('input[name=ptype][value=montage]'); if (r) { r.checked = true; r.dispatchEvent(new Event("change")); } }
   document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage"; drop.style.display = mont ? "none" : ""; $("#start").textContent = mont ? "montage project बनाएँ" : "upload शुरू करें"; $("#start").disabled = mont ? false : !chosen; }));
   $("#new").onsubmit = async (e) => {
     e.preventDefault();
@@ -151,7 +168,7 @@ function bindNew() {
     if (!chosen) return;
     $("#start").disabled = true;
     try {
-      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value });
+      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked });
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
       if (chosenAll.length > 1) {
         for (let i = 0; i < chosenAll.length; i++) { const f = chosenAll[i]; await uploadFile(p.id, f, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">clip ${i + 1}/${chosenAll.length} · ${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; }, { clip: true, start: i === chosenAll.length - 1 }); }

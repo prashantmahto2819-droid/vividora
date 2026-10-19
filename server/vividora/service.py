@@ -12,7 +12,7 @@ from typing import Any
 
 from . import db, notify, queue, storage
 from .config import settings
-from .engine import autocut
+from .engine import autocut, autopilot
 from .engine.presets import caption_styles, platforms
 
 DEFAULT_EFFECTS = {
@@ -141,12 +141,46 @@ def after_job(c, job: dict, result: dict) -> None:
     elif kind == "autocut":
         db.update(c, "projects", pid, {"edl": result.get("edl"), "updated_at": db.now()})
         st = result.get("edl", {}).get("stats", {})
-        set_status(c, pid, "review_cuts",
-                   f"{st.get('cuts', 0)} कट सुझाए, {st.get('removed_seconds', 0)}s हटेंगे — जाँचें")
-        notify.on_event("review_cuts", project)
+        if project.get("settings", {}).get("autopilot"):
+            project = db.get("projects", pid)
+            ws = db.get("workspaces", project["workspace_id"]) or {}
+            lib = db.rows(c.execute("SELECT id, kind, name FROM library WHERE workspace_id = ?", (project["workspace_id"],)))
+            opts = autopilot.plan(project, ws.get("settings") or {}, lib)
+            ap = opts.pop("autopilot")
+            try:
+                request_render(c, project, opts)
+            except ValueError:
+                set_status(c, pid, "review_cuts", "autopilot render नहीं चला — settings जाँचें")
+                return
+            meta = {**project.get("meta", {}), "autopilot": {**ap, "stage": "render", "shorts_pending": ap["shorts"] > 0}}
+            db.update(c, "projects", pid, {"meta": meta})
+            if ap["shorts"]:
+                queue.enqueue(c, pid, "shorts_plan", {"options": {"count": ap["shorts"]}})
+            set_status(c, pid, "rendering", f"autopilot: {st.get('cuts', 0)} कट, captions, zoom, music… render हो रहा")
+        else:
+            set_status(c, pid, "review_cuts",
+                       f"{st.get('cuts', 0)} कट सुझाए, {st.get('removed_seconds', 0)}s हटेंगे — जाँचें")
+            notify.on_event("review_cuts", project)
 
     elif kind == "shorts_plan":
         meta = {**project.get("meta", {}), "shorts": result.get("clips") or []}
+        ap = meta.get("autopilot") or {}
+        if ap.get("shorts_pending"):
+            meta["autopilot"] = {**ap, "shorts_pending": False}
+            db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now()})
+            clips = [{k: sc.get(k) for k in ("id", "start", "end", "title", "hook")} for sc in meta["shorts"] if sc.get("selected", True)]
+            if clips:
+                project = db.get("projects", pid)
+                try:
+                    for cl in clips:
+                        payload = {k: v for k, v in {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})}.items()
+                                   if k not in ("presets", "shorts_preset")}
+                        payload.update(preset="yt-short", label=f"short-{cl['id']}", clip={"start": float(cl["start"]), "end": float(cl["end"])},
+                                       hook={"text": cl.get("hook") or "", "seconds": 3}, title=cl.get("title"))
+                        queue.enqueue(c, pid, "render", payload)
+                except (ValueError, TypeError):
+                    pass
+            return
         db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now(),
                                        "status_note": f"{len(meta['shorts'])} Shorts सुझाए — Shorts tab में देखें"})
         notify.on_event("shorts", project, str(len(meta["shorts"])))
@@ -181,11 +215,23 @@ def after_job(c, job: dict, result: dict) -> None:
                       meta=f.get("meta"))
         # when every render job of this round is finished, ask for review
         pending = c.execute(
-            "SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'render' "
+            "SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind IN ('render','shorts_plan') "
             "AND status IN ('queued','running')", (pid,)).fetchone()[0]
         if pending == 0:
             warns = result.get("warnings") or []
-            set_status(c, pid, "review_output", " · ".join(warns) if warns else "render तैयार — देखें और मंज़ूरी दें")
+            project = db.get("projects", pid)
+            if (project.get("meta") or {}).get("autopilot"):
+                outs = db.rows(c.execute("SELECT * FROM assets WHERE project_id = ? AND kind = 'render'", (pid,)))
+                conns = db.rows(c.execute("SELECT id, platform FROM connections WHERE workspace_id = ?", (project["workspace_id"],)))
+                try:
+                    pp = autopilot.publish_plan(project, outs, conns)
+                except Exception:  # noqa: BLE001 — metadata is a nicety
+                    pp = []
+                db.update(c, "projects", pid, {"meta": {**project["meta"], "publish_plan": pp,
+                                                        "autopilot": {**project["meta"]["autopilot"], "stage": "review"}}})
+                set_status(c, pid, "review_output", f"autopilot पूरा: {len(outs)} वीडियो तैयार — देखें, मंज़ूरी दें, publish")
+            else:
+                set_status(c, pid, "review_output", " · ".join(warns) if warns else "render तैयार — देखें और मंज़ूरी दें")
             notify.on_event("review_output", project, " · ".join(warns))
 
 
