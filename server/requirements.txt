@@ -2,10 +2,10 @@ starlette>=0.40
 uvicorn[standard]>=0.30
 PyJWT>=2.8
 python-multipart>=0.0.9
-# CPU transcription inside the worker (TRANSCRIBE_LOCAL=1)
-faster-whisper>=1.1.0
-# pin the hub client: newer releases break ctranslate2 model downloads (metadata_errors)
+# CPU transcription inside the worker (TRANSCRIBE_LOCAL=1) — a known-good set:
+# faster-whisper 1.1.1 still calls av.open(metadata_errors=...), which PyAV 15 removed.
+faster-whisper==1.1.1
+av==14.4.0
+ctranslate2>=4.4,<5
 huggingface_hub>=0.25,<1.0
-hf_xet<2
-# PyAV 15+ removed av.open(metadata_errors=...) which faster-whisper still uses
-av<15
+tokenizers>=0.13,<1.0
