@@ -89,6 +89,8 @@ async def update_project(request: Request, user: dict):
         changes["edl"] = edl
     if "transcript" in data and isinstance(data["transcript"], dict):
         changes["transcript"] = data["transcript"]
+    if isinstance(data.get("meta"), dict) and isinstance(data["meta"].get("shorts"), list):
+        changes["meta"] = {**p["meta"], "shorts": data["meta"]["shorts"][:40]}
     if changes:
         changes["updated_at"] = db.now()
         with db.tx() as c:
@@ -136,6 +138,38 @@ async def render(request: Request, user: dict):
             jobs = service.request_render(c, p, data)
             service.log(c, user["workspace_id"], "project.render", user_id=user["id"],
                         project_id=p["id"], detail={"presets": [j["payload"]["preset"] for j in jobs]})
+    except ValueError as e:
+        raise ApiError(422, str(e))
+    return ok({"jobs": jobs})
+
+
+@require("editor")
+async def shorts_plan(request: Request, user: dict):
+    p = own_project(request, user)
+    data = await body(request)
+    try:
+        with db.tx() as c:
+            job = service.request_shorts_plan(c, p, data.get("options"))
+            service.log(c, user["workspace_id"], "shorts.plan", user_id=user["id"], project_id=p["id"])
+    except ValueError as e:
+        raise ApiError(422, str(e))
+    return ok({"job": job})
+
+
+@require("editor")
+async def shorts_render(request: Request, user: dict):
+    p = own_project(request, user)
+    if p["status"] in ("uploading", "preparing", "transcribing", "cutting", "rendering"):
+        raise ApiError(400, "अभी दूसरा काम चल रहा है")
+    data = await body(request)
+    clips = data.get("clips") or []
+    if not isinstance(clips, list):
+        raise ApiError(422, "clips list चाहिए")
+    try:
+        with db.tx() as c:
+            jobs = service.request_shorts_render(c, p, clips, data.get("render") or {})
+            service.log(c, user["workspace_id"], "shorts.render", user_id=user["id"], project_id=p["id"],
+                        detail={"count": len(jobs)})
     except ValueError as e:
         raise ApiError(422, str(e))
     return ok({"jobs": jobs})
@@ -209,6 +243,8 @@ routes = [
     Route("/projects/{project_id}/recut", recut, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
+    Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
+    Route("/projects/{project_id}/shorts/render", shorts_render, methods=["POST"]),
     Route("/projects/{project_id}/reopen", reopen, methods=["POST"]),
     Route("/projects/{project_id}/keep", preview_keep),
     Route("/media/{asset_id}", media),

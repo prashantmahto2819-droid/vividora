@@ -114,6 +114,7 @@
 .itm.title { background: #4a3d8f; border-color: #6c5ccf; } .itm.hook { background: #5a4a18; border-color: #8a7020; cursor: default; }
 .itm.broll { background: #1f5e6b; border-color: #2f8ea0; } .itm.music { background: #1d5a3a; border-color: #2f8f5c; cursor: pointer; }
 .itm.sfx { background: #6b4a1f; border-color: #b07a2a; }
+.itm.short { background: #7a2d5a; border-color: #c04a8f; } .itm.off { opacity: .4; }
 .itm.sel { border-color: #fff; box-shadow: 0 0 0 1px var(--amber); z-index: 2; }
 .h { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; background: rgba(255,255,255,.18); } .h.l { left: 0; } .h.r { right: 0; }
 .tl-play { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--amber); z-index: 4; pointer-events: none; }

@@ -17,6 +17,7 @@ const ICON = {
   effects: '<svg viewBox="0 0 24 24"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM19 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></svg>',
   audio: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
   overlay: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>',
+  shorts: '<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg>',
   export: '<svg viewBox="0 0 24 24"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M7 4l12 8-12 8z" fill="currentColor" stroke="none"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" fill="currentColor" stroke="none"/></svg>',
@@ -26,7 +27,7 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
-const TABS = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["overlay", "Overlay"]];
+const TABS = [["cuts", "कट"], ["captions", "Caption"], ["text", "Text"], ["media", "Media"], ["audio", "Audio"], ["effects", "Effects"], ["overlay", "Overlay"], ["shorts", "Shorts"]];
 const TITLE_PRESETS = [
   { id: "headline", label: "Headline", pos: "top", size: 0.08, color: "#FFFFFF", bg: "", text: "यहाँ बड़ा टाइटल" },
   { id: "lower3", label: "Lower third", pos: "bottom", size: 0.05, color: "#FFFFFF", bg: "#000000", text: "नाम | पहचान" },
@@ -54,6 +55,7 @@ export function mount(root, project, ctx) {
     words: (project.transcript?.segments || []).flatMap((s) => s.words || []),
     tab: "cuts", sel: null, pps: 40, t: 0, markIn: null, markOut: null, skipCuts: true, ratio: "9:16", dirty: false, saveT: null,
     lib: null, libKind: "music", exportOpen: false, drag: null, raf: null, canEdit: ctx.S.user.role !== "viewer" };
+  E.shorts = JSON.parse(JSON.stringify(project.meta?.shorts || []));
   E.dur = project.edl?.duration || project.meta?.duration || 1;
   E.pps = clamp(Math.floor(900 / E.dur), 6, 120);
   root.innerHTML = skeleton();
@@ -74,6 +76,8 @@ function update(project) {
   if (E.transcriptDirty) project.transcript = E.p.transcript;
   E.p = project;
   if (project.edl?.duration) E.dur = project.edl.duration;
+  const fresh = JSON.stringify(project.meta?.shorts || []);
+  if (fresh !== E.shortsSeen) { E.shortsSeen = fresh; if (!E.shortsDirty) { E.shorts = JSON.parse(fresh); if (E.tab === "shorts") renderPanel(); renderTimeline(); } }
   renderTop();
   if (E.exportOpen) renderExport();
   if (was !== project.status && project.status === "review_output") { E.exportOpen = true; renderExport(); }
@@ -190,6 +194,7 @@ function tick() {
   const v = $("#pv", E.root); if (!v) return;
   E.t = v.currentTime;
   if (E.skipCuts && !v.paused) { const c = cutAt(E.t); if (c) { v.currentTime = Math.min(E.dur, c.end + 0.02); E.t = v.currentTime; } }
+  if (E.stopAt != null && E.t >= E.stopAt) { v.pause(); E.stopAt = null; }
   renderOverlay(); renderPlayhead(true);
   if (!v.paused) E.raf = requestAnimationFrame(tick);
 }
@@ -303,6 +308,7 @@ function selItem() {
   if (type === "broll") return fx.broll.find((t) => t._id === id);
   if (type === "sfx") return fx.sfx.find((t) => t._id === id);
   if (type === "caption") return captionChunks()[id];
+  if (type === "short") return E.shorts.find((t) => t.id === id);
   return null;
 }
 function deleteSel() {
@@ -313,6 +319,7 @@ function deleteSel() {
   else if (type === "broll") fx.broll = fx.broll.filter((t) => t._id !== id);
   else if (type === "sfx") fx.sfx = fx.sfx.filter((t) => t._id !== id);
   else if (type === "music") fx.music.id = "";
+  else if (type === "short") { E.shorts = E.shorts.filter((t) => t.id !== id); E.shortsDirty = true; }
   else return;
   touch(); select(null);
 }
@@ -323,6 +330,7 @@ async function save(loud) {
   const rs = JSON.parse(JSON.stringify(E.rs));
   try {
     const body = { settings: { render: rs }, edl: { cuts: E.cuts } };
+    if (E.shortsDirty) { body.meta = { shorts: E.shorts }; E.shortsDirty = false; E.shortsSeen = JSON.stringify(E.shorts); }
     if (E.transcriptDirty) { body.transcript = E.p.transcript; E.transcriptDirty = false; }
     const p = await api("PATCH", `/projects/${E.pid}`, body);
     E.dirty = false; E.p = p; $("#ed-save", E.root).textContent = "सेव ✓";
@@ -363,6 +371,14 @@ function renderInspector() {
     const item = libItem(it.id);
     h = `<h3>SFX</h3><p class="small muted">${esc(item?.name || "?")}</p><div class="irow">${field("कब", num("at", it.at, 0.05, 0))}${field("आवाज़", `<input type="range" data-k="volume" min="0" max="1.5" step="0.05" value="${it.volume ?? 0.8}" ${dis}>`)}</div>
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
+  } else if (type === "short") {
+    h = `<h3>Short <span class="tag manual">${(it.end - it.start).toFixed(0)}s</span></h3>
+      ${field("Title (YouTube)", `<input data-k="title" value="${esc(it.title || "")}" ${dis}>`)}
+      ${field("Hook (वीडियो पर 3s)", `<input data-k="hook" value="${esc(it.hook || "")}" ${dis}>`)}
+      <div class="irow">${field("से", num("start", it.start, 0.1, 0, E.dur))}${field("तक", num("end", it.end, 0.1, 0, E.dur))}</div>
+      <label class="chk"><input type="checkbox" data-k="selected" ${it.selected !== false ? "checked" : ""} ${dis}> render में शामिल</label>
+      ${it.text ? `<p class="small muted" style="max-height:120px;overflow:auto">${esc(it.text)}</p>` : ""}
+      <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small quiet" data-act="playshort">यह Short चलाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "caption") {
     h = `<h3>Caption</h3><p class="small muted">${fmt(it.start)} – ${fmt(it.end)}</p>${field("शब्द सुधारें", `<textarea data-k="_captext" rows="3" ${dis}>${esc(it.words.map((w) => w.w).join(" "))}</textarea>`)}
       <p class="small muted">शब्दों की गिनती वही रखें तो timing सटीक रहती है।</p><div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small" data-act="captext">बदलें</button></div>`;
@@ -377,13 +393,15 @@ function renderInspector() {
     else if (el.type === "number" || el.type === "range") it[k] = +el.value;
     else it[k] = el.value;
     if (k === "bg" && !$('[data-k="_bgon"]', ins).checked) it.bg = "";
-    if (type === "cut") { it.start = clamp(it.start, 0, E.dur); it.end = clamp(it.end, it.start + 0.05, E.dur); }
+    if (type === "cut" || type === "short") { it.start = clamp(it.start, 0, E.dur); it.end = clamp(it.end, it.start + 0.05, E.dur); }
+    if (type === "short") E.shortsDirty = true;
     touch();
   }));
   $$("[data-act]", ins).forEach((b) => (b.onclick = () => {
     const a = b.dataset.act;
     if (a === "del") deleteSel();
-    else if (a === "seek") seek(type === "cut" ? it.start : type === "caption" ? it.start : srcOf(it.start ?? it.at));
+    else if (a === "seek") seek(type === "cut" || type === "short" ? it.start : type === "caption" ? it.start : srcOf(it.start ?? it.at));
+    else if (a === "playshort") { seek(it.start); E.stopAt = it.end; $("#pv", E.root).play(); }
     else if (a === "captext") applyCaptionText(it, $('[data-k="_captext"]', ins).value);
   }));
 }
@@ -448,6 +466,17 @@ function renderPanel() {
         ${x.kind === "music" || x.kind === "sfx" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
         <button class="btn small primary" data-add="${x.id}" ${dis}>${{ music: "लगाएँ", logo: "लगाएँ", lut: "लगाएँ" }[x.kind] || "+ जोड़ें"}</button>
         <button class="ibtn" data-del="${x.id}" title="library से हटाएँ" ${dis}>${ICON.trash}</button></li>`).join("") || `<li class="muted small">अभी कुछ नहीं — ऊपर से upload करें।</li>`}</ul>`;
+  } else if (t === "shorts") {
+    const planning = E.p.jobs?.some((j) => j.kind === "shorts_plan" && ["queued", "running"].includes(j.status));
+    const vert = (S.presets?.platforms || []).filter((pl) => pl.height > pl.width);
+    h = `<div class="ph"><h3>Shorts factory</h3><span class="small muted">${E.shorts.length} सुझाव</span></div>
+      <p class="small muted">लंबी recording से 20–60s के हिस्से जो अकेले खड़े रहें — हर एक को title + hook मिलता है। चेहरा landscape से 9:16 में अपने-आप track होता है।</p>
+      <div class="irow"><label class="small muted">कितने <input type="number" id="sh-count" min="1" max="12" value="5" style="width:60px"></label><button class="btn small" id="sh-plan" ${dis || (planning ? "disabled" : "")}>${planning ? "ढूँढ रहा है…" : "AI से सुझाव लें"}</button><button class="btn small quiet" id="sh-add" ${dis}>+ I–O से जोड़ें</button></div>
+      <ul class="plist">${E.shorts.map((sc) => `<li class="${sc.selected === false ? "off" : ""} ${E.sel?.type === "short" && E.sel.id === sc.id ? "sel" : ""}" data-short="${sc.id}">
+        <input type="checkbox" ${sc.selected !== false ? "checked" : ""} ${dis}><div class="grow" style="display:flex;flex-direction:column"><b class="small" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(sc.title || sc.id)}</b><span class="small muted">${fmt(sc.start)} → ${fmt(sc.end)} · ${(sc.end - sc.start).toFixed(0)}s${sc.hook ? ` · hook: ${esc(sc.hook)}` : ""}</span></div></li>`).join("") || `<li class="muted small">अभी कोई सुझाव नहीं — “AI से सुझाव लें” दबाएँ (बिना API key भी चलता है)।</li>`}</ul>
+      ${E.shorts.length ? `<div class="box"><div class="irow">${field("format", `<select id="sh-preset" ${dis}>${vert.map((pl) => `<option value="${pl.id}" ${(E.rs.shorts_preset || "yt-short") === pl.id ? "selected" : ""}>${esc(pl.label)}</option>`).join("")}</select>`)}
+        <label class="chk small"><input type="checkbox" id="sh-face" ${E.rs.face_track !== "off" ? "checked" : ""} ${dis}> चेहरा track करें</label></div>
+        <button class="btn primary" id="sh-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.shorts.filter((x) => x.selected !== false).length} Shorts render करें</button></div>` : ""}`;
   } else if (t === "effects") {
     const looks = S.presets?.looks || Object.keys(LOOK_CSS).map((id) => ({ id, label: id }));
     const thumb = (E.p.assets.find((a) => a.kind === "thumb") || {}).url;
@@ -496,6 +525,15 @@ function bindPanel() {
   on("#wm-size", "oninput", (e) => { fx.watermark.size = +e.target.value; touch(); });
   on("#wm-pos", "onchange", (e) => { fx.watermark.pos = e.target.value; touch(); });
   on("#wm-clear", "onclick", () => { fx.watermark.id = ""; touch(); renderPanel(); });
+  // shorts
+  on("#sh-plan", "onclick", async () => { await save(false); try { await api("POST", `/projects/${E.pid}/shorts/plan`, { options: { count: +$("#sh-count", panel).value } }); toast("Shorts ढूँढे जा रहे हैं"); E.shortsDirty = false; await load(); renderPanel(); } catch (err) { toast(err.message); } });
+  on("#sh-add", "onclick", () => { if (E.markIn == null || E.markOut == null) return toast("पहले I और O से हिस्सा चुनें"); const sc = { id: "m" + uid().slice(0, 4), start: +E.markIn.toFixed(2), end: +E.markOut.toFixed(2), title: "", hook: "", selected: true }; E.shorts.push(sc); E.shortsDirty = true; E.markIn = E.markOut = null; $("#t-marks", E.root).textContent = ""; touch(); select({ type: "short", id: sc.id }); renderPanel(); });
+  $$("[data-short]", panel).forEach((li) => (li.onclick = (e) => { const sc = E.shorts.find((x) => x.id === li.dataset.short); if (e.target.type === "checkbox") { sc.selected = e.target.checked; E.shortsDirty = true; touch(); renderPanel(); } else { select({ type: "short", id: sc.id }); seek(sc.start); renderPanel(); } }));
+  on("#sh-preset", "onchange", (e) => { E.rs.shorts_preset = e.target.value; touch(); });
+  on("#sh-face", "onchange", (e) => { E.rs.face_track = e.target.checked ? "auto" : "off"; touch(); });
+  on("#sh-render", "onclick", async () => { E.rs.shorts_preset = $("#sh-preset", panel).value; await save(false);
+    const clips = E.shorts.filter((x) => x.selected !== false).map(({ id, start, end, title, hook }) => ({ id, start, end, title, hook }));
+    try { await api("POST", `/projects/${E.pid}/shorts/render`, { clips, render: JSON.parse(JSON.stringify(E.rs)) }); toast(`${clips.length} Shorts render शुरू`); E.shortsDirty = false; await load(); E.exportOpen = true; renderExport(); } catch (err) { toast(err.message); } });
   // effects
   on("#fx-zoom", "onchange", (e) => { fx.zoom.enabled = e.target.checked; touch(); });
   on("#fx-zoom-str", "oninput", (e) => { fx.zoom.strength = +e.target.value; touch(); });
@@ -525,7 +563,7 @@ function libAdd(x) {
 }
 
 // ---------- timeline ----------
-const TRACKS = [["video", "Video"], ["captions", "Caption"], ["text", "Text"], ["broll", "B-roll"], ["audio", "Audio"]];
+const TRACKS = [["video", "Video"], ["captions", "Caption"], ["text", "Text"], ["broll", "B-roll"], ["audio", "Audio"], ["shorts", "Shorts"]];
 function renderTimeline() {
   const body = $("#tl-body", E.root), labels = $("#tl-labels", E.root); if (!body) return;
   const { esc } = E.ctx; const pps = E.pps; const W = Math.ceil(E.dur * pps) + 80; const fx = E.rs.effects;
@@ -543,7 +581,8 @@ function renderTimeline() {
   const broll = fx.broll.map((b) => `<div class="itm broll ${sel("broll", b._id)}" data-item="broll:${b._id}" style="left:${OX(b.start)}px;width:${OW(b.start, b.end)}px"><i class="h l"></i><span>${esc(libItem(b.id)?.name || "B-roll")}${b.fit === "pip" ? " · PiP" : ""}</span><i class="h r"></i></div>`).join("");
   const audio = (fx.music.id ? `<div class="itm music ${sel("music", "m")}" data-item="music:m" style="left:0;width:${(E.dur * pps).toFixed(1)}px"><span>♪ ${esc(libItem(fx.music.id)?.name || "music")} · ${Math.round(fx.music.volume * 100)}%${fx.music.duck !== false ? " · duck" : ""}</span></div>` : "")
     + fx.sfx.map((s) => `<div class="itm sfx ${sel("sfx", s._id)}" data-item="sfx:${s._id}" style="left:${OX(s.at)}px;width:${Math.max(14, 0.6 * pps).toFixed(1)}px" title="${esc(libItem(s.id)?.name || "sfx")}"><span>${esc(libItem(s.id)?.name || "sfx")}</span></div>`).join("");
-  const rows = { video, captions: caps, text, broll, audio };
+  const shortsRow = E.shorts.map((sc) => `<div class="itm short ${sc.selected === false ? "off" : ""} ${sel("short", sc.id)}" data-item="short:${sc.id}" style="left:${X(sc.start)}px;width:${Math.max(8, (sc.end - sc.start) * pps).toFixed(1)}px"><i class="h l"></i><span>${esc(sc.title || sc.id)} · ${(sc.end - sc.start).toFixed(0)}s</span><i class="h r"></i></div>`).join("");
+  const rows = { video, captions: caps, text, broll, audio, shorts: shortsRow };
   labels.innerHTML = `<div class="tl-ruler-l"></div>` + TRACKS.map(([id, l]) => `<div class="tl-l">${l}</div>`).join("");
   body.style.width = W + "px";
   body.innerHTML = `<div class="tl-ruler" id="tl-ruler">${ruler}</div>` + TRACKS.map(([id]) => `<div class="tl-track ${id}" data-track="${id}">${rows[id]}</div>`).join("")
@@ -574,6 +613,8 @@ function bindTimeline() {
   $$(".itm", body).forEach((el) => (el.onmousedown = (e) => {
     e.stopPropagation(); const [type, id] = el.dataset.item?.split(":") || []; if (!type) return;
     if (type === "music") return select({ type: "music", id: "m" });
+    if (type === "short") { const sc = E.shorts.find((x) => x.id === id); select({ type, id }); E.shortsDirty = true;
+      if (e.target.classList.contains("h")) return dragEdge(e, sc, e.target.classList.contains("l") ? "start" : "end", "src"); return dragMove(e, sc, "short"); }
     const it = type === "title" ? fx.titles.find((x) => x._id === id) : type === "broll" ? fx.broll.find((x) => x._id === id) : fx.sfx.find((x) => x._id === id);
     select({ type, id });
     if (e.target.classList.contains("h")) return dragEdge(e, it, e.target.classList.contains("l") ? "start" : "end", "out");
@@ -590,6 +631,7 @@ function dragEdge(e, it, key, clock) {
 function dragMove(e, it, type) {
   if (!E.canEdit) return; const pps = E.pps; const x0 = e.clientX; const s0 = type === "sfx" ? it.at : it.start; const len = type === "sfx" ? 0 : it.end - it.start; let moved = false;
   const mv = (ev) => { const dx = ev.clientX - x0; if (Math.abs(dx) < 3 && !moved) return; moved = true;
+    if (type === "short") { const st = clamp(s0 + dx / pps, 0, E.dur - len); it.start = +st.toFixed(2); it.end = +(st + len).toFixed(2); renderTimeline(); renderInspector(); return; }
     let s = outOf(clamp(srcOf(s0) + dx / pps, 0, E.dur)); s = clamp(s, 0, Math.max(0, outDur() - len));
     if (type === "sfx") it.at = +s.toFixed(2); else { it.start = +s.toFixed(2); it.end = +(s + len).toFixed(2); } renderTimeline(); renderInspector(); };
   const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); if (moved) touch(); };
@@ -614,7 +656,7 @@ function renderExport() {
     <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>
     ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="small muted">${esc(job?.message || "queue में")}</p>` : ""}
     ${outs.length ? `<h3>तैयार वीडियो</h3><div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
-      return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}</span></div><div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}</div></div>`; }).join("")}</div>` : ""}
+      return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(a.label?.startsWith("short-") ? (a.meta.title || a.label) : pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}</span></div><div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}</div></div>`; }).join("")}</div>` : ""}
     <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? "मंज़ूर ✓" : ""}</span>
       <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit ? `<button class="btn primary" id="go-render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा…" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };

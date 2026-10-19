@@ -13,7 +13,7 @@ import socket
 import tempfile
 from pathlib import Path
 
-from ..engine import autocut, ffmpeg, prepare, render
+from ..engine import autocut, ffmpeg, prepare, render, shorts
 from ..engine.presets import caption_style, platform
 from .client import ApiClient, run_loop
 
@@ -108,7 +108,8 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 video=raw, audio=clean, meta=project["meta"], edl=project["edl"] or
                 autocut.build_edl({"segments": []}, float(project["meta"]["duration"])),
                 transcript=project.get("transcript"), preset=preset, style=style,
-                out_dir=tmp / "out", name=preset["id"], hook=p.get("hook"),
+                out_dir=tmp / "out", name=p.get("label") or preset["id"], hook=p.get("hook"),
+                clip=p.get("clip"), face_track=p.get("face_track", "auto"),
                 focus_x=float(p.get("focus_x", 0.5)), focus_y=float(p.get("focus_y", 0.5)),
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
@@ -118,9 +119,18 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             )
             files = []
             for f in out["files"]:
-                up = client.upload(job["id"], f["path"], f["kind"], f.get("label"))
-                files.append({**f, "path": up["path"]})
+                label = p.get("label") or f.get("label")
+                up = client.upload(job["id"], f["path"], f["kind"], label)
+                files.append({**f, "label": label, "path": up["path"],
+                              "meta": {**f.get("meta", {}), "title": p.get("title")}})
             return {"files": files, "duration": out["duration"], "warnings": out["warnings"]}
+
+        if kind == "shorts_plan":
+            o = job["payload"].get("options") or {}
+            clips = shorts.plan(project.get("transcript") or {}, float(project["meta"].get("duration") or 0),
+                                project.get("edl"), count=int(o.get("count", 5)), min_len=float(o.get("min_len", 22)),
+                                max_len=float(o.get("max_len", 58)), language=project.get("language", "hi"))
+            return {"clips": clips}
 
         if kind == "transcribe":
             from .transcribe import transcribe_file
@@ -136,7 +146,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan"]
     if os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes"):
         kinds.append("transcribe")
     client = ApiClient(base, token, name)

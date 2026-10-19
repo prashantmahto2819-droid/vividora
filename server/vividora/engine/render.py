@@ -38,10 +38,16 @@ def _select_expr(keep: list[tuple[float, float]], fps: float) -> str:
     return "+".join(f"gte(t\\,{a - eps:.4f})*lt(t\\,{b - eps:.4f})" for a, b in keep)
 
 
-def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: float, focus_y: float) -> str:
+def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: float, focus_y: float,
+                  track_cmds: Path | None = None) -> str:
     src_ratio, dst_ratio = src_w / max(1, src_h), w / h
     if abs(src_ratio - dst_ratio) / dst_ratio < 0.02:
         return f"scale={w}:{h}:flags=lanczos,setsar=1"
+    if track_cmds is not None and fit == "crop" and src_ratio > dst_ratio:
+        # the crop window follows the face (sendcmd moves crop@face.x over time)
+        return (f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,"
+                f"sendcmd=f='{ffmpeg.escape_filter_path(track_cmds)}',"
+                f"crop@face={w}:{h}:(iw-{w})*{focus_x:.3f}:(ih-{h})*{focus_y:.3f},setsar=1")
     if fit == "crop" or (fit == "blur" and src_ratio > dst_ratio and dst_ratio >= 1):
         # fill the frame and cut the sides; focus_x moves the window left/right
         return (f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,"
@@ -70,6 +76,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
            preset: dict, style: dict | None, out_dir: Path, name: str, hook: dict | None = None,
            focus_x: float = 0.5, focus_y: float = 0.5, burn_captions: bool | None = None,
            caption_overrides: dict | None = None, effects: dict | None = None,
+           clip: dict | None = None, face_track: str = "auto",
            encoder_preset: str | None = None, on_progress: ProgressFn | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     e = effects or {}
@@ -80,6 +87,10 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     fps = round(fps, 3) or 30.0
 
     keep = [(_snap(a, fps), _snap(b, fps)) for a, b in keep_segments(edl)]
+    if clip and clip.get("end", 0) > clip.get("start", 0):
+        # a Short: only the chosen window of the recording (cuts inside it still apply)
+        cs, ce = _snap(float(clip["start"]), fps), _snap(float(clip["end"]), fps)
+        keep = [(max(a, cs), min(b, ce)) for a, b in keep if b > cs and a < ce]
     keep = [(a, b) for a, b in keep if b - a >= 1 / fps]
     if not keep:
         raise ValueError("कट के बाद कुछ नहीं बचा — कुछ कट बंद करें")
@@ -98,8 +109,25 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
 
     # ---- video base: cuts → frame fit → zoom → look → flash
     sel = _select_expr(keep, fps)
-    frame = _frame_filter(int(meta.get("width", w)), int(meta.get("height", h)), w, h,
-                          preset.get("fit", "crop"), focus_x, focus_y)
+    src_w, src_h = int(meta.get("width", w)), int(meta.get("height", h))
+    track_cmds = None
+    kf = meta.get("face_track") or []
+    if face_track != "off" and kf and preset.get("fit") == "crop" and src_w / src_h > w / h:
+        from .facetrack import crop_commands
+        factor = max(w / src_w, h / src_h)
+        scaled_w = int(round(src_w * factor))
+
+        def to_out(t: float) -> float | None:
+            o = 0.0
+            for a, b in keep:
+                if a <= t < b:
+                    return o + (t - a)
+                o += b - a
+            return None
+
+        track_cmds = work / "face.cmd"
+        track_cmds.write_text(crop_commands(kf, scaled_w, w, to_out, focus_x), encoding="utf-8")
+    frame = _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
     v = f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}"
     zoom = e.get("zoom") or {}
     if zoom.get("enabled"):
@@ -209,6 +237,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     files = [{"kind": "render", "path": out, "mime": "video/mp4", "label": preset["id"],
               "meta": {"preset": preset["id"], "width": w, "height": h, "duration": round(new_dur, 2),
                        "fps": fps, "captions": style.get("id") if (burn and style) else None,
+                       "clip": clip, "face_track": track_cmds is not None,
                        "effects": {"zoom": bool(zoom.get("enabled")), "look": e.get("look") or None,
                                    "music": bool((e.get("music") or {}).get("path")),
                                    "broll": len(e.get("broll") or []), "titles": len(titles),

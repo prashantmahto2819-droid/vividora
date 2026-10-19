@@ -7,3 +7,4 @@ python-multipart>=0.0.9
 # PyAV version faster-whisper pulls in does not matter.
 faster-whisper>=1.1.0
 numpy>=1.24
+opencv-python-headless>=4.9

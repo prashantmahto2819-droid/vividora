@@ -91,5 +91,15 @@ def prepare(raw: Path, work: Path, *, denoise: bool = True, on_progress: Progres
         info["denoise"] = method
 
     if report:
+        report(0.9, "चेहरा ढूँढा जा रहा है")
+    try:
+        from .facetrack import track
+        pw, ph = int(info.get("width", 1280)), int(info.get("height", 720))
+        if pw > ph:  # only landscape sources need a moving 9:16 window
+            info["face_track"] = track(proxy, dur, pw, ph)
+    except Exception as e:  # tracking is a nicety, never a reason to fail
+        info["face_track_error"] = str(e)[:200]
+
+    if report:
         report(1.0, "तैयार")
     return {"meta": info, "files": files}

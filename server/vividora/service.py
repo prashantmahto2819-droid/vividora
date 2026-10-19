@@ -132,6 +132,11 @@ def after_job(c, job: dict, result: dict) -> None:
         set_status(c, pid, "review_cuts",
                    f"{st.get('cuts', 0)} कट सुझाए, {st.get('removed_seconds', 0)}s हटेंगे — जाँचें")
 
+    elif kind == "shorts_plan":
+        meta = {**project.get("meta", {}), "shorts": result.get("clips") or []}
+        db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now(),
+                                       "status_note": f"{len(meta['shorts'])} Shorts सुझाए — Shorts tab में देखें"})
+
     elif kind == "render":
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
@@ -172,6 +177,41 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
     set_status(c, pid, "rendering", f"{len(opts['presets'])} वीडियो render हो रहे हैं")
     return [queue.enqueue(c, pid, "render", {"preset": p, **{k: v for k, v in opts.items() if k != 'presets'}})
             for p in opts["presets"]]
+
+
+def request_shorts_plan(c, project: dict, options: dict | None = None) -> dict:
+    if not project.get("transcript") or not project["transcript"].get("segments"):
+        raise ValueError("पहले transcript बनने दें")
+    db.update(c, "projects", project["id"], {"status_note": "Shorts ढूँढे जा रहे हैं", "updated_at": db.now()})
+    return queue.enqueue(c, project["id"], "shorts_plan", {"options": options or {}})
+
+
+def request_shorts_render(c, project: dict, clips: list[dict], settings_in: dict) -> list[dict]:
+    """One render job per chosen Short; outputs are labelled short-<id>."""
+    pid = project["id"]
+    opts = {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {}), **settings_in}
+    preset = opts.get("shorts_preset") or "yt-short"
+    if preset not in platforms():
+        raise ValueError(f"unknown preset: {preset}")
+    if opts["caption_style"] not in caption_styles():
+        raise ValueError("unknown caption style")
+    good = [cl for cl in clips if float(cl.get("end", 0)) - float(cl.get("start", 0)) >= 3]
+    if not good:
+        raise ValueError("कम से कम एक Short चुनें")
+    meta = {**project.get("meta", {})}
+    chosen = {cl["id"]: cl for cl in good}
+    meta["shorts"] = [{**sc, **chosen.get(sc["id"], {}), "selected": sc["id"] in chosen} for sc in meta.get("shorts", [])] \
+        + [cl for cl in good if cl["id"] not in {sc["id"] for sc in meta.get("shorts", [])}]
+    db.update(c, "projects", pid, {"meta": meta, "settings": {**project.get("settings", {}), "render": opts},
+                                   "updated_at": db.now()})
+    set_status(c, pid, "rendering", f"{len(good)} Shorts render हो रहे हैं")
+    jobs = []
+    for cl in good:
+        payload = {k: v for k, v in opts.items() if k not in ("presets", "shorts_preset")}
+        payload.update(preset=preset, label=f"short-{cl['id']}", clip={"start": float(cl["start"]), "end": float(cl["end"])},
+                       hook={"text": cl.get("hook") or "", "seconds": 3}, title=cl.get("title"))
+        jobs.append(queue.enqueue(c, pid, "render", payload))
+    return jobs
 
 
 def delete_project(c, project: dict) -> None:
