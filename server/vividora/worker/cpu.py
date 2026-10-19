@@ -58,7 +58,7 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path) -> dict
         p = fetch(look[4:])
         e["lut_path"] = str(p) if p else None
         e["look"] = "none"
-    for key in ("music", "watermark"):
+    for key in ("music", "watermark", "frame"):
         d = e.get(key) or {}
         if isinstance(d, dict) and d.get("id"):
             p = fetch(d["id"])

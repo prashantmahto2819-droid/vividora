@@ -28,6 +28,7 @@ DEFAULT_EFFECTS = {
     "broll": [],        # [{id, start, end, fit: cover|pip, pos: tl|tr|bl|br}]
     "titles": [],       # [{start, end, text, pos: top|center|bottom, size, color, bg}]
     "watermark": {"id": "", "opacity": 0.75, "size": 0.14, "pos": "tr"},
+    "frame": {"id": "", "opacity": 1.0},             # full-frame PNG border/frame from the library
     "sfx": [],          # [{id, at, volume}]
 }
 

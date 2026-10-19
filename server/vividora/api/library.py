@@ -24,6 +24,8 @@ KINDS = {
     "broll": {".mp4", ".mov", ".mkv", ".webm", ".m4v"},
     "image": {".png", ".jpg", ".jpeg", ".webp", ".gif"},
     "logo": {".png", ".webp", ".svg"},
+    "frame": {".png", ".webp"},
+    "sticker": {".png", ".webp", ".gif"},
     "lut": {".cube"},
     "font": {".ttf", ".otf"},
 }

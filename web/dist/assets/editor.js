@@ -43,7 +43,7 @@ const TITLE_PRESETS = [
 ];
 const LOOK_CSS = { none: "", warm: "sepia(.15) saturate(1.1)", cinematic: "contrast(1.1) saturate(.9) brightness(.97)", vivid: "saturate(1.35) contrast(1.05)",
   soft: "contrast(.95) saturate(.95) blur(.3px)", bw: "grayscale(1) contrast(1.12)", cool: "hue-rotate(-8deg) saturate(1.02)", vintage: "sepia(.35) contrast(.95)" };
-const LIB_KINDS = [["music", "Music"], ["sfx", "SFX"], ["broll", "B-roll"], ["image", "Image"], ["logo", "Logo"], ["lut", "LUT"]];
+const LIB_KINDS = [["music", "Music"], ["sfx", "SFX"], ["broll", "B-roll"], ["image", "Image"], ["sticker", "Sticker"], ["logo", "Logo"], ["frame", "Frame"], ["lut", "LUT"]];
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 // ---------- mount / state ----------
@@ -51,7 +51,7 @@ export function mount(root, project, ctx) {
   if (E && E.pid === project.id && root.contains(E.root)) { update(project); return; }
   unmount();
   const rs = JSON.parse(JSON.stringify(project.render_defaults || {}));
-  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, transition: "none", extras: [], grade: {}, grade_preset: "", stack: [], music: { id: "", volume: 0.18, duck: true },
+  rs.effects = { zoom: { enabled: false, strength: 1 }, look: "none", flash: false, transition: "none", extras: [], grade: {}, grade_preset: "", stack: [], frame: { id: "", opacity: 1 }, music: { id: "", volume: 0.18, duck: true },
     broll: [], titles: [], watermark: { id: "", opacity: 0.75, size: 0.14, pos: "tr" }, sfx: [], ...(rs.effects || {}) };
   if (rs.effects.flash && (!rs.effects.transition || rs.effects.transition === "none")) rs.effects.transition = "flash";
   rs.captions = { size_scale: 1, position: "", primary: "", highlight: "", font: "", italic: "", uppercase: "", letter_spacing: "", outline_scale: "", shadow_scale: "", outline_color: "", ...(rs.captions || {}) };
@@ -304,14 +304,18 @@ function renderOverlay() {
   // B-roll + watermark: rebuilt only when the visible set changes (so <video> keeps playing)
   const active = E.rs.effects.broll.filter((b) => ot >= b.start && ot < b.end);
   const wm = E.rs.effects.watermark; const wmi = wm.id && libItem(wm.id);
-  const mkey = active.map((b) => `${b._id}:${b.id}:${b.fit}:${b.pos}`).join("|") + `#${wm.id}:${wm.opacity}:${wm.size}:${wm.pos}` + (E.sel?.type === "broll" ? E.sel.id : "");
+  const mkey = active.map((b) => `${b._id}:${b.id}:${b.fit}:${b.pos}:${b.x}:${b.y}:${b.scale}:${b.rotate}:${b.opacity}:${JSON.stringify(b.to || 0)}:${b.fit === "free" ? ot.toFixed(1) : ""}`).join("|") + `#${wm.id}:${wm.opacity}:${wm.size}:${wm.pos}` + (E.sel?.type === "broll" ? E.sel.id : "");
   if (mkey !== E.mkey) {
     E.mkey = mkey; let mh = "";
     for (const b of active) {
     const item = libItem(b.id); const pip = b.fit === "pip";
+    if (b.fit === "free") { const k = (b.end - b.start) > 0 ? Math.max(0, Math.min(1, (ot - b.start) / (b.end - b.start))) : 0; const to = b.to || {}; const x = (b.x ?? 0.5) + ((to.x ?? b.x ?? 0.5) - (b.x ?? 0.5)) * k, y = (b.y ?? 0.5) + ((to.y ?? b.y ?? 0.5) - (b.y ?? 0.5)) * k, sc = (b.scale ?? 0.4) + ((to.scale ?? b.scale ?? 0.4) - (b.scale ?? 0.4)) * k;
+      mh += `<div class="ov-broll ${E.sel?.type === "broll" && E.sel.id === b._id ? "sel" : ""}" style="position:absolute;left:${(x * 100).toFixed(2)}%;top:${(y * 100).toFixed(2)}%;width:${(sc * 100).toFixed(2)}%;transform:translate(-50%,-50%) rotate(${b.rotate || 0}deg);opacity:${b.opacity ?? 1}">${item?.kind === "image" || item?.kind === "sticker" || item?.kind === "frame" ? `<img src="${item.url}" style="width:100%;display:block">` : item ? `<video src="${item.url}" muted autoplay loop playsinline style="width:100%;display:block"></video>` : ""}</div>`; continue; }
     const style = pip ? `width:42%;aspect-ratio:${fb.w > fb.h ? "16/9" : "9/16"};${{ tl: "left:4%;top:3%", tr: "right:4%;top:3%", bl: "left:4%;bottom:28%", br: "right:4%;bottom:28%" }[b.pos || "tr"]}` : "inset:0";
       mh += `<div class="ov-broll ${E.sel?.type === "broll" && E.sel.id === b._id ? "sel" : ""}" style="position:absolute;${style};overflow:hidden;border-radius:${pip ? 6 : 0}px">${item?.kind === "image" ? `<img src="${item.url}" style="width:100%;height:100%;object-fit:cover">` : item ? `<video src="${item.url}" muted autoplay loop playsinline style="width:100%;height:100%;object-fit:cover"></video>` : ""}<span class="ov-tag">${esc(item?.name || "B-roll")}</span></div>`;
     }
+    const frm = E.rs.effects.frame || {}; const frmi = frm.id && libItem(frm.id);
+    if (frmi) mh += `<img src="${frmi.url}" style="position:absolute;inset:0;width:100%;height:100%;opacity:${frm.opacity ?? 1};pointer-events:none">`;
     if (wmi) mh += `<img src="${wmi.url}" style="position:absolute;width:${(wm.size * 100).toFixed(0)}%;opacity:${wm.opacity};${{ tl: "left:3.5%;top:3.5%", tr: "right:3.5%;top:3.5%", bl: "left:3.5%;bottom:3.5%", br: "right:3.5%;bottom:3.5%" }[wm.pos]}">`;
     $("#ovl-media", ovl).innerHTML = mh;
   }
@@ -349,6 +353,11 @@ function renderOverlay() {
   }
   $("#ovl-text", ovl).innerHTML = html;
   $$(".ov-title", ovl).forEach((el) => (el.onmousedown = (e) => { e.preventDefault(); select({ type: "title", id: el.dataset.id }); }));
+  $$("#ovl-media .ov-broll", ovl).forEach((el, i) => { const b = active[i]; if (!b || b.fit !== "free" || !E.canEdit) return; el.style.pointerEvents = "auto"; el.style.cursor = "move";
+    el.onmousedown = (e) => { e.preventDefault(); select({ type: "broll", id: b._id }); const x0 = e.clientX, y0 = e.clientY, bx = b.x ?? 0.5, by = b.y ?? 0.5;
+      const mv = (ev) => { b.x = +clamp(bx + (ev.clientX - x0) / fb.w, 0, 1).toFixed(3); b.y = +clamp(by + (ev.clientY - y0) / fb.h, 0, 1).toFixed(3); renderOverlay(); renderInspector(); };
+      const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); touch(); };
+      document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up); }; });
 }
 
 // ---------- selection / inspector ----------
@@ -422,12 +431,17 @@ function renderInspector() {
       <div class="irow">${field("शुरू", num("start", it.start, 0.1, 0))}${field("ख़त्म", num("end", it.end, 0.1, 0))}</div>
       <div class="irow">${field("जगह", `<select data-k="pos" ${dis}>${["top", "center", "bottom"].map((p) => `<option value="${p}" ${it.pos === p ? "selected" : ""}>${{ top: "ऊपर", center: "बीच", bottom: "नीचे" }[p]}</option>`).join("")}</select>`)}${field("आकार", `<input type="range" data-k="size" min="0.03" max="0.16" step="0.005" value="${it.size || 0.075}" ${dis}>`)}</div>
       <div class="irow">${field("रंग", `<input type="color" data-k="color" value="${it.color || "#ffffff"}" ${dis}>`)}${field("outline/box", `<div class="irow"><input type="color" data-k="bg" value="${it.bg || "#000000"}" ${dis}><label class="chk small"><input type="checkbox" data-k="_bgon" ${it.bg ? "checked" : ""} ${dis}> लगाएँ</label></div>`)}</div>
+      <div class="irow">${field("animation", `<select data-k="anim" ${dis}>${(E.ctx.S.presets?.text_anims || []).map((a) => `<option value="${a.id}" ${(it.anim || "fade") === a.id ? "selected" : ""}>${esc(a.label)}</option>`).join("")}</select>`)}${field("font", `<select data-k="font" ${dis}><option value="">Poppins</option>${(E.ctx.S.presets?.fonts || []).map((f) => `<option ${it.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "broll") {
     const item = libItem(it.id);
     h = `<h3>B-roll</h3><p class="small muted">${esc(item?.name || "?")}${item?.meta?.duration ? ` · ${fmt(item.meta.duration)}` : ""}</p>
       <div class="irow">${field("शुरू", num("start", it.start, 0.1, 0))}${field("ख़त्म", num("end", it.end, 0.1, 0))}</div>
-      <div class="irow">${field("कैसे", `<select data-k="fit" ${dis}><option value="cover" ${it.fit !== "pip" ? "selected" : ""}>पूरा frame</option><option value="pip" ${it.fit === "pip" ? "selected" : ""}>छोटा box (PiP)</option></select>`)}
+      <div class="irow">${field("कैसे", `<select data-k="fit" ${dis}><option value="cover" ${!["pip", "free"].includes(it.fit) ? "selected" : ""}>पूरा frame</option><option value="pip" ${it.fit === "pip" ? "selected" : ""}>छोटा box (PiP)</option><option value="free" ${it.fit === "free" ? "selected" : ""}>free (जगह/size/घुमाव)</option></select>`)}
+      ${it.fit === "free" ? `</div><div class="irow">${field("X", `<input type="range" data-k="x" min="0" max="1" step="0.01" value="${it.x ?? 0.5}" ${dis}>`)}${field("Y", `<input type="range" data-k="y" min="0" max="1" step="0.01" value="${it.y ?? 0.5}" ${dis}>`)}</div>
+      <div class="irow">${field("size", `<input type="range" data-k="scale" min="0.05" max="1" step="0.01" value="${it.scale ?? 0.4}" ${dis}>`)}${field("opacity", `<input type="range" data-k="opacity" min="0.1" max="1" step="0.05" value="${it.opacity ?? 1}" ${dis}>`)}${field("घुमाव°", num("rotate", it.rotate || 0, 1, -180, 180))}</div>
+      <div class="irow"><label class="chk small"><input type="checkbox" data-k="_kf" ${it.to ? "checked" : ""} ${dis}> keyframe: अंत में यहाँ पहुँचे</label>${it.to ? `${field("X₂", `<input type="range" data-k="to.x" min="0" max="1" step="0.01" value="${it.to.x ?? it.x ?? 0.5}" ${dis}>`)}${field("Y₂", `<input type="range" data-k="to.y" min="0" max="1" step="0.01" value="${it.to.y ?? it.y ?? 0.5}" ${dis}>`)}${field("size₂", `<input type="range" data-k="to.scale" min="0.05" max="1" step="0.01" value="${it.to.scale ?? it.scale ?? 0.4}" ${dis}>`)}` : ""}</div>
+      <div class="irow">${field("in/out", `<select data-k="anim" ${dis}><option value="none" ${!it.anim || it.anim === "none" ? "selected" : ""}>cut</option><option value="fade" ${it.anim === "fade" ? "selected" : ""}>fade</option></select>`)}` : ""}
       ${field("कोना", `<select data-k="pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${(it.pos || "tr") === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`)}</div>
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "sfx") {
@@ -451,10 +465,13 @@ function renderInspector() {
     if (!E.canEdit) return;
     const k = el.dataset.k;
     if (k === "_bgon") { it.bg = el.checked ? ($('[data-k="bg"]', ins).value) : ""; }
+    else if (k === "_kf") { if (el.checked) it.to = { x: it.x ?? 0.5, y: it.y ?? 0.5, scale: it.scale ?? 0.4 }; else delete it.to; touch(); renderInspector(); return; }
     else if (k === "_captext") return;
+    else if (k.startsWith("to.")) { it.to = it.to || {}; it.to[k.slice(3)] = +el.value; }
     else if (el.type === "checkbox") it[k] = el.checked;
     else if (el.type === "number" || el.type === "range") it[k] = +el.value;
     else it[k] = el.value;
+    if (k === "fit") { touch(); renderInspector(); return; }
     if (k === "bg" && !$('[data-k="_bgon"]', ins).checked) it.bg = "";
     if (type === "cut" || type === "short") { it.start = clamp(it.start, 0, E.dur); it.end = clamp(it.end, it.start + 0.05, E.dur); }
     if (type === "short") E.shortsDirty = true;
@@ -512,7 +529,7 @@ function renderPanel() {
       <div class="tgrid">${TITLE_PRESETS.map((tp) => `<button class="tcard" data-title="${tp.id}" ${dis}><span style="color:${tp.color};${tp.bg ? `background:${tp.bg};padding:.1em .4em;border-radius:4px` : ""};font-size:${tp.size * 220}px;font-weight:800">${esc(tp.text.split("|")[0])}</span><small>${tp.label}</small></button>`).join("")}</div>
       <h4>Timeline पर</h4><ul class="plist">${fx.titles.map((ti) => `<li class="${E.sel?.type === "title" && E.sel.id === ti._id ? "sel" : ""}" data-title-id="${ti._id}"><span class="grow small">${esc(ti.text)}</span><span class="small muted">${fmt(ti.start)}</span></li>`).join("") || `<li class="muted small">अभी कोई text नहीं</li>`}</ul>`;
   } else if (t === "media" || t === "audio" || t === "overlay") {
-    const kinds = t === "media" ? ["broll", "image"] : t === "audio" ? ["music", "sfx"] : ["logo", "lut"];
+    const kinds = t === "media" ? ["broll", "image", "sticker"] : t === "audio" ? ["music", "sfx"] : ["logo", "frame", "lut"];
     if (!kinds.includes(E.libKind)) E.libKind = kinds[0];
     const items = (E.lib || []).filter((x) => x.kind === E.libKind);
     const music = fx.music, wm = fx.watermark;
@@ -523,7 +540,7 @@ function renderPanel() {
         <div id="clip-progress"></div></div>` : "";
     h = `<div class="ph"><h3>${{ media: "Media library", audio: "Audio", overlay: "Logo & LUT" }[t]}</h3></div>${clipBox}
       <div class="seg">${kinds.map((k) => `<button data-kind="${k}" class="${E.libKind === k ? "on" : ""}">${LIB_KINDS.find((x) => x[0] === k)[1]}</button>`).join("")}</div>
-      <label class="drop small ${dis ? "off" : ""}"><input type="file" id="lib-file" multiple hidden ${dis}>${ICON.plus} ${E.libKind} upload करें <span class="muted">(${{ music: "mp3/wav", sfx: "mp3/wav", broll: "mp4/mov", image: "png/jpg", logo: "png", lut: ".cube" }[E.libKind]})</span></label>
+      <label class="drop small ${dis ? "off" : ""}"><input type="file" id="lib-file" multiple hidden ${dis}>${ICON.plus} ${E.libKind} upload करें <span class="muted">(${{ music: "mp3/wav", sfx: "mp3/wav", broll: "mp4/mov", image: "png/jpg", sticker: "png (transparent)", logo: "png", frame: "png 1080×1920/1920×1080 transparent", lut: ".cube" }[E.libKind]})</span></label>
       <div id="lib-progress"></div>
       ${t === "audio" && E.libKind === "music" ? `<div class="box"><b>Background music</b>${music.id ? `<p class="small">${esc(libItem(music.id)?.name || music.id)}</p>` : `<p class="small muted">library से “लगाएँ” दबाएँ</p>`}
         <div class="irow">${field("आवाज़", `<input type="range" id="mus-vol" min="0" max="0.6" step="0.02" value="${music.volume}" ${dis}>`)}<label class="chk small"><input type="checkbox" id="mus-duck" ${music.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा (duck)</label></div>
@@ -532,12 +549,14 @@ function renderPanel() {
         <div class="irow">${field("पारदर्शिता", `<input type="range" id="wm-op" min="0.1" max="1" step="0.05" value="${wm.opacity}" ${dis}>`)}${field("आकार", `<input type="range" id="wm-size" min="0.06" max="0.3" step="0.01" value="${wm.size}" ${dis}>`)}</div>
         ${field("कोना", `<select id="wm-pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${wm.pos === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`)}
         ${wm.id ? `<button class="btn small quiet" id="wm-clear">हटाएँ</button>` : ""}</div>` : ""}
+      ${t === "overlay" && E.libKind === "frame" ? `<div class="box"><b>Frame / border</b>${fx.frame?.id ? `<p class="small">${esc(libItem(fx.frame.id)?.name || "")}</p>` : `<p class="small muted">frame PNG चुनकर “लगाएँ”</p>`}
+        ${field("opacity", `<input type="range" id="frm-op" min="0.2" max="1" step="0.05" value="${fx.frame?.opacity ?? 1}" ${dis}>`)}${fx.frame?.id ? `<button class="btn small quiet" id="frm-clear">हटाएँ</button>` : ""}</div>` : ""}
       ${t === "overlay" && E.libKind === "lut" ? `<p class="small muted">LUT (.cube) लगाने पर Effects का look बदल जाता है। अभी: <b>${fx.look?.startsWith("lut:") ? esc(libItem(fx.look.slice(4))?.name || "LUT") : "कोई नहीं"}</b></p>` : ""}
       <ul class="lib">${E.lib === null ? `<li class="muted small">लोड हो रहा…</li>` : items.map((x) => `<li data-lib="${x.id}">
-        ${x.kind === "image" || x.kind === "logo" ? `<img src="${x.url}" alt="">` : x.kind === "broll" ? `<video src="${x.url}#t=0.5" muted preload="metadata"></video>` : `<i class="libicon">${ICON.audio}</i>`}
+        ${["image", "logo", "sticker", "frame"].includes(x.kind) ? `<img src="${x.url}" alt="">` : x.kind === "broll" ? `<video src="${x.url}#t=0.5" muted preload="metadata"></video>` : `<i class="libicon">${ICON.audio}</i>`}
         <div class="grow"><b class="small">${esc(x.name)}</b><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}${x.meta?.width ? ` · ${x.meta.width}×${x.meta.height}` : ""}</span></div>
         ${x.kind === "music" || x.kind === "sfx" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
-        <button class="btn small primary" data-add="${x.id}" ${dis}>${{ music: "लगाएँ", logo: "लगाएँ", lut: "लगाएँ" }[x.kind] || "+ जोड़ें"}</button>
+        <button class="btn small primary" data-add="${x.id}" ${dis}>${{ music: "लगाएँ", logo: "लगाएँ", lut: "लगाएँ", frame: "लगाएँ" }[x.kind] || "+ जोड़ें"}</button>
         <button class="ibtn" data-del="${x.id}" title="library से हटाएँ" ${dis}>${ICON.trash}</button></li>`).join("") || `<li class="muted small">अभी कुछ नहीं — ऊपर से upload करें।</li>`}</ul>`;
   } else if (t === "montage") {
     const mo = E.mo; const lib = E.lib || []; const clips = lib.filter((x) => x.kind === "broll" || x.kind === "image"); const musics = lib.filter((x) => x.kind === "music"); const logos = lib.filter((x) => x.kind === "logo");
@@ -656,6 +675,8 @@ function bindPanel() {
   on("#wm-size", "oninput", (e) => { fx.watermark.size = +e.target.value; touch(); });
   on("#wm-pos", "onchange", (e) => { fx.watermark.pos = e.target.value; touch(); });
   on("#wm-clear", "onclick", () => { fx.watermark.id = ""; touch(); renderPanel(); });
+  on("#frm-op", "oninput", (e) => { fx.frame = fx.frame || {}; fx.frame.opacity = +e.target.value; touch(); });
+  on("#frm-clear", "onclick", () => { fx.frame.id = ""; touch(); renderPanel(); });
   // montage
   if (E.montage && E.mo) {
     const mo = E.mo; const lib = E.lib || [];
@@ -730,6 +751,8 @@ function libAdd(x) {
   if (x.kind === "music") fx.music.id = x.id;
   else if (x.kind === "logo") fx.watermark.id = x.id;
   else if (x.kind === "lut") fx.look = "lut:" + x.id;
+  else if (x.kind === "frame") fx.frame = { id: x.id, opacity: fx.frame?.opacity ?? 1 };
+  else if (x.kind === "sticker") { const b = { _id: uid(), id: x.id, start: st, end: +Math.min(outDur(), st + 3).toFixed(2), fit: "free", x: 0.5, y: 0.35, scale: 0.3, opacity: 1, rotate: 0, anim: "fade" }; fx.broll.push(b); select({ type: "broll", id: b._id }); }
   else if (x.kind === "sfx") { const s = { _id: uid(), id: x.id, at: st, volume: 0.8 }; fx.sfx.push(s); select({ type: "sfx", id: s._id }); }
   else { const d = x.kind === "image" ? 3 : Math.min(x.meta?.duration || 4, 8); const b = { _id: uid(), id: x.id, start: st, end: +Math.min(outDur(), st + d).toFixed(2), fit: x.kind === "image" ? "pip" : "cover", pos: "tr" }; fx.broll.push(b); select({ type: "broll", id: b._id }); }
   touch(); renderPanel();

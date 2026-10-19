@@ -9,7 +9,7 @@ from starlette.routing import Route
 from .. import db, service, storage
 from ..engine import autocut
 from ..engine import catalog
-from ..engine.effects import EXTRAS, LOOKS, TRANSITIONS
+from ..engine.effects import EXTRAS, LOOKS, TEXT_ANIMS, TRANSITIONS
 from ..engine.presets import caption_styles, platforms
 from ..security import media_token, read_token
 from .deps import ApiError, body, need, ok, own_project, require
@@ -279,6 +279,7 @@ async def presets(request: Request, user: dict):
                "fonts": fonts, "looks": [{"id": k, "label": v["label"]} for k, v in LOOKS.items()],
                "extras": [{"id": k, "label": v["label"]} for k, v in EXTRAS.items()],
                "transitions": [{"id": k, "label": v} for k, v in TRANSITIONS.items()],
+               "text_anims": [{"id": k, "label": v} for k, v in TEXT_ANIMS.items()],
                "catalog": catalog.catalog_json(),
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 

@@ -173,6 +173,14 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         cur = f"[vo{i}]"
         next_in += 1
 
+    # ---- frame / border overlay (full-frame PNG with transparency)
+    fr = e.get("frame") or {}
+    if fr.get("path"):
+        inputs += ["-loop", "1", "-i", str(fr["path"])]
+        chains.append(f"[{next_in}:v]scale={w}:{h},format=rgba,colorchannelmixer=aa={float(fr.get('opacity', 1.0)):.2f}[frm];"
+                      f"{cur}[frm]overlay=0:0:shortest=1[vfr]")
+        cur = "[vfr]"
+        next_in += 1
     # ---- watermark
     wm = e.get("watermark") or {}
     if wm.get("path"):

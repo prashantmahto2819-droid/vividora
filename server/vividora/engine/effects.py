@@ -165,9 +165,12 @@ def overlay_input_args(item: dict, path: Path) -> list[str]:
 
 
 def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, out_label: str, idx: int) -> str:
-    """Full-frame B-roll (fit: cover) or a picture-in-picture box, shown between start and end."""
+    """Full-frame B-roll (fit: cover), a picture-in-picture box, or a free transform
+    (fit: free → x, y, scale, opacity, rotate, optional keyframe `to` for a move/zoom)."""
     s, e = float(item["start"]), float(item["end"])
     pip = item.get("fit") == "pip"
+    if item.get("fit") == "free":
+        return _free_overlay(item, input_index, w, h, in_label, out_label, idx)
     if pip:
         bw, bh = int(w * 0.42), int(h * 0.42 * (9 / 16) if w < h else h * 0.42)
         prep = (f"[{input_index}:v]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
@@ -182,6 +185,40 @@ def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, 
         fade = f",fade=t=in:st={s:.3f}:d=0.25:alpha=1,fade=t=out:st={max(s, e - 0.25):.3f}:d=0.25:alpha=1"
         prep = prep.replace(f"[ov{idx}]", f",format=yuva420p{fade}[ov{idx}]")
     return (f"{prep};{in_label}[ov{idx}]overlay={pos}:enable='between(t\\,{s:.3f}\\,{e:.3f})'"
+            f":eof_action=pass{out_label}")
+
+
+def _lerp(a: float, b: float, s: float, e: float) -> str:
+    d = max(0.05, e - s)
+    return f"({a:.4f}+({b:.4f}-{a:.4f})*min(1\\,max(0\\,(t-{s:.3f})/{d:.3f})))"
+
+
+def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_label: str, idx: int) -> str:
+    s, e = float(item["start"]), float(item["end"])
+    x0, y0 = float(item.get("x", 0.5)), float(item.get("y", 0.5))          # centre, fraction of frame
+    sc0 = float(item.get("scale", 0.4))                                       # width as fraction of frame width
+    op = max(0.0, min(1.0, float(item.get("opacity", 1.0))))
+    rot = float(item.get("rotate", 0))
+    to = item.get("to") or {}
+    x1, y1, sc1 = float(to.get("x", x0)), float(to.get("y", y0)), float(to.get("scale", sc0))
+    ow = max(8, int(w * max(sc0, sc1)))
+    prep = (f"[{idx_in}:v]scale={ow}:-2:flags=bicubic,format=rgba,setpts=PTS-STARTPTS+{s:.3f}/TB")
+    if rot:
+        prep += f",rotate={rot}*PI/180:c=black@0:ow='hypot(iw,ih)':oh=ow"
+    if op < 1:
+        prep += f",colorchannelmixer=aa={op:.3f}"
+    anim = item.get("anim") or "none"
+    if anim in ("fade", "pop"):
+        prep += f",fade=t=in:st={s:.3f}:d=0.25:alpha=1,fade=t=out:st={max(s, e - 0.25):.3f}:d=0.25:alpha=1"
+    prep += f"[ovf{idx}]"
+    # scale keyframe: shrink the (max-size) overlay per frame with the overlay's own scale option is not possible,
+    # so we animate position only and pick size by the larger keyframe; a zoom is approximated by `scale` filter eval
+    if abs(sc1 - sc0) > 0.001:
+        zw = f"'trunc({w}*{_lerp(sc0, sc1, s, e)}/2)*2'"
+        prep = prep.replace(f"[ovf{idx}]", f",scale=w={zw}:h=-2:eval=frame[ovf{idx}]")
+    px = f"'{w}*{_lerp(x0, x1, s, e)}-w/2'" if (x1 != x0) else f"'{w * x0:.1f}-w/2'"
+    py = f"'{h}*{_lerp(y0, y1, s, e)}-h/2'" if (y1 != y0) else f"'{h * y0:.1f}-h/2'"
+    return (f"{prep};{in_label}[ovf{idx}]overlay=x={px}:y={py}:eval=frame:enable='between(t\\,{s:.3f}\\,{e:.3f})'"
             f":eof_action=pass{out_label}")
 
 
@@ -209,10 +246,59 @@ def title_events(titles: list[dict], width: int, height: int, font: str = "Poppi
             continue
         an = {"top": 8, "center": 5, "bottom": 2}.get(t.get("pos", "top"), 8)
         size = round(float(t.get("size", 0.075)) * base)
-        tags = f"\\an{an}\\fs{size}\\fad(150,150)"
+        s0, e0 = float(t["start"]), float(t["end"])
+        dur_ms = max(200, int((e0 - s0) * 1000))
+        anim = t.get("anim") or "fade"
+        tags = f"\\an{an}\\fs{size}" + text_anim_tags(anim, an, width, height, dur_ms)
         if t.get("color"):
             tags += f"\\c{ass_color(t['color'])}"
         if t.get("bg"):
             tags += f"\\bord{round(0.02 * base, 1)}\\3c{ass_color(t['bg'])}"
-        out.append(f"Dialogue: 2,{_t(float(t['start']))},{_t(float(t['end']))},Title,,0,0,0,,{{{tags}}}{txt}")
+        if t.get("font"):
+            tags += f"\\fn{t['font']}"
+        if anim == "typewriter":
+            # reveal one character at a time: one event per prefix
+            plain = str(t.get("text", "")).replace("|", "\n")
+            n = max(1, len(plain))
+            step = min(80, dur_ms * 0.6 / n)
+            for i in range(1, n + 1):
+                a = s0 + (i - 1) * step / 1000
+                b = s0 + i * step / 1000 if i < n else e0
+                part = _esc(plain[:i]).replace("\n", "\\N")
+                out.append(f"Dialogue: 2,{_t(a)},{_t(b)},Title,,0,0,0,,{{{tags}}}{part}")
+            continue
+        out.append(f"Dialogue: 2,{_t(s0)},{_t(e0)},Title,,0,0,0,,{{{tags}}}{txt}")
     return style, out
+
+
+TEXT_ANIMS = {"none": "कोई नहीं", "fade": "Fade", "pop": "Pop", "slide_up": "Slide up", "slide_left": "Slide in (बाएँ से)",
+              "zoom_out": "Zoom out", "typewriter": "Typewriter", "bounce": "Bounce", "glow": "Glow pulse", "shake": "Shake"}
+
+
+def text_anim_tags(anim: str, an: int, w: int, h: int, dur_ms: int) -> str:
+    """ASS override tags for in/out animation of a title."""
+    cx = w / 2
+    cy = {8: h * 0.12, 5: h / 2, 2: h * 0.88}.get(an, h / 2)
+    o = min(400, dur_ms // 3)
+    if anim == "none":
+        return ""
+    if anim == "fade":
+        return f"\\fad(200,200)"
+    if anim == "pop":
+        return f"\\fad(80,150)\\fscx60\\fscy60\\t(0,160,\\fscx112\\fscy112)\\t(160,260,\\fscx100\\fscy100)"
+    if anim == "slide_up":
+        return f"\\fad(120,150)\\move({cx:.0f},{cy + h * 0.06:.0f},{cx:.0f},{cy:.0f},0,{o})"
+    if anim == "slide_left":
+        return f"\\fad(100,150)\\move({cx - w * 0.25:.0f},{cy:.0f},{cx:.0f},{cy:.0f},0,{o})"
+    if anim == "zoom_out":
+        return f"\\fad(80,150)\\fscx160\\fscy160\\t(0,{o},\\fscx100\\fscy100)"
+    if anim == "bounce":
+        return (f"\\fad(60,150)\\move({cx:.0f},{cy - h * 0.08:.0f},{cx:.0f},{cy:.0f},0,{o // 2})"
+                f"\\fscy80\\t({o // 2},{o // 2 + 90},\\fscy115)\\t({o // 2 + 90},{o // 2 + 200},\\fscy100)")
+    if anim == "glow":
+        return f"\\fad(150,150)\\blur2\\t(0,{dur_ms // 2},\\blur10)\\t({dur_ms // 2},{dur_ms},\\blur2)"
+    if anim == "shake":
+        return (f"\\fad(80,120)\\t(0,60,\\frz2)\\t(60,120,\\frz-2)\\t(120,180,\\frz1.5)\\t(180,240,\\frz-1)\\t(240,300,\\frz0)")
+    if anim == "typewriter":
+        return ""
+    return "\\fad(150,150)"
