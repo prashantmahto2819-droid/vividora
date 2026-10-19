@@ -144,9 +144,12 @@ def after_job(c, job: dict, result: dict) -> None:
         st = result.get("edl", {}).get("stats", {})
         if project.get("settings", {}).get("autopilot"):
             project = db.get("projects", pid)
-            ws = db.get("workspaces", project["workspace_id"]) or {}
-            lib = db.rows(c.execute("SELECT id, kind, name FROM library WHERE workspace_id = ?", (project["workspace_id"],)))
-            opts = autopilot.plan(project, ws.get("settings") or {}, lib)
+            ch = db.get("channels", project.get("channel_id") or "") or db.row(c.execute(
+                "SELECT * FROM channels WHERE workspace_id = ? ORDER BY created_at LIMIT 1", (project["workspace_id"],)).fetchone())
+            ch_settings = (ch or {}).get("settings") or (db.get("workspaces", project["workspace_id"]) or {}).get("settings") or {}
+            lib = db.rows(c.execute("SELECT id, kind, name, tags FROM library WHERE workspace_id = ? AND (channel_id IS NULL OR channel_id = ?)",
+                                    (project["workspace_id"], (ch or {}).get("id"))))
+            opts = autopilot.plan(project, ch_settings, lib)
             ap = opts.pop("autopilot")
             try:
                 request_render(c, project, opts)
@@ -223,7 +226,9 @@ def after_job(c, job: dict, result: dict) -> None:
             project = db.get("projects", pid)
             if (project.get("meta") or {}).get("autopilot"):
                 outs = db.rows(c.execute("SELECT * FROM assets WHERE project_id = ? AND kind = 'render'", (pid,)))
-                conns = db.rows(c.execute("SELECT id, platform FROM connections WHERE workspace_id = ?", (project["workspace_id"],)))
+                conns = db.rows(c.execute("SELECT id, platform FROM connections WHERE workspace_id = ? AND (channel_id = ? OR channel_id IS NULL) "
+                                          "ORDER BY CASE WHEN channel_id = ? THEN 0 ELSE 1 END", (project["workspace_id"], project.get("channel_id"), project.get("channel_id"))))
+                seen = set(); conns = [cn for cn in conns if not (cn["platform"] in seen or seen.add(cn["platform"]))]
                 try:
                     pp = autopilot.publish_plan(project, outs, conns)
                 except Exception:  # noqa: BLE001 — metadata is a nicety

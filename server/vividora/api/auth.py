@@ -115,8 +115,9 @@ async def update_user(request: Request, user: dict):
 
 @require("viewer")
 async def brand_get(request: Request, user: dict):
-    ws = db.get("workspaces", user["workspace_id"])
-    return ok((ws.get("settings") or {}).get("brand", {}))
+    from .channels import get_channel
+    ch = get_channel(user["workspace_id"], request.query_params.get("channel"))
+    return ok(((ch or {}).get("settings") or {}).get("brand", {}))
 
 
 @require("admin")
@@ -124,10 +125,14 @@ async def brand_set(request: Request, user: dict):
     data = await body(request)
     keys = ("name", "logo_id", "primary", "highlight", "font", "caption_style", "grade_preset", "music", "watermark_pos", "hashtags", "cta")
     brand = {k: data[k] for k in keys if k in data}
-    ws = db.get("workspaces", user["workspace_id"])
+    from .channels import get_channel
+    ch = get_channel(user["workspace_id"], data.get("channel_id") or request.query_params.get("channel"))
+    if not ch:
+        raise ApiError(404, "channel not found")
+    st = ch.get("settings") or {}
     with db.tx() as c:
-        db.update(c, "workspaces", ws["id"], {"settings": {**(ws.get("settings") or {}), "brand": {**((ws.get("settings") or {}).get("brand", {})), **brand}}})
-        service.log(c, ws["id"], "brand.update", user_id=user["id"], detail={"fields": list(brand)})
+        db.update(c, "channels", ch["id"], {"settings": {**st, "brand": {**st.get("brand", {}), **brand}}, "updated_at": db.now()})
+        service.log(c, user["workspace_id"], "brand.update", user_id=user["id"], detail={"channel": ch["id"], "fields": list(brand)})
     return ok(brand)
 
 

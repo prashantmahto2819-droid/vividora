@@ -12,6 +12,7 @@ from ..engine import catalog
 from ..engine.effects import EXTRAS, LOOKS, TEXT_ANIMS, TRANSITIONS
 from ..engine.presets import caption_styles, platforms
 from ..security import media_token, read_token
+from .channels import channel_settings, get_channel
 from .deps import ApiError, body, need, ok, own_project, require
 
 STATUSES = ("uploading", "preparing", "transcribing", "cutting", "review_cuts", "rendering",
@@ -26,6 +27,10 @@ async def list_projects(request: Request, user: dict):
     if status in STATUSES:
         q += " AND status = ?"
         args.append(status)
+    ch = request.query_params.get("channel")
+    if ch:
+        q += " AND channel_id = ?"
+        args.append(ch)
     q += " ORDER BY updated_at DESC LIMIT 200"
     projects = db.rows(db.conn().execute(q, args))
     thumbs = {a["project_id"]: a["id"] for a in db.rows(db.conn().execute(
@@ -44,7 +49,8 @@ async def list_projects(request: Request, user: dict):
 async def create_project(request: Request, user: dict):
     data = await body(request)
     need(data, "title")
-    ws_settings = (db.get("workspaces", user["workspace_id"]) or {}).get("settings", {}) or {}
+    channel = get_channel(user["workspace_id"], data.get("channel_id"))
+    ws_settings = channel_settings(user["workspace_id"], channel["id"] if channel else None)
     brand = ws_settings.get("brand", {}) or {}
     brand_render = {}
     if brand.get("caption_style"):
@@ -60,9 +66,9 @@ async def create_project(request: Request, user: dict):
             eff["grade"] = {k: v for k, v in GRADE_PRESETS[brand["grade_preset"]].items() if k != "label"}
             eff["grade_preset"] = brand["grade_preset"]
         brand_render["effects"] = eff
-    p = {"id": db.new_id(), "workspace_id": user["workspace_id"], "created_by": user["id"],
+    p = {"id": db.new_id(), "workspace_id": user["workspace_id"], "created_by": user["id"], "channel_id": channel["id"] if channel else None,
          "title": data["title"].strip()[:200], "kind": data.get("kind", "talking_head"),
-         "language": data.get("language") or "auto",
+         "language": data.get("language") or (channel or {}).get("language") or "auto",
          "status": "review_cuts" if data.get("kind") == "montage" else "uploading",
          "status_note": "clips, music और text चुनकर montage बनाएँ" if data.get("kind") == "montage" else "upload का इंतज़ार",
          "meta": {}, "transcript": None, "edl": None,
@@ -96,6 +102,8 @@ async def update_project(request: Request, user: dict):
     changes: dict = {}
     if data.get("title"):
         changes["title"] = data["title"].strip()[:200]
+    if data.get("channel_id") and get_channel(user["workspace_id"], data["channel_id"]):
+        changes["channel_id"] = data["channel_id"]
     if "settings" in data and isinstance(data["settings"], dict):
         changes["settings"] = {**p["settings"], **data["settings"]}
     if "edl" in data and isinstance(data["edl"], dict):

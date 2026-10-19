@@ -49,10 +49,12 @@ async def refresh_trends(request: Request, user: dict):
 
 @require("viewer")
 async def list_ideas(request: Request, user: dict):
-    rows = db.rows(db.conn().execute(
-        "SELECT * FROM ideas WHERE workspace_id = ? AND status != 'dropped' ORDER BY updated_at DESC LIMIT 300",
-        (user["workspace_id"],)))
-    return ok(rows)
+    q = "SELECT * FROM ideas WHERE workspace_id = ? AND status != 'dropped'"
+    args: list = [user["workspace_id"]]
+    if request.query_params.get("channel"):
+        q += " AND (channel_id = ? OR channel_id IS NULL)"
+        args.append(request.query_params["channel"])
+    return ok(db.rows(db.conn().execute(q + " ORDER BY updated_at DESC LIMIT 300", args)))
 
 
 @require("editor")
@@ -67,16 +69,22 @@ async def generate_ideas(request: Request, user: dict):
         "SELECT title FROM ideas WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 20", (user["workspace_id"],)))]
     recent += [r["title"] for r in db.rows(db.conn().execute(
         "SELECT title FROM projects WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 20", (user["workspace_id"],)))]
-    lang = data.get("language") or "hi"
-    ideas = await run_in_threadpool(lambda: planner.ideas(topics, count=count, fmt=fmt, language=lang,
-                                                          topic=(data.get("topic") or "").strip() or None, recent_titles=recent))
+    from .channels import get_channel
+    ch = get_channel(user["workspace_id"], data.get("channel_id"))
+    lang = data.get("language") or (ch or {}).get("language") or "hi"
+    niche = (ch or {}).get("niche") or ""
+    topic = (data.get("topic") or "").strip() or None
+    if niche and not topic:
+        topic = f"(channel niche: {niche})"
+    ideas = await run_in_threadpool(lambda: planner.ideas(topics, count=count, fmt=fmt, language=lang if lang != "auto" else "hi",
+                                                          topic=topic, recent_titles=recent))
     out = []
     with db.tx() as c:
         for i in ideas:
             row = {"id": db.new_id(), "workspace_id": user["workspace_id"], "title": i["title"], "hook": i.get("hook"),
                    "angle": i.get("angle"), "outline": i.get("outline"), "script": None, "format": fmt, "status": "new",
                    "source": i.get("source"), "project_id": None, "due_at": None, "meta": {}, "created_by": user["id"],
-                   "created_at": db.now(), "updated_at": db.now()}
+                   "channel_id": (ch or {}).get("id"), "created_at": db.now(), "updated_at": db.now()}
             db.insert(c, "ideas", row)
             out.append(row)
         service.log(c, user["workspace_id"], "ideas.generate", user_id=user["id"], detail={"count": len(out)})
@@ -91,7 +99,7 @@ async def create_idea(request: Request, user: dict):
            "hook": data.get("hook"), "angle": data.get("angle"), "outline": data.get("outline"), "script": data.get("script"),
            "format": data.get("format") if data.get("format") in planner.FORMATS else "short", "status": "new",
            "source": "manual", "project_id": None, "due_at": data.get("due_at"), "meta": {}, "created_by": user["id"],
-           "created_at": db.now(), "updated_at": db.now()}
+           "channel_id": data.get("channel_id"), "created_at": db.now(), "updated_at": db.now()}
     with db.tx() as c:
         db.insert(c, "ideas", row)
     return ok(row, 201)
@@ -201,6 +209,7 @@ async def create_ref(request: Request, user: dict):
     if not (data.get("url") or data.get("note")):
         raise ApiError(422, "link या note लिखें")
     row = {"id": db.new_id(), "workspace_id": user["workspace_id"], "project_id": data.get("project_id") or None,
+           "channel_id": data.get("channel_id") or None,
            "kind": data.get("kind") if data.get("kind") in REF_KINDS else "other", "url": (data.get("url") or "")[:500] or None,
            "note": (data.get("note") or "")[:2000] or None, "created_by": user["id"], "created_at": db.now()}
     with db.tx() as c:

@@ -39,6 +39,15 @@ def _keywords(text: str, n: int = 12) -> list[str]:
     return [w for w, _ in sorted(freq.items(), key=lambda kv: -kv[1])[:n]]
 
 
+def _brand(project: dict) -> dict:
+    try:
+        from .. import db
+        ch = db.get("channels", project.get("channel_id") or "")
+        return ((ch or {}).get("settings") or {}).get("brand", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def heuristic(project: dict, platform: str, label: str | None) -> dict:
     tr = project.get("transcript") or {}
     text = plain_text(tr) if tr else ""
@@ -53,14 +62,16 @@ def heuristic(project: dict, platform: str, label: str | None) -> dict:
     hook = (short or {}).get("hook") or (sents[0][:120] if sents else "")
     summary = " ".join(sents[:4])[:420]
     kws = _keywords(first)
-    tags = list(dict.fromkeys([*kws[:10], *BASE_TAGS[lang]]))[:25]
+    brand = _brand(project)
+    tags = list(dict.fromkeys([*kws[:10], *[h.lstrip("#") for h in (brand.get("hashtags") or "").split()], *BASE_TAGS[lang]]))[:25]
     hashtags = " ".join("#" + t.replace(" ", "") for t in tags[:8])
+    cta = brand.get("cta") or "ऐसी और कहानियों के लिए channel subscribe करें।"
     is_short = platform != "youtube" or (label or "").startswith("short-") or label in ("yt-short", "ig-reel", "fb-reel")
     if is_short:
         desc = f"{hook}\n\n{hashtags}"
     else:
         desc = (f"{hook}\n\n{summary}\n\n"
-                f"👉 ऐसी और कहानियों के लिए channel subscribe करें।\n\n{hashtags}")
+                f"👉 {cta}\n\n{hashtags}")
     return {"title": title, "description": desc.strip(), "tags": tags, "source": "heuristic"}
 
 

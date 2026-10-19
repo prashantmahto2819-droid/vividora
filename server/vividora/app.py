@@ -14,7 +14,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import __version__, db
-from .api import analytics, auth, library, plan, projects, publish, uploads, workers
+from .api import analytics, auth, channels, library, plan, projects, publish, uploads, workers
 from .api.deps import error_handler
 from .bootstrap import ensure_admin
 from .config import settings
@@ -56,7 +56,7 @@ def create_app() -> Starlette:
     db.init()
     ensure_admin()
 
-    api_routes = [Route("/health", health), *auth.routes, *projects.routes, *uploads.routes, *workers.routes, *library.routes, *publish.routes, *plan.routes, *analytics.routes]
+    api_routes = [Route("/health", health), *auth.routes, *projects.routes, *uploads.routes, *workers.routes, *library.routes, *publish.routes, *plan.routes, *analytics.routes, *channels.routes]
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))

@@ -2,7 +2,7 @@
 import * as ED from "./editor.js";
 import * as REC from "./record.js";
 
-const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null,
+const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null, channels: [], channel: localStorage.getItem("vividora_channel") || "",
             route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null };
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -37,16 +37,18 @@ window.addEventListener("hashchange", () => { S.route = parseRoute(); load().the
 async function load() {
   if (!S.token) return;
   if (!S.presets) S.presets = await api("GET", "/presets").catch(() => null);
-  S.projects = await api("GET", "/projects");
-  if (S.route.kind === "home") { const [t, i, a] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [] })), api("GET", "/ideas").catch(() => []), api("GET", "/analytics").catch(() => ({ videos: [] }))]); S.homeTrends = t.trends || []; S.ideas = i; S.analytics = a; }
+  S.channels = await api("GET", "/channels").catch(() => []);
+  if (!S.channels.find((c) => c.id === S.channel)) S.channel = S.channels[0]?.id || "";
+  S.projects = await api("GET", "/projects" + (S.channel && S.channels.length > 1 ? `?channel=${S.channel}` : ""));
+  if (S.route.kind === "home") { const [t, i, a] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [] })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [] }))]); S.homeTrends = t.trends || []; S.ideas = i; S.analytics = a; }
   if (S.route.kind === "projects" && S.route.id) {
     S.project = await api("GET", "/projects/" + S.route.id).catch(() => null);
   } else S.project = null;
   if (S.route.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (S.route.kind === "users") S.users = await api("GET", "/users").catch(() => []);
-  if (S.route.kind === "plan") { const [t, i, n, r] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", "/ideas").catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = r; }
-  if (S.route.kind === "analytics") S.analytics = await api("GET", "/analytics").catch(() => ({ videos: [], learn: {} }));
-  if (S.route.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", "/brand").catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); }
+  if (S.route.kind === "plan") { const [t, i, n, r] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = r; }
+  if (S.route.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
+  if (S.route.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); }
   schedulePoll();
 }
 function schedulePoll() {
@@ -80,6 +82,7 @@ function render() {
     <aside class="rail ${detail || r.kind !== "home" ? "hidden-mobile" : ""}">
       <div class="rail-head"><a class="brand" href="#/"><i></i>Vividora</a>
         ${S.user.role !== "viewer" ? `<span class="row" style="gap:.3rem"><a class="btn quiet" href="#/record" title="camera + teleprompter">⏺</a><a class="btn primary" href="#/new">+ नया</a></span>` : ""}</div>
+      ${S.channels.length ? `<div class="chsw"><select id="ch-switch" title="channel">${S.channels.map((c) => `<option value="${c.id}" ${c.id === S.channel ? "selected" : ""}>${esc(c.name)}${c.handle ? " · " + esc(c.handle) : ""}</option>`).join("")}</select>${S.user.role === "admin" ? `<a class="ibtn" href="#/settings" title="channels manage">⚙</a>` : ""}</div>` : ""}
       <div class="rail-list">${S.projects.length ? S.projects.map(projRow).join("") : `<p class="muted" style="padding:1rem">अभी कोई project नहीं। "+ नया" से पहली recording डालें।</p>`}</div>
       <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
         <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/analytics">analytics</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
@@ -87,6 +90,7 @@ function render() {
     <main class="main ${r.kind === "home" ? "wide" : ""}">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : r.kind === "analytics" ? analyticsView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
   </div>`;
   $("#logout").onclick = logout;
+  const chs = $("#ch-switch"); if (chs) chs.onchange = () => { S.channel = chs.value; localStorage.setItem("vividora_channel", S.channel); load().then(render); };
   if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics();
   if (detail && S.project) bindProject(S.project);
 }
@@ -141,7 +145,8 @@ function bindLogin() {
 
 function newView() {
   const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; const idea = ideaId && (S.ideas || []).find((i) => i.id === ideaId);
-  return `<h1>नई recording</h1>${idea ? `<div class="note">idea: <b>${esc(idea.title)}</b> — upload के बाद यह "record हो गया" में चला जाएगा।</div>` : ""}<p class="muted">पहले नाम दें, फिर फ़ाइल चुनें। upload बीच में टूटे तो वहीं से आगे बढ़ता है।</p>
+  const chn = S.channels.find((c) => c.id === S.channel);
+  return `<h1>नई recording</h1>${chn ? `<p class="small muted">channel: <b style="color:${esc(chn.color || "#F2B33D")}">${esc(chn.name)}</b> — brand kit, pattern और connections इसी के लगेंगे (बाएँ ऊपर से बदलें)</p>` : ""}${idea ? `<div class="note">idea: <b>${esc(idea.title)}</b> — upload के बाद यह "record हो गया" में चला जाएगा।</div>` : ""}<p class="muted">पहले नाम दें, फिर फ़ाइल चुनें। upload बीच में टूटे तो वहीं से आगे बढ़ता है।</p>
     <div class="choices" style="margin-bottom:1rem"><label class="chip on"><input type="radio" name="ptype" value="talking_head" checked>🎙️ Recording (मेरी आवाज़ वाला वीडियो)</label><label class="chip"><input type="radio" name="ptype" value="montage">🎵 Montage (music + clips, बिना voice)</label></div>
     <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का" value="${idea ? esc(idea.title) : ""}"></div>
     <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
@@ -164,11 +169,11 @@ function bindNew() {
   $("#new").onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
-    if (ptype === "montage") { $("#start").disabled = true; try { const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, kind: "montage" }); go("/projects/" + p.id); } catch (err) { toast(err.message); $("#start").disabled = false; } return; }
+    if (ptype === "montage") { $("#start").disabled = true; try { const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, kind: "montage", channel_id: S.channel }); go("/projects/" + p.id); } catch (err) { toast(err.message); $("#start").disabled = false; } return; }
     if (!chosen) return;
     $("#start").disabled = true;
     try {
-      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked });
+      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, channel_id: S.channel });
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
       if (chosenAll.length > 1) {
         for (let i = 0; i < chosenAll.length; i++) { const f = chosenAll[i]; await uploadFile(p.id, f, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">clip ${i + 1}/${chosenAll.length} · ${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; }, { clip: true, start: i === chosenAll.length - 1 }); }
@@ -365,11 +370,22 @@ function statusView() {
 const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" };
 function settingsView() {
   const c = S.conns || { connections: [], setup: {} }; const st = c.setup || {}; const admin = S.user.role === "admin";
-  return `<h1>Channels</h1><p class="muted">जिन channels/pages पर Vividora publish करेगा। हर upload से पहले आपकी मंज़ूरी ज़रूरी है — connection सिर्फ़ रास्ता खोलता है।</p>
+  const chn = S.channels.find((c) => c.id === S.channel);
+  return `<h1>Channels</h1>
+    <div class="section" style="margin-top:0;border:0;padding-top:0"><div class="row between"><h2>आपके channels · ${S.channels.length}</h2>${admin ? `<button class="btn small" id="ch-add">+ नया channel</button>` : ""}</div>
+      <div class="chgrid">${S.channels.map((c) => `<div class="chcard ${c.id === S.channel ? "on" : ""}" data-ch="${c.id}" style="--c:${esc(c.color || "#F2B33D")}"><b>${esc(c.name)}</b><span class="small muted">${esc(c.handle || "")} · ${esc(c.niche || "niche नहीं")} · ${c.projects} projects · ${(c.platforms || []).join(", ") || "कोई connection नहीं"}</span></div>`).join("")}</div>
+      ${chn && admin ? `<form id="ch-edit" class="row" style="align-items:flex-end;margin-top:.75rem"><input type="hidden" name="id" value="${chn.id}">
+        <div class="field"><label>नाम</label><input name="name" value="${esc(chn.name)}" required></div><div class="field"><label>handle</label><input name="handle" value="${esc(chn.handle || "")}" placeholder="@theprashantmahto"></div>
+        <div class="field" style="flex:1;min-width:220px"><label>niche (ideas/trends/titles इसी से)</label><input name="niche" value="${esc(chn.niche || "")}" placeholder="Hindi motivation, success stories, self-improvement"></div>
+        <div class="field"><label>भाषा</label><select name="language"><option value="hi" ${chn.language === "hi" ? "selected" : ""}>हिंदी</option><option value="en" ${chn.language === "en" ? "selected" : ""}>English</option><option value="auto" ${chn.language === "auto" ? "selected" : ""}>auto</option></select></div>
+        <div class="field"><label>रंग</label><input type="color" name="color" value="${esc(chn.color || "#F2B33D")}"></div>
+        <div class="field" style="flex:1;min-width:200px"><label>trend keywords (comma)</label><input name="keywords" value="${esc((chn.keywords || []).join(", "))}" placeholder="motivation, success, hindi story"></div>
+        <button class="btn primary">सेव</button>${S.channels.length > 1 ? `<button type="button" class="btn quiet danger" id="ch-del">हटाएँ</button>` : ""}</form>` : ""}</div>
+    <p class="muted">नीचे की settings (connections, brand kit) <b>${esc(chn?.name || "")}</b> channel की हैं। हर upload से पहले आपकी मंज़ूरी ज़रूरी है — connection सिर्फ़ रास्ता खोलता है।</p>
     ${st.dry_run ? `<div class="note">PUBLISH_DRY_RUN चालू है — publish असली नहीं होगा (test mode)।</div>` : ""}
     ${!st.public_url ? `<div class="note err">.env में <b>PUBLIC_URL</b> नहीं है (जैसे https://studio.yourdomain.com — Cloudflare Tunnel का पता)। बिना इसके Google/Meta login वापस नहीं आ सकता और Instagram/Facebook वीडियो नहीं ले पाएँगे।</div>` : ""}
     <div class="section"><div class="row between"><h2>जुड़े हुए</h2>${admin ? `<span class="row"><button class="btn" id="c-yt" ${st.youtube ? "" : "disabled"} title="${st.youtube ? "" : ".env में YT_CLIENT_ID/YT_CLIENT_SECRET चाहिए"}">+ YouTube</button><button class="btn" id="c-meta" ${st.meta ? "" : "disabled"} title="${st.meta ? "" : ".env में META_APP_ID/META_APP_SECRET चाहिए"}">+ Instagram / Facebook</button></span>` : ""}</div>
-      ${c.connections.length ? `<table><tr><th>platform</th><th>नाम</th><th>जुड़ा</th><th></th></tr>${c.connections.map((x) => `<tr><td>${PLAT[x.platform] || x.platform}</td><td>${esc(x.name)}${x.meta?.subscribers ? ` <span class="muted small">· ${x.meta.subscribers} subs</span>` : ""}${x.meta?.page ? ` <span class="muted small">· page: ${esc(x.meta.page)}</span>` : ""}</td><td class="small muted">${new Date(x.created_at).toLocaleDateString("hi-IN")}</td><td>${admin ? `<button class="btn quiet small danger c-del" data-id="${x.id}">हटाएँ</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">अभी कोई channel नहीं जुड़ा।</p>`}</div>
+      ${c.connections.length ? `<table><tr><th>platform</th><th>नाम</th><th>channel</th><th>जुड़ा</th><th></th></tr>${c.connections.map((x) => `<tr><td>${PLAT[x.platform] || x.platform}</td><td>${esc(x.name)}${x.meta?.subscribers ? ` <span class="muted small">· ${x.meta.subscribers} subs</span>` : ""}${x.meta?.page ? ` <span class="muted small">· page: ${esc(x.meta.page)}</span>` : ""}</td><td>${admin ? `<select class="c-move small" data-id="${x.id}">${S.channels.map((ch) => `<option value="${ch.id}" ${x.channel_id === ch.id ? "selected" : ""}>${esc(ch.name)}</option>`).join("")}</select>` : esc(S.channels.find((ch) => ch.id === x.channel_id)?.name || "")}</td><td class="small muted">${new Date(x.created_at).toLocaleDateString("hi-IN")}</td><td>${admin ? `<button class="btn quiet small danger c-del" data-id="${x.id}">हटाएँ</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">अभी कोई channel नहीं जुड़ा।</p>`}</div>
     <div class="section"><h2>Brand kit</h2><p class="muted small">हर नए project और autopilot में यही default लगेगा।</p>
       <form id="brand" class="row" style="align-items:flex-end">
         <div class="field"><label>channel का नाम</label><input name="name" value="${esc(S.brand?.name || "")}" placeholder="@theprashantmahto"></div>
@@ -388,8 +404,13 @@ function settingsView() {
       <details><summary><b>Instagram / Facebook</b> (free, Business account चाहिए)</summary><ol class="small muted"><li>Instagram को Professional (Creator/Business) बनाएँ और एक Facebook Page से link करें</li><li>developers.facebook.com → Create App (Business) → products: Facebook Login for Business + Instagram Graph API</li><li>Facebook Login → Settings → Valid OAuth Redirect URIs: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/meta/callback</code></li><li>App ID/Secret को .env में <code>META_APP_ID</code> / <code>META_APP_SECRET</code>; फिर "+ Instagram / Facebook"</li><li>Cloudflare Access में <code>/pub/*</code> path को bypass करें (Meta वहीं से वीडियो उठाता है)</li></ol><p class="small muted">limit: Instagram 100 post/24h, Facebook Reels ~30/24h।</p></details></div>`;
 }
 function bindSettings() {
-  const bf = $("#brand"); if (bf) bf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const body = {}; for (const el of f.elements) if (el.name) body[el.name] = el.type === "color" ? (el.value === "#ffffff" && el.name === "primary" ? "" : el.value) : el.value; try { await api("PUT", "/brand", body); toast("brand kit सेव"); } catch (err) { toast(err.message); } };
-  const start = async (pl) => { try { const r = await api("POST", `/connect/${pl}/start`); location.href = r.url; } catch (e) { toast(e.message); } };
+  const bf = $("#brand"); if (bf) bf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const body = {}; for (const el of f.elements) if (el.name) body[el.name] = el.type === "color" ? (el.value === "#ffffff" && el.name === "primary" ? "" : el.value) : el.value; try { await api("PUT", `/brand?channel=${S.channel}`, body); toast("brand kit सेव"); } catch (err) { toast(err.message); } };
+  const start = async (pl) => { try { const r = await api("POST", `/connect/${pl}/start?channel=${S.channel}`); location.href = r.url; } catch (e) { toast(e.message); } };
+  document.querySelectorAll(".c-move").forEach((sel) => (sel.onchange = async () => { await api("PATCH", `/connections/${sel.dataset.id}`, { channel_id: sel.value }); toast("channel बदला"); load().then(render); }));
+  const add = $("#ch-add"); if (add) add.onclick = async () => { const name = prompt("नए channel का नाम"); if (!name) return; const niche = prompt("niche (जैसे: Hindi motivation, success stories)") || ""; const r = await api("POST", "/channels", { name, niche }); S.channel = r.id; localStorage.setItem("vividora_channel", r.id); load().then(render); };
+  const ce = $("#ch-edit"); if (ce) ce.onsubmit = async (e) => { e.preventDefault(); const f = e.target; await api("PATCH", `/channels/${f.id.value}`, { name: f.name.value, handle: f.handle.value, niche: f.niche.value, language: f.language.value, color: f.color.value, keywords: f.keywords.value.split(",").map((x) => x.trim()).filter(Boolean) }); toast("channel सेव"); load().then(render); };
+  const cd = $("#ch-del"); if (cd) cd.onclick = async () => { if (!confirm("यह channel हटाएँ? इसके projects पहले channel में चले जाएँगे।")) return; await api("DELETE", `/channels/${S.channel}`); S.channel = ""; load().then(render); };
+  document.querySelectorAll("[data-ch]").forEach((el) => (el.onclick = () => { S.channel = el.dataset.ch; localStorage.setItem("vividora_channel", S.channel); load().then(render); }));
   const yt = $("#c-yt"); if (yt) yt.onclick = () => start("youtube");
   const mt = $("#c-meta"); if (mt) mt.onclick = () => start("meta");
   document.querySelectorAll(".c-del").forEach((b) => (b.onclick = async () => { if (confirm("यह connection हटाएँ?")) { await api("DELETE", `/connections/${b.dataset.id}`); load().then(render); } }));
@@ -434,12 +455,12 @@ function ideaPanel(i, canEdit) {
     <div class="row between" style="margin-top:1rem"><span class="small muted">record करने के बाद "+ नया" से upload करें — यह idea link हो जाएगा।</span>${canEdit ? `<span class="row"><a class="btn small" href="#/new?idea=${i.id}">record हो गया → upload</a><button class="btn primary small" id="idea-save">सेव</button></span>` : ""}</div></div></div>`;
 }
 function bindPlan() {
-  const rf0 = $("#ref-form"); if (rf0) rf0.onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/refs", { kind: f.kind.value, url: f.url.value.trim(), note: f.note.value.trim() }); load().then(render); } catch (err) { toast(err.message); } };
+  const rf0 = $("#ref-form"); if (rf0) rf0.onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/refs", { kind: f.kind.value, url: f.url.value.trim(), note: f.note.value.trim(), channel_id: S.channel }); load().then(render); } catch (err) { toast(err.message); } };
   document.querySelectorAll(".ref-del").forEach((b) => (b.onclick = async () => { await api("DELETE", `/refs/${b.dataset.id}`); load().then(render); }));
   const rf = $("#tr-refresh"); if (rf) rf.onclick = async () => { rf.disabled = true; rf.textContent = "ला रहा है…"; try { const r = await api("POST", "/trends/refresh"); toast(`${r.count} trends`); } catch (e) { toast(e.message); } load().then(render); };
   const gen = $("#idea-gen"); if (gen) gen.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true; b.textContent = "सोच रहा है…";
-    try { await api("POST", "/ideas/generate", { topic: f.topic.value, format: f.format.value, count: +f.count.value }); toast("ideas आ गए"); } catch (err) { toast(err.message); } load().then(render); };
-  const add = $("#idea-add"); if (add) add.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const r = await api("POST", "/ideas", { title: f.title.value, format: "short" }); S.ideaOpen = r.id; load().then(render); };
+    try { await api("POST", "/ideas/generate", { topic: f.topic.value, format: f.format.value, count: +f.count.value, channel_id: S.channel }); toast("ideas आ गए"); } catch (err) { toast(err.message); } load().then(render); };
+  const add = $("#idea-add"); if (add) add.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const r = await api("POST", "/ideas", { title: f.title.value, format: "short", channel_id: S.channel }); S.ideaOpen = r.id; load().then(render); };
   document.querySelectorAll("[data-idea]").forEach((li) => (li.onclick = () => { S.ideaOpen = li.dataset.idea; render(); }));
   const close = $("#idea-close"); if (close) close.onclick = () => { S.ideaOpen = null; render(); };
   const modal = $("#idea-modal"); if (modal) modal.onclick = (e) => { if (e.target === modal) { S.ideaOpen = null; render(); } };
@@ -466,7 +487,7 @@ function analyticsView() {
 }
 function bindAnalytics() {
   const r = $("#an-refresh"); if (r) r.onclick = async () => { r.disabled = true; r.textContent = "ला रहा है…"; try { const x = await api("POST", "/analytics/refresh"); toast(`${x.updated} videos · ${(x.errors || []).join("; ") || "ok"}`); } catch (e) { toast(e.message); } load().then(render); };
-  const ap = $("#an-apply"); if (ap) ap.onclick = async () => { const x = await api("POST", "/analytics/apply"); toast("default बदले"); load().then(render); };
+  const ap = $("#an-apply"); if (ap) ap.onclick = async () => { const x = await api("POST", `/analytics/apply?channel=${S.channel}`); toast("default बदले"); load().then(render); };
 }
 
 // ---------- boot ----------

@@ -95,6 +95,11 @@ CREATE TABLE IF NOT EXISTS history (
   id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   user_id TEXT, note TEXT, settings TEXT NOT NULL DEFAULT '{}', edl TEXT, meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS history_project ON history(project_id, id);
+CREATE TABLE IF NOT EXISTS channels (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, handle TEXT, niche TEXT, language TEXT NOT NULL DEFAULT 'hi', color TEXT,
+  settings TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS channels_ws ON channels(workspace_id);
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);
@@ -135,9 +140,40 @@ def conn() -> sqlite3.Connection:
     return c
 
 
+MIGRATIONS = [
+    ("projects", "channel_id", "TEXT"),
+    ("connections", "channel_id", "TEXT"),
+    ("ideas", "channel_id", "TEXT"),
+    ("refs", "channel_id", "TEXT"),
+    ("trends", "channel_id", "TEXT"),
+    ("library", "channel_id", "TEXT"),
+    ("library", "tags", "TEXT NOT NULL DEFAULT ''"),
+    ("library", "source", "TEXT"),
+    ("library", "license", "TEXT"),
+]
+
+
 def init() -> None:
     with conn() as c:
         c.executescript(SCHEMA)
+        for table, col, decl in MIGRATIONS:
+            cols = [r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()]
+            if col not in cols:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        # every workspace gets a default channel; projects without one are attached to it
+        for ws in c.execute("SELECT id, name, settings FROM workspaces").fetchall():
+            ch = c.execute("SELECT id FROM channels WHERE workspace_id = ? ORDER BY created_at LIMIT 1", (ws[0],)).fetchone()
+            if ch is None:
+                st = json.loads(ws[2] or "{}")
+                cid = new_id()
+                c.execute("INSERT INTO channels (id, workspace_id, name, handle, niche, language, color, settings, created_at, updated_at) "
+                          "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                          (cid, ws[0], (st.get("brand") or {}).get("name") or "Main channel", None,
+                           "motivation, stories", "hi", "#F2B33D",
+                           json.dumps({k: st.get(k) for k in ("brand", "render_defaults", "recommend") if st.get(k)}), now(), now()))
+                ch = (cid,)
+            for t in ("projects", "connections", "ideas", "refs", "library"):
+                c.execute(f"UPDATE {t} SET channel_id = ? WHERE workspace_id = ? AND channel_id IS NULL", (ch[0], ws[0]))
 
 
 @contextmanager

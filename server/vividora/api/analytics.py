@@ -13,13 +13,16 @@ from ..publish.http import PublishError
 from .deps import ApiError, ok, require
 
 
-def _rows(workspace_id: str) -> list[dict]:
+def _rows(workspace_id: str, channel_id: str | None = None) -> list[dict]:
     cn = db.conn()
-    pubs = db.rows(cn.execute(
-        "SELECT p.*, pr.title AS project_title, pr.settings AS project_settings, a.meta AS asset_meta, a.label AS asset_label "
-        "FROM publications p JOIN projects pr ON pr.id = p.project_id LEFT JOIN assets a ON a.id = p.asset_id "
-        "WHERE p.workspace_id = ? AND p.status = 'done' AND p.remote_id IS NOT NULL ORDER BY p.finished_at DESC",
-        (workspace_id,)))
+    q = ("SELECT p.*, pr.title AS project_title, pr.settings AS project_settings, pr.channel_id AS channel_id, a.meta AS asset_meta, a.label AS asset_label "
+         "FROM publications p JOIN projects pr ON pr.id = p.project_id LEFT JOIN assets a ON a.id = p.asset_id "
+         "WHERE p.workspace_id = ? AND p.status = 'done' AND p.remote_id IS NOT NULL")
+    args: list = [workspace_id]
+    if channel_id:
+        q += " AND pr.channel_id = ?"
+        args.append(channel_id)
+    pubs = db.rows(cn.execute(q + " ORDER BY p.finished_at DESC", args))
     out = []
     for p in pubs:
         import json
@@ -36,9 +39,11 @@ def _rows(workspace_id: str) -> list[dict]:
 
 @require("viewer")
 async def overview(request: Request, user: dict):
-    rows = _rows(user["workspace_id"])
-    ws = db.get("workspaces", user["workspace_id"])
-    return ok({"videos": rows, "learn": analytics.learn(rows), "defaults": (ws.get("settings") or {}).get("render_defaults", {})})
+    from .channels import get_channel
+    ch = get_channel(user["workspace_id"], request.query_params.get("channel"))
+    rows = _rows(user["workspace_id"], ch["id"] if ch else None)
+    return ok({"videos": rows, "learn": analytics.learn(rows), "channel": ch["id"] if ch else None,
+               "defaults": ((ch or {}).get("settings") or {}).get("render_defaults", {})})
 
 
 @require("editor")
@@ -84,7 +89,9 @@ async def refresh(request: Request, user: dict):
 @require("admin")
 async def apply_defaults(request: Request, user: dict):
     """Turn the recommendation into the workspace's default render settings for new projects."""
-    rows = _rows(user["workspace_id"])
+    from .channels import get_channel
+    ch = get_channel(user["workspace_id"], request.query_params.get("channel"))
+    rows = _rows(user["workspace_id"], ch["id"] if ch else None)
     rec = analytics.learn(rows).get("recommend", {})
     defaults: dict = {}
     if rec.get("caption_style") in caption_styles():
@@ -96,10 +103,10 @@ async def apply_defaults(request: Request, user: dict):
         eff["look"] = rec["look"]
     if eff:
         defaults["effects"] = eff
-    ws = db.get("workspaces", user["workspace_id"])
     with db.tx() as c:
-        db.update(c, "workspaces", ws["id"], {"settings": {**(ws.get("settings") or {}), "render_defaults": defaults,
-                                                           "recommend": rec}})
+        if ch:
+            db.update(c, "channels", ch["id"], {"settings": {**(ch.get("settings") or {}), "render_defaults": defaults, "recommend": rec},
+                                                "updated_at": db.now()})
         service.log(c, user["workspace_id"], "analytics.apply", user_id=user["id"], detail=defaults)
     return ok({"defaults": defaults, "recommend": rec})
 

@@ -186,7 +186,7 @@ async function upload() {
   const ext = R.blob.type.includes("mp4") ? "mp4" : "webm";
   const file = new File([R.blob], `recording_${Date.now()}.${ext}`, { type: R.blob.type });
   try {
-    const p = await api("POST", "/projects", { title: $("#rec-title", R.root).value.trim() || "Recording", language: R.language, autopilot: $("#rec-ap", R.root)?.checked !== false });
+    const p = await api("POST", "/projects", { title: $("#rec-title", R.root).value.trim() || "Recording", language: R.language, autopilot: $("#rec-ap", R.root)?.checked !== false, channel_id: R.ctx.S.channel });
     if (R.scriptIdea) api("PATCH", `/ideas/${R.scriptIdea.id}`, { project_id: p.id, status: "recorded" }).catch(() => {});
     await uploadFile(p.id, file, (d, t) => { $("#rec-prog", R.root).innerHTML = `<p class="small muted">upload ${(d / t * 100).toFixed(0)}%</p><div class="progress"><i style="width:${(d / t * 100).toFixed(0)}%"></i></div>`; });
     toast("upload पूरा — auto edit शुरू"); R.blob = null; go("/projects/" + p.id);

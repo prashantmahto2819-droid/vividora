@@ -30,7 +30,7 @@ _states: dict[str, dict] = {}  # oauth state → {workspace_id, user_id, platfor
 
 
 def conn_view(c: dict) -> dict:
-    return {k: c[k] for k in ("id", "platform", "name", "external_id", "meta", "created_at", "updated_at")}
+    return {k: c.get(k) for k in ("id", "platform", "name", "external_id", "meta", "created_at", "updated_at", "channel_id")}
 
 
 def _platform_status() -> dict:
@@ -43,6 +43,18 @@ async def list_connections(request: Request, user: dict):
     rows = db.rows(db.conn().execute("SELECT * FROM connections WHERE workspace_id = ? ORDER BY created_at",
                                      (user["workspace_id"],)))
     return ok({"connections": [conn_view(r) for r in rows], "setup": _platform_status()})
+
+
+@require("admin")
+async def move_connection(request: Request, user: dict):
+    cid = request.path_params["conn_id"]
+    c0 = db.get("connections", cid)
+    if not c0 or c0["workspace_id"] != user["workspace_id"]:
+        raise ApiError(404, "connection not found")
+    data = await body(request)
+    with db.tx() as t:
+        db.update(t, "connections", cid, {"channel_id": data.get("channel_id") or None, "updated_at": db.now()})
+    return ok()
 
 
 @require("admin")
@@ -64,13 +76,13 @@ async def connect_start(request: Request, user: dict):
         if not youtube.configured():
             raise ApiError(400, ".env में YT_CLIENT_ID / YT_CLIENT_SECRET / PUBLIC_URL सेट करें")
         state = pysecrets.token_urlsafe(24)
-        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform}
+        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel")}
         return ok({"url": youtube.auth_url(state)})
     if platform == "meta":
         if not metaapi.configured():
             raise ApiError(400, ".env में META_APP_ID / META_APP_SECRET / PUBLIC_URL सेट करें")
         state = pysecrets.token_urlsafe(24)
-        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform}
+        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel")}
         return ok({"url": metaapi.auth_url(state)})
     raise ApiError(404, "unknown platform")
 
@@ -98,7 +110,7 @@ async def youtube_callback(request: Request):
                                     (st["workspace_id"], ch["id"])).fetchone())
         row = {"platform": "youtube", "name": ch["title"], "external_id": ch["id"], "secrets": sec,
                "meta": {"thumbnail": ch.get("thumbnail"), "subscribers": ch.get("subscribers")},
-               "updated_at": db.now()}
+               "channel_id": st.get("channel_id"), "updated_at": db.now()}
         if existing:
             db.update(c, "connections", existing["id"], row)
         else:
@@ -135,6 +147,7 @@ async def meta_callback(request: Request):
                 ex = db.row(c.execute("SELECT * FROM connections WHERE workspace_id=? AND platform=? AND external_id=?",
                                       (st["workspace_id"], row["platform"], row["external_id"])).fetchone())
                 row["updated_at"] = db.now()
+                row["channel_id"] = st.get("channel_id")
                 if ex:
                     db.update(c, "connections", ex["id"], row)
                 else:
@@ -254,6 +267,7 @@ async def public_file(request: Request):
 routes = [
     Route("/connections", list_connections),
     Route("/connections/{conn_id}", delete_connection, methods=["DELETE"]),
+    Route("/connections/{conn_id}", move_connection, methods=["PATCH"]),
     Route("/connect/{platform}/start", connect_start, methods=["POST"]),
     Route("/connect/youtube/callback", youtube_callback),
     Route("/connect/meta/callback", meta_callback),
