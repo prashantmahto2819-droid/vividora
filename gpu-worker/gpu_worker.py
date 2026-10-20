@@ -1,8 +1,9 @@
 """Vividora GPU worker — runs on the Windows PC with the NVIDIA card.
 
-It only does `transcribe` jobs (Hindi speech → words with timestamps) using
-faster-whisper on CUDA, and sends the result back to the Vividora API in the
-Ubuntu VM. Everything else (cutting, captions, render) happens in the VM.
+It does `transcribe` jobs (Hindi speech → words with timestamps) using
+faster-whisper on CUDA, and `dub` jobs (AI voice-over: Indic Parler-TTS / Kokoro,
+needs requirements-tts.txt + ffmpeg), and sends the results back to the Vividora
+API in the Ubuntu VM. Everything else (cutting, captions, render) happens in the VM.
 
 Setup: run install.ps1 once, fill gpu-worker.env, then run.ps1 (or let Task
 Scheduler start it at logon — install.ps1 offers that).
@@ -52,16 +53,24 @@ def gpu_info() -> dict:
 
 
 def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> dict:
+    def progress(frac: float, msg: str) -> None:
+        if not client.heartbeat(job["id"], frac * 100, msg):
+            raise RuntimeError("job cancelled")
+
+    if job["kind"] == "dub":
+        # AI voice-over / dubbing (Indic Parler-TTS / Kokoro) — see README "AI voice-over"
+        try:
+            import vividora_tts  # copied from server/vividora/engine/tts.py by install.ps1
+        except ImportError:
+            raise ValueError("lib\\vividora_tts.py नहीं मिला — gpu-worker में .\\install.ps1 दोबारा चलाएँ") from None
+        with tempfile.TemporaryDirectory(prefix="vividora_dub_") as td:
+            return vividora_tts.handle_job(client, job, Path(td), on_progress=progress)
+
     audio_asset = next((a for a in assets if a["kind"] == "audio_asr"), None)
     if audio_asset is None:
         raise ValueError("project has no audio_asr file")
     with tempfile.TemporaryDirectory(prefix="vividora_gpu_") as td:
         audio = client.download(audio_asset["id"], Path(td) / "audio.wav")
-
-        def progress(frac: float, msg: str) -> None:
-            if not client.heartbeat(job["id"], frac * 100, msg):
-                raise RuntimeError("job cancelled")
-
         transcript = transcribe_file(audio, language=job["payload"].get("language", "hi"),
                                      on_progress=progress)
     return {"transcript": transcript}
@@ -82,7 +91,10 @@ def main() -> None:
     name = os.environ.get("WORKER_NAME", f"gpu@{socket.gethostname()}")
     info = {**gpu_info(), "model": os.environ["WHISPER_MODEL"]}
     logging.getLogger("vividora.worker").info("GPU worker %s → %s · %s", name, base, info)
-    run_loop(ApiClient(base, token, name), ["transcribe"], handle,
+    os.environ.setdefault("TTS_CACHE", str(HERE / "models" / "tts"))
+    # "dub" = AI voice-over. Set DUB=0 in gpu-worker.env to leave it to the CPU worker (TTS_LOCAL=1).
+    kinds = ["transcribe"] + ([] if os.environ.get("DUB", "1") == "0" else ["dub"])
+    run_loop(ApiClient(base, token, name), kinds, handle,
              poll=float(os.environ.get("POLL_SECONDS", "4")), info=info)
 
 

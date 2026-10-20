@@ -10,6 +10,8 @@ video for one platform.
   titles    [{start, end, text, pos, size, color, bg}]
   watermark {path, opacity, size, pos}
   sfx       [{path, at, volume}]
+  voice_track       "original" | dub asset id; the worker adds voice_track_path / _words
+  voice_track_mode  "replace" (AI voice only) | "both" (original quieter under it, voice_track_under 0..1)
 Times are on the output (post-cut) timeline.
 """
 
@@ -159,6 +161,29 @@ def _cut_points(keep: list[tuple[float, float]]) -> list[float]:
     return pts[:-1]
 
 
+def out_timeline(edl: dict, fps: float, effects: dict | None = None):
+    """Source time → output time of the FULL video (same cuts / speed ramps / clip transitions as
+    render). → (to_out(t) → float | None, output duration). The AI voice-over is timed with this."""
+    fps = float(fps or 30.0)
+    keep = [(_snap(a, fps), _snap(b, fps)) for a, b in keep_segments(edl)]
+    keep = [(a, b) for a, b in keep if b - a >= 1 / fps]
+    if not keep:
+        return (lambda t: None), 0.0
+    e = effects or {}
+    segs = _segment_timeline(_plan_segments(keep, edl, e.get("transition") or "none", e.get("speed") or edl.get("speed")))
+    if any(fx.is_xfade(sg["tr"]) or sg["rate"] != 1.0 for sg in segs):
+        return _src_to_out(segs), segs[-1]["out_start"] + segs[-1]["out_dur"]
+
+    def to_out(t: float) -> float | None:
+        o = 0.0
+        for a, b in keep:
+            if a <= t < b:
+                return o + (t - a)
+            o += b - a
+        return None
+    return to_out, sum(b - a for a, b in keep)
+
+
 def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript: dict | None,
            preset: dict, style: dict | None, out_dir: Path, name: str, hook: dict | None = None,
            focus_x: float = 0.5, focus_y: float = 0.5, burn_captions: bool | None = None,
@@ -188,6 +213,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     fps = round(fps, 3) or 30.0
 
     keep = [(_snap(a, fps), _snap(b, fps)) for a, b in keep_segments(edl)]
+    dub_path = e.get("voice_track_path") if e.get("voice_track") not in (None, "", "original") else None
+    if dub_path and not Path(dub_path).exists():
+        dub_path = None
     if clip and clip.get("end", 0) > clip.get("start", 0):
         # a Short: only the chosen window of the recording (cuts inside it still apply)
         cs, ce = _snap(float(clip["start"]), fps), _snap(float(clip["end"]), fps)
@@ -212,6 +240,17 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         new_dur = sum(b - a for a, b in keep)
         cuts = _cut_points(keep)
         words = remap_words(words_of(transcript), keep) if transcript else []
+    dub_offset = 0.0
+    if dub_path:
+        # the dub is timed on the full video's output timeline; a Short starts somewhere inside it
+        if clip:
+            full_out, _ = out_timeline(edl, fps, effects)
+            dub_offset = max(0.0, full_out(keep[0][0]) or 0.0)
+        dub_words = e.get("voice_track_words")
+        if isinstance(dub_words, list) and dub_words:
+            # captions follow what is actually heard (translated / re-voiced text)
+            words = [{**wd, "start": max(0.0, round(float(wd["start"]) - dub_offset, 3)), "end": round(float(wd["end"]) - dub_offset, 3)}
+                     for wd in dub_words if float(wd["end"]) - dub_offset > 0 and float(wd["start"]) - dub_offset < new_dur]
     style = resolve_style(style, caption_overrides) if style else style
     burn = preset.get("burn_captions", True) if burn_captions is None else burn_captions
     work = out_dir / f".{name}"
@@ -423,20 +462,39 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
 
     # ---- audio: voice (cut) → music duck → sfx → loudnorm
     a_cfg = preset.get("audio", {})
-    if seg_audio_label or (not use_segments and (audio is not None or meta.get("has_audio"))):
-        if not use_segments:
-            if audio is not None:
-                inputs += ["-i", str(audio)]
-                a_in = f"[{next_in}:a]"
-                next_in += 1
+    has_orig = bool(seg_audio_label) or (not use_segments and (audio is not None or bool(meta.get("has_audio"))))
+    dub_mode = "both" if (dub_path and has_orig and e.get("voice_track_mode") == "both") else "replace"
+    if has_orig or dub_path:
+        cur_a = None
+        if has_orig and not (dub_path and dub_mode == "replace"):
+            if not use_segments:
+                if audio is not None:
+                    inputs += ["-i", str(audio)]
+                    a_in = f"[{next_in}:a]"
+                    next_in += 1
+                else:
+                    a_in = "[0:a]"
+                chains.append(f"{a_in}aselect='{sel}',asetpts=N/SR/TB,aformat=sample_rates=48000:channel_layouts=mono[voice]")
+            cur_a = "[voice]"
+            vchain = fx.voice_chain(e.get("voice"), new_dur)
+            if vchain:
+                chains.append(f"[voice]{vchain}[voicefx]")
+                cur_a = "[voicefx]"
+        elif seg_audio_label:
+            chains.append(f"{seg_audio_label}anullsink")  # the cut original is not heard
+        if dub_path:
+            # AI voice-over / dub: already timed + loudness-normalised; pad/trim to this video
+            inputs += ["-i", str(dub_path)]
+            chains.append(f"[{next_in}:a]aformat=sample_rates=48000:channel_layouts=mono,atrim=start={dub_offset:.3f},"
+                          f"asetpts=PTS-STARTPTS,apad,atrim=0:{new_dur:.3f}[dubv]")
+            next_in += 1
+            if cur_a:
+                under = max(0.0, min(1.0, float(e.get("voice_track_under", 0.25) or 0)))
+                chains.append(f"{cur_a}volume={under:.3f}[vunder];[dubv][vunder]amix=inputs=2:duration=first:"
+                              f"dropout_transition=0:normalize=0[vdub]")
+                cur_a = "[vdub]"
             else:
-                a_in = "[0:a]"
-            chains.append(f"{a_in}aselect='{sel}',asetpts=N/SR/TB,aformat=sample_rates=48000:channel_layouts=mono[voice]")
-        cur_a = "[voice]"
-        vchain = fx.voice_chain(e.get("voice"), new_dur)
-        if vchain:
-            chains.append(f"[voice]{vchain}[voicefx]")
-            cur_a = "[voicefx]"
+                cur_a = "[dubv]"
         music = e.get("music") or {}
         if music.get("path"):
             inputs += ["-stream_loop", "-1", "-i", str(music["path"])]
@@ -493,7 +551,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                        "effects": {"zoom": bool(zoom.get("enabled")), "look": e.get("look") or None,
                                    "music": bool((e.get("music") or {}).get("path")),
                                    "broll": len(e.get("broll") or []), "titles": len(titles),
-                                   "watermark": bool(wm.get("path"))}}}]
+                                   "watermark": bool(wm.get("path")),
+                                   "voice_track": e.get("voice_track") if dub_path else "original",
+                                   "voice_track_mode": dub_mode if dub_path else None}}}]
     if preset.get("sidecar_srt") and words:
         srt = out_dir / f"{name}.srt"
         srt.write_text(build_srt(words), encoding="utf-8")

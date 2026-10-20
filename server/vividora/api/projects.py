@@ -583,6 +583,7 @@ async def media(request: Request):
 
 @require("viewer")
 async def presets(request: Request, user: dict):
+    from ..engine import dub as dub_eng
     fonts = ["Noto Sans Devanagari", "Poppins", "Baloo 2", "Mukta", "Hind", "Lora", "FreeSerif"]
     return ok({"platforms": list(platforms().values()), "caption_styles": list(caption_styles().values()),
                "fonts": fonts, "looks": [{"id": k, "label": v["label"]} for k, v in LOOKS.items()],
@@ -595,6 +596,7 @@ async def presets(request: Request, user: dict):
                "body_anims": [{"id": k, "label": v} for k, v in BODY_ANIMS.items()],
                "voice_params": VOICE_PARAMS, "voice_presets": VOICE_PRESETS, "textfx": textfx.presets_json(), "blends": BLENDS, "autopilot": {"defaults": autopilot_eng.AUTOPILOT_DEFAULTS, "labels": autopilot_eng.AUTOPILOT_LABELS},
                "catalog": catalog.catalog_json(),
+               "dub": dub_eng.presets_json(),  # AI voice-over: voices / languages / modes
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
 

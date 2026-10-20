@@ -1,0 +1,12 @@
+# AI voice-over / dubbing on the GPU worker (optional, ~5 GB with models).
+# Install CUDA PyTorch FIRST (see README "AI voice-over"), then:
+#   .venv\Scripts\python.exe -m pip install -r requirements-tts.txt
+# Licences: Indic Parler-TTS model + parler-tts code = Apache-2.0, Kokoro-82M + kokoro = Apache-2.0.
+# Hindi + Indian English (ai4bharat/indic-parler-tts); pins its own compatible transformers version
+parler-tts @ git+https://github.com/huggingface/parler-tts.git
+sentencepiece
+protobuf
+# English, lighter (hexgrad/Kokoro-82M)
+kokoro>=0.9.4
+soundfile
+numpy
