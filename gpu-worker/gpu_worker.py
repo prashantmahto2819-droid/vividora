@@ -93,7 +93,10 @@ def main() -> None:
     logging.getLogger("vividora.worker").info("GPU worker %s → %s · %s", name, base, info)
     os.environ.setdefault("TTS_CACHE", str(HERE / "models" / "tts"))
     # "dub" = AI voice-over. Set DUB=0 in gpu-worker.env to leave it to the CPU worker (TTS_LOCAL=1).
-    kinds = ["transcribe"] + ([] if os.environ.get("DUB", "1") == "0" else ["dub"])
+    # TRANSCRIBE=0: leave transcription to the server (e.g. a PC without an NVIDIA GPU that only makes AI voices)
+    kinds = ([] if os.environ.get("TRANSCRIBE", "1") == "0" else ["transcribe"]) + ([] if os.environ.get("DUB", "1") == "0" else ["dub"])
+    if not kinds:
+        raise SystemExit("TRANSCRIBE=0 और DUB=0 दोनों — इस worker के पास कोई काम नहीं")
     run_loop(ApiClient(base, token, name), kinds, handle,
              poll=float(os.environ.get("POLL_SECONDS", "4")), info=info)
 
