@@ -170,7 +170,28 @@ async def inbound(request: Request):
     text = str(data.get("text") or data.get("message") or "").strip()
     m = re.search(r"\b(ok|okay|approve|हाँ|ha|yes)\s+([0-9a-f]{4})\b", text, re.I)
     if not m:
-        return ok({"matched": False})
+        # not an approval → a command (typed or a voice note). Publishing still needs "ok CODE".
+        allowed = [x.strip()[-10:] for x in str(settings.notify_to or "").split(",") if x.strip()]
+        sender = re.sub(r"\D", "", str(data.get("from") or ""))[-10:]
+        if allowed and sender and sender not in allowed:
+            return ok({"matched": False, "ignored": "sender"})
+        audio = data.get("audio_base64") or data.get("audio_url") or ((data.get("media") or {}) if isinstance(data.get("media"), dict) else {}).get("url") \
+            or ((data.get("media") or {}) if isinstance(data.get("media"), dict) else {}).get("base64")
+        if audio:
+            from .. import voice_in
+            text = await run_in_threadpool(voice_in.transcribe_any, audio)
+            if not text:
+                notify.send("🎤 voice note समझ नहीं आया — दोबारा भेजें या लिखकर भेजें।")
+                return ok({"matched": False, "voice": "failed"})
+        if not text:
+            return ok({"matched": False})
+        ws = db.row(db.conn().execute("SELECT id FROM workspaces ORDER BY created_at LIMIT 1").fetchone())
+        if not ws:
+            return ok({"matched": False})
+        from .. import command_exec
+        r = await run_in_threadpool(command_exec.run, ws["id"], None, text[:500], None, via="whatsapp")
+        notify.send(("🎤 “" + text[:80] + "”\n" if audio else "") + (r.get("reply") or "✅"))
+        return ok({"matched": False, "command": r.get("intent")})
     code = m.group(2).lower()
     rows = db.rows(db.conn().execute("SELECT * FROM projects WHERE status = 'review_output'"))
     p = next((r for r in rows if r["id"].startswith(code)), None)

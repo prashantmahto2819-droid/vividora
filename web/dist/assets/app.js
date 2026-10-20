@@ -2,6 +2,7 @@
 import * as ED from "./editor.js";
 import * as REC from "./record.js";
 import * as TH from "./thumbs.js";
+import * as VO from "./voice.js";
 
 const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null, channels: [], channel: localStorage.getItem("vividora_channel") || "",
             route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null,
@@ -25,7 +26,7 @@ const STATUS = {
   review_output: ["मंज़ूरी बाकी", "review"], approved: ["मंज़ूर", "approved"], failed: ["रुक गया", "failed"],
 };
 const WORKING = ["preparing", "transcribing", "cutting", "rendering"];
-const JOBK = { prepare: "जाँच + preview", transcribe: "transcript", autocut: "कट", render: "render", shorts_plan: "Shorts ढूँढना", publish: "publish", montage: "montage", matte: "cutout" };
+const JOBK = { prepare: "जाँच + preview", transcribe: "transcript", autocut: "कट", render: "render", shorts_plan: "Shorts ढूँढना", publish: "publish", montage: "montage", montage_plan: "beat plan", matte: "cutout" };
 
 // ---------- icons (stroke, 24 grid) ----------
 const IC = {
@@ -72,7 +73,7 @@ function parseRoute() {
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
-window.addEventListener("hashchange", () => { S.route = parseRoute(); document.body.classList.remove("nav-open"); closeMenu(); load().then(render); });
+window.addEventListener("hashchange", () => { S.route = parseRoute(); document.body.classList.remove("nav-open"); closeMenu(); load().catch((e) => toast(e.message)).then(render); });
 
 // ---------- data ----------
 async function load() {
@@ -153,8 +154,10 @@ const EDITOR_STATUS = ["review_cuts", "rendering", "review_output", "approved"];
 function render() {
   const app = $("#app");
   closeMenu();
-  if (!S.token) { ED.unmount(); TH.unmount(); app.dataset.mode = ""; app.innerHTML = loginView(); bindLogin(); return; }
+  if (!S.token) { ED.unmount(); TH.unmount(); VO.unmount(); app.dataset.mode = ""; app.innerHTML = loginView(); bindLogin(); return; }
   const r = S.route;
+  if (S.user?.role !== "viewer") VO.mount({ api, toast, reload: () => { $("#app").dataset.mode = ""; load().then(render); } });
+  document.body.classList.toggle("ed-mode", r.kind === "projects" && !!r.id);
   const detail = r.kind === "projects" && r.id;
   if (r.kind === "record") {
     if (app.dataset.mode !== "record") { ED.unmount(); TH.unmount(); app.dataset.mode = "record"; app.innerHTML = `<div id="recroot"></div>`; REC.mount($("#recroot"), { S, api, esc, toast, go, uploadFile }); }

@@ -188,6 +188,46 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 raise err from None
             return r
 
+        if kind in ("montage_plan", "montage") and (kind == "montage_plan" or job["payload"].get("plan")):
+            from ..engine import beatcut
+            p = job["payload"]
+            lib = tmp / "lib"
+            prog = _progress(client, job["id"])
+            local = {}
+            for n, item in enumerate(p.get("clips") or []):
+                path = client.download_library(item["id"], lib / item["id"])
+                k = "image" if (path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") or _is_image(path)) else "video"
+                local[item["id"]] = {"path": path, "kind": k}
+            music = client.download_library(p["music"], lib / p["music"])
+            if kind == "montage_plan":
+                mu = beatcut.music(music, float(p.get("max_seconds", 30)))
+                infos = []
+                for n, (cid, c) in enumerate(local.items()):
+                    prog(n / max(1, len(local)), f"clip {n + 1}/{len(local)} देख रहे हैं (best moments, चेहरा)")
+                    infos.append({"id": cid, **beatcut.clip(c["path"], c["kind"])})
+                pl = beatcut.plan(mu, infos, max_seconds=float(p.get("max_seconds", 30)), pace=p.get("pace") or "auto",
+                                  effects=p.get("effects_level") or "auto", slowmo=bool(p.get("slowmo", True)), seed=int(p.get("seed", 7)))
+                pl["clip_info"] = {i["id"]: {"kind": i["kind"], "w": i["w"], "h": i["h"], "duration": i["duration"]} for i in infos}
+                return {"plan": pl}
+            for cid, c in local.items():
+                try:
+                    pr = ffmpeg.probe(c["path"])
+                    c.update(w=pr.get("width"), h=pr.get("height"))
+                except Exception:  # noqa: BLE001
+                    pass
+            wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None
+            preset = platform(p.get("preset", "ig-reel"))
+            out = beatcut.render(pl=p["plan"], clips=local, music_path=music, out_dir=tmp / "out", name=preset["id"], preset=preset,
+                                 texts=p.get("texts") or [], look=p.get("look") or "auto", reframe=p.get("reframe") or "smart",
+                                 font=p.get("font") or "Poppins", text_color=p.get("text_color") or "#FFFFFF",
+                                 text_size=float(p.get("text_size", 0.07)), watermark=wm,
+                                 encoder_preset=os.getenv("X264_PRESET") or None, on_progress=prog)
+            files = []
+            for f in out["files"]:
+                up = client.upload(job["id"], f["path"], f["kind"], f.get("label"))
+                files.append({**f, "path": up["path"]})
+            return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": []}
+
         if kind == "montage":
             p = job["payload"]
             lib = tmp / "lib"
@@ -256,7 +296,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan"]
     try:
         import onnxruntime  # noqa: F401
         kinds.append("matte")

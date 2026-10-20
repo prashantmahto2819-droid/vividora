@@ -262,3 +262,16 @@ details.insp { border-top: 1px solid var(--ed-line); padding-top: .4rem; margin-
 .hookbox { margin-bottom: .6rem; }
 
 .pfbox { margin: .5rem 0; } .pfrow { padding: .2rem 0; border-top: 1px solid var(--ed-line); }
+
+.aicard textarea { width: 100%; font-size: .75rem; } .aicard { margin-bottom: .5rem; }
+
+.moplan { max-height: 52vh; overflow: auto; }
+.moseg { display: flex; gap: .4rem; align-items: center; padding: .25rem; border-radius: 8px; cursor: pointer; }
+.moseg.sel { outline: 2px solid var(--accent); } .moseg.off { opacity: .45; } .moseg.off .mothumb { filter: grayscale(1); }
+.moseg select { flex: 1; min-width: 0; font-size: .72rem; }
+.mobody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; } .morow { display: flex; gap: 2px; align-items: center; }
+.mothumb { width: 38px; height: 54px; flex: none; border-radius: 6px; overflow: hidden; background: #000; }
+.mothumb video, .mothumb img { width: 100%; height: 100%; object-fit: cover; }
+.moalts { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: .35rem; }
+.moalt { display: flex; flex-direction: column; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.moalt img { width: 100%; aspect-ratio: 9/12; object-fit: cover; border-radius: 5px; background: #000; }

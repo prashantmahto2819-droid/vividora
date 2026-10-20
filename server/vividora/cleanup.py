@@ -156,6 +156,11 @@ def clean(workspace_id: str, what: list[str], days: int = 7) -> dict:
     finished = _finished_projects(workspace_id, days)
     if "cache" in what:
         done["cache"] = drop_kinds(finished, CACHE_KINDS, "cache")
+        fr = storage.abs_path("cache") / "frames"   # plan thumbnails — rebuilt on demand
+        if fr.exists():
+            for f in fr.glob("*.jpg"):
+                if not _young(f):
+                    freed += _rm(f)
     if "sources" in what:
         done["sources"] = drop_kinds(finished, SOURCE_KINDS, "sources")
     if "renders" in what:

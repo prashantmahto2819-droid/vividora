@@ -350,6 +350,38 @@ async def file(request: Request):
     return FileResponse(path, media_type=item["mime"] or "application/octet-stream")
 
 
+async def frame(request: Request):
+    """Small JPEG of one moment of a library video (plan thumbnails) — cached, so the editor
+    never has to open dozens of <video> streams at once."""
+    import hashlib
+    import subprocess
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import Response
+    item = db.get("library", request.path_params["item_id"])
+    tok = request.query_params.get("t")
+    data = read_token(tok, kind="media") if tok else None
+    if not item or not data or data.get("sub") != item["id"]:
+        raise ApiError(401, "media link expired")
+    try:
+        at = max(0.0, min(36000.0, float(request.query_params.get("at") or 0)))
+    except ValueError:
+        at = 0.0
+    path = storage.abs_path(item["path"])
+    if not path.exists():
+        raise ApiError(404, "file missing on disk")
+    cache = Path(storage.abs_path("cache")) / "frames"
+    cache.mkdir(parents=True, exist_ok=True)
+    out = cache / (hashlib.sha1(f"{item['id']}|{at:.2f}".encode()).hexdigest()[:20] + ".jpg")
+    if not out.exists():
+        def grab():
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{at:.2f}", "-i", str(path), "-frames:v", "1",
+                            "-vf", "scale=160:-2", "-q:v", "6", str(out)], capture_output=True, timeout=30)
+        await run_in_threadpool(grab)
+    if not out.exists():
+        raise ApiError(404, "frame नहीं बना")
+    return Response(out.read_bytes(), media_type="image/jpeg", headers={"cache-control": "private, max-age=86400"})
+
+
 @require_worker
 async def worker_file(request: Request):
     item = db.get("library", request.path_params["item_id"])
@@ -370,5 +402,6 @@ routes = [
     Route("/library/{item_id}", rename, methods=["PATCH"]),
     Route("/library/{item_id}", delete, methods=["DELETE"]),
     Route("/library/{item_id}/file", file),
+    Route("/library/{item_id}/frame", frame),
     Route("/worker/library/{item_id}", worker_file),
 ]

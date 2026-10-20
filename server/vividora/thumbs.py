@@ -273,6 +273,12 @@ def auto_text(project: dict) -> dict:
         text = plain_text(tr) if tr else ""
     except Exception:  # noqa: BLE001
         text = ""
+    from .engine import aipack
+    pack = aipack.get(project) if tr else None
+    opts = [str(o).strip()[:60] for o in ((pack or {}).get("thumb_texts") or []) if str(o).strip()]
+    opts = [o for o in opts if len(T.plain(o).split()) <= 5]
+    if opts:
+        return {"options": opts[:4], "source": "llm"}
     return T.suggest_texts(project.get("title") or "", text, project.get("language") or "hi")
 
 

@@ -247,8 +247,15 @@ def after_job(c, job: dict, result: dict) -> None:
                 except (ValueError, TypeError):
                     pass
             return
+        n_auto = int(meta.pop("shorts_render_after_plan", 0) or 0)
         db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now(),
                                        "status_note": f"{len(meta['shorts'])} Shorts सुझाए — Shorts tab में देखें"})
+        if n_auto and meta["shorts"]:
+            clips = [{k: sc.get(k) for k in ("id", "start", "end", "title", "hook")} for sc in meta["shorts"][:n_auto]]
+            try:
+                request_shorts_render(c, db.get("projects", pid), clips, {})
+            except ValueError:
+                pass
         notify.on_event("shorts", project, str(len(meta["shorts"])))
 
     elif kind == "publish":
@@ -278,6 +285,19 @@ def after_job(c, job: dict, result: dict) -> None:
                 request_render(c, db.get("projects", pid), pend)
             except ValueError:
                 pass
+
+    elif kind == "montage_plan":
+        st = project.get("settings", {})
+        mo = {**(st.get("montage") or {}), "plan": result.get("plan")}
+        db.update(c, "projects", pid, {"settings": {**st, "montage": mo}, "updated_at": db.now()})
+        pl = result.get("plan") or {}
+        n = len(pl.get("segments") or [])
+        if mo.get("auto_render"):
+            project = db.get("projects", pid)
+            queue.enqueue(c, pid, "montage", {**{k: v for k, v in mo.items() if k != "auto_render"}, "plan": pl})
+            set_status(c, pid, "rendering", f"beat edit बन रहा है · {pl.get('bpm')} BPM · {n} cuts")
+        else:
+            set_status(c, pid, "review_cuts", f"plan तैयार · {pl.get('bpm')} BPM · {n} cuts — देखें/बदलें, फिर render")
 
     elif kind == "montage":
         for f in result.get("files", []):
@@ -335,6 +355,9 @@ def fail_job(c, job: dict, error: str) -> None:
             notify.on_event("publish_failed", db.get("projects", pid) or {"id": pid}, error.splitlines()[-1][:160] if error else "")
         db.update(c, "projects", pid, {"status_note": f"{job['kind']} असफल: {error.splitlines()[-1][:160] if error else 'error'}",
                                        "updated_at": db.now()})
+        return
+    if job["kind"] in ("montage", "montage_plan"):
+        set_status(c, pid, "review_cuts", f"{'beat plan' if job['kind'] == 'montage_plan' else 'montage'} असफल: {error.splitlines()[-1][:160] if error else 'error'} — settings बदलकर फिर कोशिश करें")
         return
     set_status(c, pid, "failed", f"{job['kind']}: {error.splitlines()[-1][:200] if error else 'error'}")
     notify.on_event("failed", db.get("projects", pid) or {"id": pid}, f"{job['kind']}: {error.splitlines()[-1][:160] if error else ''}")
@@ -419,13 +442,49 @@ def request_montage(c, project: dict, opts: dict) -> dict:
                "max_seconds": max(5.0, min(180.0, float(opts.get("max_seconds", 30)))), "flash": bool(opts.get("flash", True)),
                "watermark": opts.get("watermark") or None, "font": opts.get("font") or "Poppins",
                "text_color": opts.get("text_color") or "#FFFFFF", "text_size": max(0.03, min(0.14, float(opts.get("text_size", 0.07)))),
-               "seed": int(opts.get("seed", 7))}
-    db.update(c, "projects", project["id"], {"settings": {**project.get("settings", {}), "montage": payload},
+               "seed": int(opts.get("seed", 7)), "mode": opts.get("mode") or "classic",
+               "pace": opts.get("pace") or "auto", "effects_level": opts.get("effects_level") or "auto",
+               "reframe": opts.get("reframe") or "smart", "slowmo": bool(opts.get("slowmo", True)),
+               "auto_render": bool(opts.get("auto_render", False))}
+    old = (project.get("settings", {}).get("montage") or {})
+    kind = "montage"
+    if payload["mode"] == "auto":
+        if opts.get("replan") or not isinstance(opts.get("plan"), dict):
+            kind = "montage_plan"
+        else:
+            payload["plan"] = _clean_plan(opts["plan"])
+    if kind == "montage_plan":
+        payload.pop("plan", None)
+    elif payload["mode"] != "auto":
+        payload.pop("plan", None)
+    store = {**payload, **({"plan": old.get("plan")} if kind == "montage_plan" and old.get("plan") else {})}
+    db.update(c, "projects", project["id"], {"settings": {**project.get("settings", {}), "montage": store},
                                              "updated_at": db.now()})
-    c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? AND kind='montage' AND status='queued'",
+    c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? AND kind IN ('montage','montage_plan') AND status='queued'",
               (db.now(), project["id"]))
+    if kind == "montage_plan":
+        set_status(c, project["id"], "rendering", "clips और music देख रहे हैं — beat plan बन रहा है")
+        return queue.enqueue(c, project["id"], "montage_plan", {k: v for k, v in payload.items() if k != "auto_render"})
     set_status(c, project["id"], "rendering", "montage बन रहा है")
-    return queue.enqueue(c, project["id"], "montage", payload)
+    return queue.enqueue(c, project["id"], "montage", {k: v for k, v in payload.items() if k != "auto_render"})
+
+
+def _clean_plan(pl: dict) -> dict:
+    """Plan edited in the editor → only known fields, sane numbers."""
+    from .engine.beatcut import FX_ALL
+    segs = []
+    for s in (pl.get("segments") or [])[:300]:
+        if not isinstance(s, dict) or not s.get("clip"):
+            continue
+        fx = s.get("fx") if s.get("fx") in FX_ALL else "cut"
+        foc = s.get("focus") or [.5, .5]
+        segs.append({"clip": str(s["clip"]), "src_in": max(0.0, float(s.get("src_in") or 0)), "dur": max(0.1, min(10.0, float(s.get("dur") or 0.5))),
+                     "speed": max(0.25, min(4.0, float(s.get("speed") or 1))), "fx": fx, "keep": bool(s.get("keep", True)),
+                     "pulse": [float(x) for x in (s.get("pulse") or [])][:16], "focus": [max(0.0, min(1.0, float(foc[0]))), max(0.0, min(1.0, float(foc[1])))],
+                     "energy": float(s.get("energy") or .5), "kind": s.get("kind") or "video", "highlight": bool(s.get("highlight")),
+                     "score": float(s.get("score") or 0), "face": bool(s.get("face"))})
+    return {**{k: pl.get(k) for k in ("bpm", "period", "music_start", "alts", "beats", "bars", "clip_info")}, "segments": segs,
+            "total": round(sum(s["dur"] for s in segs if s["keep"]), 3)}
 
 
 def resolve_effects_local(project: dict, effects: dict) -> dict:

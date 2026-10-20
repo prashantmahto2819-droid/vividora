@@ -228,6 +228,30 @@ async def audio_preview(request: Request, user: dict):
 
 
 @require("viewer")
+async def ai_prompts(request: Request, user: dict):
+    """Prompt Studio: prompts for hook video, B-roll, cut-out background and thumbnail (Grok / ChatGPT / Veo)."""
+    from starlette.concurrency import run_in_threadpool
+    from ..engine import prompts
+    p = own_project(request, user)
+    dur = float((p.get("meta") or {}).get("duration") or 0)
+    plat = request.query_params.get("platform") or ("short" if dur <= 75 else "long")
+    n = max(1, min(10, int(request.query_params.get("broll") or 4)))
+    items = await run_in_threadpool(prompts.suggest, p, plat, n)
+    return ok({"platform": plat, "items": items, "batch": prompts.batch(items)})
+
+
+@require("viewer")
+async def ai_pack(request: Request, user: dict):
+    """The one-call AI pack (hooks, metadata for every platform, thumbnail texts, pinned comment, prompts)
+    + how many AI calls the cache has saved."""
+    from starlette.concurrency import run_in_threadpool
+    from ..engine import aipack, llm
+    p = own_project(request, user)
+    pack = await run_in_threadpool(aipack.get, p) if p.get("transcript") else None
+    return ok({"pack": pack, "llm": llm.stats()})
+
+
+@require("viewer")
 async def preflight(request: Request, user: dict):
     """Platform rule check (duration, hook, safe zones, hashtags, originality) for the chosen presets."""
     from ..engine import platform_rules
@@ -636,6 +660,8 @@ routes = [
     Route("/projects/{project_id}/autopilot/apply", autopilot_apply, methods=["POST"]),
     Route("/projects/{project_id}/hooks", hook_studio),
     Route("/projects/{project_id}/preflight", preflight),
+    Route("/projects/{project_id}/prompts", ai_prompts),
+    Route("/projects/{project_id}/aipack", ai_pack),
     Route("/projects/{project_id}/suggest", suggestions),
     Route("/projects/{project_id}/audio-preview", audio_preview, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),

@@ -150,6 +150,13 @@ def _suggest(project: dict, *, platform: str = "youtube", label: str | None = No
     base = heuristic(project, platform, label)
     if not llm.available():
         return base
+    is_short = platform != "youtube" or (label or "").startswith("short-") or label in ("yt-short", "ig-reel", "fb-reel")
+    from . import aipack
+    packed = aipack.meta_for(project, platform, is_short and platform == "youtube")
+    if packed:
+        if not packed["tags"]:
+            packed["tags"] = base["tags"]
+        return packed
     tr = project.get("transcript") or {}
     text = plain_text(tr)[:6000] if tr else ""
     is_short = platform != "youtube" or (label or "").startswith("short-") or label in ("yt-short", "ig-reel", "fb-reel")

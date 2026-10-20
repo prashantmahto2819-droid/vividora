@@ -104,6 +104,13 @@ def options(project: dict, n: int = 3) -> list[dict]:
     tr = project.get("transcript") or {}
     sents = shorts._sentences(tr)
     lang = project.get("language") or "hi"
+    from . import aipack
+    pack = aipack.get(project) if sents else None
+    if pack and isinstance(pack.get("hooks"), list):
+        hs = [{"heading": str(h.get("heading", ""))[:60], "say": str(h.get("say", ""))[:140], "type": h.get("type", ""), "source": "ai"}
+              for h in pack["hooks"][:n] if isinstance(h, dict) and h.get("heading")]
+        if hs:
+            return hs
     if llm.available() and sents:
         body = " ".join(s["text"] for s in sents[:40])[:3500]
         res = llm.ask_json(

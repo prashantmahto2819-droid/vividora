@@ -14,8 +14,8 @@ from . import llm
 RULES: list[tuple[str, tuple[str, ...]]] = [
     ("help", ("help", "मदद", "क्या कर सकते", "क्या-क्या", "commands")),
     ("status", ("status", "स्टेटस", "क्या हाल", "कहाँ तक", "कितना हुआ", "हो गया क्या", "update दो", "अपडेट")),
-    ("shorts", ("short", "शॉर्ट", "शॉर्ट्स", "reel", "रील")),
     ("render", ("render", "रेंडर", "export", "एक्सपोर्ट", "वीडियो बना", "video bana", "फाइनल बना", "final")),
+    ("shorts", ("short", "शॉर्ट", "शॉर्ट्स", "reel", "रील")),
     ("autopilot", ("autopilot", "ऑटोपायलट", "अपने आप edit", "auto edit", "खुद edit", "editing कर दो", "एडिट कर दो")),
     ("music_off", ("music हटा", "म्यूजिक हटा", "music बंद", "म्यूजिक बंद", "गाना हटा", "no music")),
     ("music", ("music", "म्यूजिक", "म्यूज़िक", "गाना", "background song")),

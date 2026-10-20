@@ -33,10 +33,11 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   stickers: '<svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v10a4 4 0 01-4 4H7a4 4 0 01-4-4V5a2 2 0 012-2z"/><path d="M15 3v4h4M8 13c1 1.5 2.3 2 4 2s3-.5 4-2M9 9h.01M15 9h.01"/></svg>',
   transitions: '<svg viewBox="0 0 24 24"><rect x="2" y="6" width="9" height="12" rx="1"/><rect x="13" y="6" width="9" height="12" rx="1"/><path d="M9 12h6M13 9l2 3-2 3"/></svg>',
+  ai: '<svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
 import * as TFX from "./textfx.js";
-const TABS_ALL = [["cuts", "कट"], ["media", "Media"], ["audio", "Audio"], ["text", "Text"], ["stickers", "Stickers"], ["effects", "Effects"], ["transitions", "Transitions"], ["color", "Filters"], ["captions", "Captions"], ["body", "Cutout"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["refs", "Refs"]];
+const TABS_ALL = [["cuts", "कट"], ["media", "Media"], ["audio", "Audio"], ["text", "Text"], ["stickers", "Stickers"], ["effects", "Effects"], ["transitions", "Transitions"], ["color", "Filters"], ["captions", "Captions"], ["body", "Cutout"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["ai", "AI Studio"], ["refs", "Refs"]];
 const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
 const TITLE_PRESETS = [
@@ -73,7 +74,7 @@ export function mount(root, project, ctx) {
   E.shorts = JSON.parse(JSON.stringify(project.meta?.shorts || []));
   E.montage = project.kind === "montage";
   TABS = E.montage ? TABS_MONTAGE : TABS_ALL;
-  if (E.montage) { E.tab = "montage"; E.mo = { clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); }
+  if (E.montage) { E.tab = "montage"; E.mo = { mode: "auto", pace: "auto", effects_level: "auto", reframe: "smart", slowmo: true, clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); const sp = E.mo.plan; E.moSig = sp ? `${sp.music_start}|${(sp.segments || []).length}|${sp.total}|${sp.bpm}` : ""; }
   E.speed = JSON.parse(JSON.stringify(project.edl?.speed || []));
   E.hist = []; E.redo = [];
   E.dur = project.edl?.duration || project.meta?.duration || 1;
@@ -96,6 +97,7 @@ function update(project) {
   if (E.transcriptDirty) project.transcript = E.p.transcript;
   E.p = project;
   if (project.edl?.duration) E.dur = project.edl.duration;
+  if (E.montage) { const sp = project.settings?.montage?.plan; const sig = sp ? `${sp.music_start}|${(sp.segments || []).length}|${sp.total}|${sp.bpm}` : ""; if (sig !== E.moSig) { E.moSig = sig; if (sp && !E.moDirty) E.mo.plan = sp; } }
   if (E.montage) { const r = project.assets.find((a) => a.kind === "render"); const v = $("#pv", E.root); if (r && v && !v.src.includes(r.id)) { v.src = r.url; E.dur = project.meta?.duration || E.dur; renderTimeline(); } if (E.tab === "montage") renderPanel(); }
   const fresh = JSON.stringify(project.meta?.shorts || []);
   if (fresh !== E.shortsSeen) { E.shortsSeen = fresh; if (!E.shortsDirty) { E.shorts = JSON.parse(fresh); if (E.tab === "shorts") renderPanel(); renderTimeline(); } }
@@ -693,6 +695,20 @@ function renderPanel() {
       <div class="box"><b>अपने fonts</b><p class="small muted">Google Fonts या किसी free site से .ttf/.otf font upload करें — text, captions और heading सब में चुन सकेंगे। ${(E.lib || []).filter((x) => x.kind === "font").map((x) => `<span class="pill small" style="font-family:'${esc(x.meta?.family || x.name)}'">${esc(x.meta?.family || x.name)}</span>`).join(" ")}</p>
         <label class="btn small">⬆ Font upload<input type="file" id="font-up" accept=".ttf,.otf" multiple hidden ${dis}></label><div id="lib-progress"></div></div>
       <h4>Timeline पर</h4><ul class="plist">${fx.titles.map((ti) => `<li class="${E.sel?.type === "title" && E.sel.id === ti._id ? "sel" : ""}" data-title-id="${ti._id}"><span class="grow small">${esc(ti.text)}</span><span class="small muted">${fmt(ti.start)}</span></li>`).join("") || `<li class="muted small">अभी कोई text नहीं</li>`}</ul>`;
+  } else if (t === "ai") {
+    const A = E.ai; const K = { hook: "🎬 Hook video (शुरुआत)", broll: "🎞 B-roll", background: "🖼 Cutout background", thumbnail: "🏷 Thumbnail background" };
+    h = `<div class="ph"><h3>AI Prompt Studio</h3><span class="small muted">Grok · ChatGPT · Veo</span></div>
+      <p class="small muted">Transcript से prompts बनते हैं। Copy करके Grok Imagine / ChatGPT में बनाएँ, फिर बना हुआ file यहीं “लगाएँ” से upload करें — सही जगह अपने-आप लग जाएगा।</p>
+      <div class="irow"><select id="ai-plat"><option value="">platform: auto</option><option value="short">9:16 Shorts/Reels</option><option value="long">16:9 YouTube</option></select><select id="ai-n">${[2, 4, 6, 8].map((n) => `<option ${n === (E.aiN || 4) ? "selected" : ""}>${n}</option>`).join("")}</select><button class="btn small primary" id="ai-go">✨ prompts बनाएँ</button></div>
+      ${A?.batch ? `<div class="box"><b>⚡ सब एक बार में</b><p class="small muted">${A.batch.count} prompts एक ही message में — ChatGPT/Grok में एक बार paste करें, सारी images/clips एक ही chat में बनेंगी (बार-बार credit नहीं)।</p>
+        <div class="irow"><button class="btn small primary" data-aiall="chatgpt">सब copy → ChatGPT ↗</button>${A.batch.videos ? `<button class="btn small" data-aiall="grok">${A.batch.videos} video prompts → Grok ↗</button>` : ""}</div>
+        ${E.aiPack?.pack?.pinned_comment ? `<p class="small">📌 Pin comment: “${esc(E.aiPack.pack.pinned_comment)}” <button class="btn small quiet" id="ai-pin">copy</button></p>` : ""}
+        ${E.aiPack?.llm?.provider ? `<p class="small muted">AI: ${E.aiPack.llm.calls} calls · ${E.aiPack.llm.saved} बार cache से (credit बचा)</p>` : ""}</div>` : ""}
+      <div id="ai-list">${A ? A.items.map((x, i) => `<div class="box aicard"><div class="row between"><b>${K[x.kind] || x.kind}</b><span class="small muted">${x.at != null ? "⏱ " + fmt(x.at) : ""} ${x.seconds ? `· ${x.seconds}s video` : "· image"} · ${esc(x.aspect)}${x.source === "ai" ? " · AI" : ""}</span></div>
+          ${x.line ? `<p class="small muted">“${esc(x.line.slice(0, 120))}”</p>` : ""}${x.hindi && x.hindi !== x.line ? `<p class="small">${esc(x.hindi)}</p>` : ""}
+          <textarea data-aip="${i}" rows="4">${esc(x.prompt)}</textarea>
+          <div class="irow"><button class="btn small" data-aicopy="${i}">Copy</button><button class="btn small" data-aiopen="grok:${i}">Grok ↗</button><button class="btn small" data-aiopen="chatgpt:${i}">ChatGPT ↗</button><button class="btn small quiet" data-aiopen="gemini:${i}">Gemini ↗</button>
+          <label class="btn small primary">⬆ बना file लगाएँ<input type="file" data-aiup="${i}" accept="video/*,image/*" hidden ${dis}></label></div></div>`).join("") : `<p class="small muted">ऊपर “prompts बनाएँ” दबाएँ।</p>`}</div><div id="lib-progress"></div>`;
   } else if (t === "transitions") {
     const nCuts = E.cuts.filter((c) => c.enabled !== false).length;
     h = `<div class="ph"><h3>Transitions</h3><span class="small muted">${nCuts} कट</span></div>
@@ -734,20 +750,43 @@ function renderPanel() {
   } else if (t === "montage") {
     const mo = E.mo; const lib = E.lib || []; const clips = lib.filter((x) => x.kind === "broll" || x.kind === "image"); const musics = lib.filter((x) => x.kind === "music"); const logos = lib.filter((x) => x.kind === "logo");
     const vert = (S.presets?.platforms || []); const chosen = mo.clips.map((c) => lib.find((x) => x.id === c.id)).filter(Boolean);
-    const looks = S.presets?.looks || [];
+    const looks = S.presets?.looks || []; const grades = Object.entries(S.presets?.catalog?.grade_presets || {}); const auto = mo.mode === "auto";
+    const job = E.p.jobs?.find((j) => (j.kind === "montage" || j.kind === "montage_plan") && j.status === "running");
+    const pl = mo.plan; const FXL = { cut: "सीधा cut", zoom_punch: "Zoom punch", flash: "Flash", shake: "Shake", rgb: "RGB split", glitch: "Glitch", blur_in: "Blur in", zoom_in: "Zoom in", zoom_out: "Zoom out", white_fade: "White fade", black_fade: "Black fade" };
+    const sel = (id, opts, v) => `<select id="${id}" ${dis}>${opts.map(([k, l]) => `<option value="${k}" ${String(v) === String(k) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+    const frm = (it, at) => it?.url ? (it.kind === "image" ? it.url : it.url.replace("/file?", "/frame?") + `&at=${(+at + 0.3).toFixed(2)}`) : "";
+    const segRow = (sg, i) => { const it = libItem(sg.clip); const src = frm(it, sg.src_in);
+      return `<li class="moseg ${sg.keep === false ? "off" : ""} ${E.moSel === i ? "sel" : ""}" data-mosel="${i}">
+        <span class="mothumb">${src ? `<img src="${src}" alt="" loading="lazy">` : ""}</span>
+        <span class="mobody"><span class="small"><b>${i + 1}.</b> ${esc((it?.name || "clip").slice(0, 14))} ${sg.highlight ? "⭐" : ""}${sg.face ? " 🙂" : ""}${sg.speed < 1 ? " 🐢" : ""} <span class="muted">${it?.kind === "image" ? "photo" : "⏱" + fmt(sg.src_in)} · ${(+sg.dur).toFixed(2)}s</span></span>
+        <span class="morow"><select data-mofx="${i}" ${dis}>${Object.entries(FXL).map(([k, l]) => `<option value="${k}" ${sg.fx === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <button class="ibtn" data-moalt="${i}" title="इसी clip का दूसरा अच्छा हिस्सा" ${dis}>↻</button><button class="ibtn" data-momv="${i}:-1" title="ऊपर" ${dis}>↑</button></span></span>
+        <label class="chk small" title="रखें / हटाएँ"><input type="checkbox" data-mokeep="${i}" ${sg.keep !== false ? "checked" : ""} ${dis}></label></li>`; };
+    const keptDur = pl ? pl.segments.filter((x) => x.keep !== false).reduce((a, x) => a + (+x.dur), 0) : 0;
     h = `<div class="ph"><h3>Montage</h3><span class="small muted">${E.p.meta?.bpm ? `${E.p.meta.bpm} BPM · ${E.p.meta.segments} cuts` : "beat-synced"}</span></div>
-      <p class="small muted">Media tab से clips/images upload करें, Audio tab से music। फिर यहाँ चुनें — हर beat पर cut, ऊपर text lines।</p>
-      <h4>Clips (क्रम में) · ${chosen.length}</h4><ul class="plist">${chosen.map((x, i) => `<li data-moclip="${i}"><span class="small muted">${i + 1}.</span><span class="grow small">${esc(x.name)}</span><button class="ibtn" data-moup="${i}" title="ऊपर">↑</button><button class="ibtn" data-model="${i}">${ICON.trash}</button></li>`).join("") || `<li class="muted small">नीचे से जोड़ें</li>`}</ul>
-      <div class="irow" style="flex-wrap:wrap">${clips.filter((x) => !mo.clips.some((c) => c.id === x.id)).map((x) => `<button class="btn small quiet" data-moadd="${x.id}" ${dis}>+ ${esc(x.name.slice(0, 18))}</button>`).join("") || `<span class="small muted">library में कोई clip/image नहीं — Media tab में upload करें</span>`}</div>
-      <h4>Music</h4>${field("", `<select id="mo-music" ${dis}><option value="">— चुनें —</option>${musics.map((m) => `<option value="${m.id}" ${mo.music === m.id ? "selected" : ""}>${esc(m.name)}${m.meta?.duration ? ` (${fmt(m.meta.duration)})` : ""}</option>`).join("")}</select>`)}
-      <h4>Text lines (एक line = एक message, | से line break)</h4>${field("", `<textarea id="mo-texts" rows="4" ${dis}>${esc(mo.texts)}</textarea>`)}
-      <div class="irow">${field("font", `<select id="mo-font" ${dis}>${fontList().map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field("आकार", `<input type="range" id="mo-size" min="0.04" max="0.12" step="0.005" value="${mo.text_size}" ${dis}>`)}</div>
-      <h4>Cut</h4><div class="irow">${field("हर कितने beat पर", `<select id="mo-every" ${dis}>${[1, 2, 4, 8].map((n) => `<option value="${n}" ${mo.every == n ? "selected" : ""}>${n} beat</option>`).join("")}</select>`)}${field("लंबाई", `<select id="mo-max" ${dis}>${[15, 20, 30, 45, 60, 90].map((n) => `<option value="${n}" ${mo.max_seconds == n ? "selected" : ""}>${n}s</option>`).join("")}</select>`)}
-        ${field("format", `<select id="mo-preset" ${dis}>${vert.map((pl) => `<option value="${pl.id}" ${mo.preset === pl.id ? "selected" : ""}>${esc(pl.label)}</option>`).join("")}</select>`)}</div>
-      <div class="irow">${field("look", `<select id="mo-look" ${dis}>${looks.map((l) => `<option value="${l.id}" ${mo.look === l.id ? "selected" : ""}>${esc(l.label)}</option>`).join("")}</select>`)}<label class="chk small"><input type="checkbox" id="mo-flash" ${mo.flash ? "checked" : ""} ${dis}> beat flash</label>
+      <div class="seg" style="margin-bottom:.6rem"><button data-momode="auto" class="${auto ? "on" : ""}">🤖 Auto beat-edit</button><button data-momode="classic" class="${auto ? "" : "on"}">Classic</button></div>
+      <p class="small muted">${auto ? "कई clips + एक song डालें → हर clip के best हिस्से (चेहरा, movement, साफ़ frame) अपने-आप चुने जाते हैं, song के beat पर 0.5–2s के cut, beat पर effects (flash, zoom punch, shake, RGB, glitch), चेहरे के हिसाब से 9:16/1:1/16:9 में auto-crop, auto color। Plan बनने के बाद हर cut बदल/हटा/वापस ला सकते हैं।" : "हर beat पर cut, clips क्रम से, ऊपर text lines।"}</p>
+      <div class="box"><div class="row between"><b>Clips · ${chosen.length}</b>${E.canEdit ? `<label class="btn small primary">⬆ clips/photos upload<input type="file" id="mo-up" accept="video/*,image/*,.mov,.mkv" multiple hidden></label>` : ""}</div>
+      <div id="lib-progress"></div><ul class="plist">${chosen.map((x, i) => `<li><span class="small muted">${i + 1}.</span><span class="grow small">${esc(x.name)} <span class="muted">${x.meta?.duration ? fmt(x.meta.duration) : "photo"}${x.meta?.width ? ` · ${x.meta.width}×${x.meta.height}` : ""}</span></span><button class="ibtn" data-moup="${i}" title="ऊपर">↑</button><button class="ibtn" data-model="${i}">${ICON.trash}</button></li>`).join("") || `<li class="muted small">ऊपर से एक साथ कई clips upload करें (अलग-अलग ratio चलेगा)।</li>`}</ul>
+      ${clips.some((x) => !mo.clips.some((c) => c.id === x.id)) ? `<details><summary class="small">library से जोड़ें</summary><div class="irow" style="flex-wrap:wrap"><button class="btn small" id="mo-addall" ${dis}>+ सब</button>${clips.filter((x) => !mo.clips.some((c) => c.id === x.id)).map((x) => `<button class="btn small quiet" data-moadd="${x.id}" ${dis}>+ ${esc(x.name.slice(0, 18))}</button>`).join("")}</div></details>` : ""}</div>
+      <div class="box"><div class="row between"><b>Song / music</b>${E.canEdit ? `<label class="btn small">⬆ song<input type="file" id="mo-mup" accept="audio/*,video/*" hidden></label>` : ""}</div>${field("", `<select id="mo-music" ${dis}><option value="">— चुनें —</option>${musics.map((m) => `<option value="${m.id}" ${mo.music === m.id ? "selected" : ""}>${esc(m.name)}${m.meta?.duration ? ` (${fmt(m.meta.duration)})` : ""}</option>`).join("")}</select>`)}
+      <p class="small muted">${auto ? "लंबा song हो तो सबसे जोशीला हिस्सा (drop/chorus) अपने-आप चुना जाता है।" : ""}</p></div>
+      <div class="irow">${field("लंबाई", sel("mo-max", [10, 15, 20, 30, 45, 60, 90].map((n) => [n, n + "s"]), mo.max_seconds))}${field("format", sel("mo-preset", vert.map((x) => [x.id, x.label]), mo.preset))}</div>
+      ${auto ? `<div class="irow">${field("cut speed", sel("mo-pace", [["auto", "Auto (song के हिसाब से)"], ["fast", "Fast · ½–1 beat"], ["medium", "Medium"], ["slow", "Slow · 2–4 beat"]], mo.pace))}${field("effects", sel("mo-fxl", [["auto", "Auto"], ["strong", "ज़्यादा (strong)"], ["subtle", "हल्के"], ["none", "बिना effect"]], mo.effects_level))}</div>
+        <div class="irow">${field("frame / crop", sel("mo-reframe", [["smart", "Smart crop (चेहरा/subject)"], ["fit", "पूरा दिखाओ + blur background"], ["center", "बीच से crop"]], mo.reframe))}<label class="chk small"><input type="checkbox" id="mo-slow" ${mo.slowmo ? "checked" : ""} ${dis}> धीमे हिस्से में slow-mo</label></div>`
+      : `<div class="irow">${field("हर कितने beat पर", sel("mo-every", [1, 2, 4, 8].map((n) => [n, n + " beat"]), mo.every))}<label class="chk small"><input type="checkbox" id="mo-flash" ${mo.flash ? "checked" : ""} ${dis}> beat flash</label></div>`}
+      <div class="irow">${field("color / filter", `<select id="mo-look" ${dis}>${auto ? `<option value="auto" ${mo.look === "auto" ? "selected" : ""}>Auto (song के mood से)</option>` : ""}${looks.map((l) => `<option value="${l.id}" ${mo.look === l.id ? "selected" : ""}>${esc(l.label)}</option>`).join("")}${auto && grades.length ? `<optgroup label="Filters (115)">${grades.map(([k, g]) => `<option value="grade:${k}" ${mo.look === "grade:" + k ? "selected" : ""}>${esc(g.label)}</option>`).join("")}</optgroup>` : ""}</select>`)}
         ${field("logo", `<select id="mo-wm" ${dis}><option value="">नहीं</option>${logos.map((l) => `<option value="${l.id}" ${mo.watermark === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>`)}</div>
-      <button class="btn primary" id="mo-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.p.status === "rendering" ? "बन रहा है…" : "Montage बनाएँ"}</button>
-      ${E.p.status === "rendering" ? `<div class="progress" style="margin-top:.5rem"><i style="width:${E.p.jobs?.find((j) => j.kind === "montage" && j.status === "running")?.progress || 0}%"></i></div>` : ""}`;
+      <details ${mo.texts ? "open" : ""}><summary class="small">Text lines (एक line = एक message, | से line break)</summary>${field("", `<textarea id="mo-texts" rows="3" ${dis}>${esc(mo.texts)}</textarea>`)}
+      <div class="irow">${field("font", `<select id="mo-font" ${dis}>${fontList().map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field("आकार", `<input type="range" id="mo-size" min="0.04" max="0.12" step="0.005" value="${mo.text_size}" ${dis}>`)}</div></details>
+      ${auto ? `<div class="irow" style="margin-top:.6rem"><button class="btn primary" id="mo-auto" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>✨ Auto edit करो (plan + video)</button><button class="btn" id="mo-plan" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>सिर्फ़ plan</button></div>`
+      : `<button class="btn primary" id="mo-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.p.status === "rendering" ? "बन रहा है…" : "Montage बनाएँ"}</button>`}
+      ${E.p.status === "rendering" ? `<p class="small">${esc(E.p.status_note || "")}</p><div class="progress" style="margin-top:.5rem"><i style="width:${job?.progress || 0}%"></i></div>` : ""}
+      ${auto && pl ? `<div class="box" style="margin-top:.8rem"><div class="row between"><b>Plan · ${pl.segments.filter((x) => x.keep !== false).length}/${pl.segments.length} cuts · ${keptDur.toFixed(1)}s · ${pl.bpm} BPM</b>${E.moDirty ? `<span class="small" style="color:var(--accent)">बदलाव बाकी</span>` : ""}</div>
+        <p class="small muted">⭐ = सबसे अच्छे हिस्से · 🙂 = चेहरा मिला · ☐ हटाने से cut निकल जाता है (beat sync बना रहता है) · ↻ = उसी clip का दूसरा हिस्सा</p>
+        <ul class="plist moplan">${pl.segments.map(segRow).join("")}</ul>
+        ${(pl.alts || []).length ? `<h4>छूटे हुए अच्छे हिस्से — वापस डालें</h4><div class="moalts">${pl.alts.slice(0, 24).map((a, i) => { const it = libItem(a.clip); return `<button class="moalt" data-moins="${i}" title="चुने हुए cut के बाद डालें" ${dis}>${it?.url ? `<img src="${frm(it, a.src_in)}" alt="" loading="lazy">` : ""}<span class="small">${esc((it?.name || "").slice(0, 10))} ${fmt(a.src_in)}${a.face ? " 🙂" : ""}</span></button>`; }).join("")}</div>` : ""}
+        <button class="btn primary" id="mo-rerender" style="margin-top:.6rem" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>🎬 इस plan से video बनाओ</button></div>` : ""}`;
   } else if (t === "refs") {
     const refs = E.refs || []; const RK = { audio: "🎵 audio", video: "🎬 video", effect: "✨ effect", caption: "💬 caption", hook: "🪝 hook", other: "📌" };
     h = `<div class="ph"><h3>References</h3><span class="small muted">trend audio / video / effect</span></div>
@@ -862,6 +901,15 @@ function bindPanel() {
   $$("[data-tcat]", panel).forEach((b) => (b.onclick = () => { E.tCat = b.dataset.tcat; renderPanel(); }));
   $$("[data-tlang]", panel).forEach((b) => (b.onclick = () => { E.tLang = b.dataset.tlang; renderPanel(); }));
   on("#t-blank", "onclick", () => addTemplate(null));
+  on("#ai-go", "onclick", async (e) => { e.target.disabled = true; e.target.textContent = "बन रहे…"; E.aiN = +$("#ai-n", panel).value; try { await save(false); E.ai = await api("GET", `/projects/${E.pid}/prompts?broll=${E.aiN}${$("#ai-plat", panel).value ? "&platform=" + $("#ai-plat", panel).value : ""}`); E.aiPack = await api("GET", `/projects/${E.pid}/aipack`).catch(() => null); } catch (er) { toast(er.message); } renderPanel(); });
+  $$("[data-aiall]", panel).forEach((b) => (b.onclick = () => { const w = b.dataset.aiall; navigator.clipboard?.writeText(E.ai.batch[w]); window.open(w === "grok" ? "https://grok.com/imagine" : "https://chatgpt.com/", "_blank", "noopener"); toast("सारे prompts copy हुए — वहाँ एक बार paste करें"); }));
+  on("#ai-pin", "onclick", () => { navigator.clipboard?.writeText(E.aiPack.pack.pinned_comment); toast("copy हुआ"); });
+  $$("[data-aip]", panel).forEach((el) => (el.oninput = () => { E.ai.items[+el.dataset.aip].prompt = el.value; }));
+  $$("[data-aicopy]", panel).forEach((b) => (b.onclick = () => { navigator.clipboard?.writeText(E.ai.items[+b.dataset.aicopy].prompt); toast("prompt copy हुआ"); }));
+  $$("[data-aiopen]", panel).forEach((b) => (b.onclick = () => { const [svc, i] = b.dataset.aiopen.split(":"); const x = E.ai.items[+i]; const txt = svc === "chatgpt" && x.chatgpt ? x.chatgpt : x.prompt;
+    navigator.clipboard?.writeText(txt); window.open(x.open?.[svc] || "https://grok.com/imagine", "_blank", "noopener"); toast("prompt copy हुआ — वहाँ paste करें"); }));
+  $$("[data-aiup]", panel).forEach((el) => (el.onchange = async () => { const f = el.files[0]; if (!f) return; const x = E.ai.items[+el.dataset.aiup]; const isImg = f.type.startsWith("image/");
+    const d = await libUpload(isImg ? "image" : "broll", f); if (!d) return; placeAi(x, d, isImg); }));
   on("#hk-load", "onclick", async () => { const box = $("#hk-body", panel); box.textContent = "जाँच हो रही है…"; try { await save(false); E.hk = await api("GET", `/projects/${E.pid}/hooks`); showHooks(); } catch (e) { box.textContent = e.message; } });
   if (E.hk) showHooks();
   on("#font-up", "onchange", async (e) => { for (const f of e.target.files) await libUpload("font", f); });
@@ -907,13 +955,39 @@ function bindPanel() {
   // montage
   if (E.montage && E.mo) {
     const mo = E.mo; const lib = E.lib || [];
-    const sync = () => { mo.music = $("#mo-music", panel)?.value || mo.music; mo.texts = $("#mo-texts", panel)?.value ?? mo.texts; mo.font = $("#mo-font", panel)?.value || mo.font; mo.text_color = $("#mo-color", panel)?.value || mo.text_color; mo.text_size = +($("#mo-size", panel)?.value || mo.text_size); mo.every = +($("#mo-every", panel)?.value || mo.every); mo.max_seconds = +($("#mo-max", panel)?.value || mo.max_seconds); mo.preset = $("#mo-preset", panel)?.value || mo.preset; mo.look = $("#mo-look", panel)?.value || mo.look; mo.flash = $("#mo-flash", panel)?.checked ?? mo.flash; mo.watermark = $("#mo-wm", panel)?.value ?? mo.watermark; };
-    ["#mo-music", "#mo-texts", "#mo-font", "#mo-color", "#mo-size", "#mo-every", "#mo-max", "#mo-preset", "#mo-look", "#mo-flash", "#mo-wm"].forEach((sel) => on(sel, "onchange", sync));
+    const sync = () => { const g = (id) => $(id, panel); mo.music = g("#mo-music")?.value ?? mo.music; mo.texts = g("#mo-texts")?.value ?? mo.texts; mo.font = g("#mo-font")?.value || mo.font; mo.text_color = g("#mo-color")?.value || mo.text_color;
+      mo.text_size = +(g("#mo-size")?.value || mo.text_size); mo.every = +(g("#mo-every")?.value || mo.every); mo.max_seconds = +(g("#mo-max")?.value || mo.max_seconds); mo.preset = g("#mo-preset")?.value || mo.preset;
+      mo.look = g("#mo-look")?.value || mo.look; if (g("#mo-flash")) mo.flash = g("#mo-flash").checked; mo.watermark = g("#mo-wm")?.value ?? mo.watermark;
+      mo.pace = g("#mo-pace")?.value || mo.pace; mo.effects_level = g("#mo-fxl")?.value || mo.effects_level; mo.reframe = g("#mo-reframe")?.value || mo.reframe; if (g("#mo-slow")) mo.slowmo = g("#mo-slow").checked; };
+    ["#mo-music", "#mo-texts", "#mo-font", "#mo-color", "#mo-size", "#mo-every", "#mo-max", "#mo-preset", "#mo-look", "#mo-flash", "#mo-wm", "#mo-pace", "#mo-fxl", "#mo-reframe", "#mo-slow"].forEach((sl) => on(sl, "onchange", sync));
+    $$("[data-momode]", panel).forEach((b) => (b.onclick = () => { sync(); mo.mode = b.dataset.momode; if (mo.mode === "auto" && !mo.look) mo.look = "auto"; if (mo.mode !== "auto" && (mo.look === "auto" || String(mo.look).startsWith("grade:"))) mo.look = "none"; renderPanel(); }));
     $$("[data-moadd]", panel).forEach((b) => (b.onclick = () => { sync(); const x = lib.find((y) => y.id === b.dataset.moadd); mo.clips.push({ id: x.id, duration: x.meta?.duration }); renderPanel(); }));
+    on("#mo-addall", "onclick", () => { sync(); lib.filter((x) => (x.kind === "broll" || x.kind === "image") && !mo.clips.some((c) => c.id === x.id)).forEach((x) => mo.clips.push({ id: x.id, duration: x.meta?.duration })); renderPanel(); });
     $$("[data-model]", panel).forEach((b) => (b.onclick = () => { sync(); mo.clips.splice(+b.dataset.model, 1); renderPanel(); }));
     $$("[data-moup]", panel).forEach((b) => (b.onclick = () => { sync(); const i = +b.dataset.moup; if (i > 0) { [mo.clips[i - 1], mo.clips[i]] = [mo.clips[i], mo.clips[i - 1]]; renderPanel(); } }));
-    on("#mo-render", "onclick", async () => { sync(); const body = { ...mo, texts: mo.texts.split("\n").map((t) => t.trim()).filter(Boolean) };
-      try { await api("POST", `/projects/${E.pid}/montage`, body); toast("montage बन रहा है"); await load(); renderPanel(); } catch (err) { toast(err.message); } });
+    on("#mo-up", "onchange", async (e) => { sync(); for (const f of e.target.files) { const d = await libUpload(f.type.startsWith("image/") ? "image" : "broll", f); if (d) mo.clips.push({ id: d.id, duration: d.meta?.duration }); } renderPanel(); });
+    on("#mo-mup", "onchange", async (e) => { sync(); const f = e.target.files[0]; if (!f) return; const d = await libUpload("music", f); if (d) mo.music = d.id; renderPanel(); });
+    const body = (extra) => ({ ...mo, texts: String(mo.texts || "").split("\n").map((x) => x.trim()).filter(Boolean), ...extra });
+    const send = async (extra, msg) => { sync(); if (!mo.clips.length) return toast("पहले clips डालें"); if (!mo.music) return toast("song/music चुनें");
+      try { await api("POST", `/projects/${E.pid}/montage`, body(extra)); E.moDirty = false; toast(msg); await load(); renderPanel(); } catch (err) { toast(err.message); } };
+    on("#mo-render", "onclick", () => send({ mode: "classic" }, "montage बन रहा है"));
+    on("#mo-auto", "onclick", () => send({ mode: "auto", replan: true, auto_render: true, plan: null }, "clips देखे जा रहे हैं → plan → video ⏳"));
+    on("#mo-plan", "onclick", () => send({ mode: "auto", replan: true, auto_render: false, plan: null }, "beat plan बन रहा है ⏳"));
+    on("#mo-rerender", "onclick", () => send({ mode: "auto", replan: false, plan: mo.plan }, "आपके plan से video बन रहा है 🎬"));
+    const pl = mo.plan; const dirty = () => { E.moDirty = true; renderPanel(); };
+    if (pl) {
+      $$("[data-mosel]", panel).forEach((li) => (li.onclick = (e) => { if (e.target.closest("select,button,input")) return; E.moSel = +li.dataset.mosel; renderPanel(); }));
+      $$("[data-mokeep]", panel).forEach((c) => (c.onchange = () => { pl.segments[+c.dataset.mokeep].keep = c.checked; dirty(); }));
+      $$("[data-mofx]", panel).forEach((c) => (c.onchange = () => { pl.segments[+c.dataset.mofx].fx = c.value; dirty(); }));
+      $$("[data-momv]", panel).forEach((b) => (b.onclick = () => { const [i, d] = b.dataset.momv.split(":").map(Number); const j = i + d; if (j < 0) return; const a = pl.segments;
+        // swap the moments, keep the durations on the beat grid
+        const keys = ["clip", "src_in", "speed", "focus", "face", "highlight", "kind", "score"]; const t = {}; keys.forEach((k) => (t[k] = a[i][k])); keys.forEach((k) => (a[i][k] = a[j][k])); keys.forEach((k) => (a[j][k] = t[k])); dirty(); }));
+      $$("[data-moalt]", panel).forEach((b) => (b.onclick = () => { const sg = pl.segments[+b.dataset.moalt]; const k = (pl.alts || []).findIndex((a) => a.clip === sg.clip) ;
+        const k2 = k >= 0 ? k : (pl.alts || []).findIndex((a) => libItem(a.clip)?.kind !== "image"); if (k2 < 0) return toast("और हिस्से नहीं बचे");
+        const a = pl.alts[k2]; pl.alts.splice(k2, 1, { clip: sg.clip, src_in: sg.src_in, score: sg.score, focus: sg.focus, face: sg.face }); Object.assign(sg, { clip: a.clip, src_in: a.src_in, focus: a.focus, face: a.face, score: a.score, speed: 1, kind: "video" }); dirty(); }));
+      $$("[data-moins]", panel).forEach((b) => (b.onclick = () => { const a = pl.alts[+b.dataset.moins]; const at = E.moSel != null ? E.moSel + 1 : pl.segments.length; const d = +(2 * (pl.period || 0.5)).toFixed(3);
+        pl.segments.splice(at, 0, { clip: a.clip, src_in: a.src_in, dur: d < 0.4 ? d * 2 : d, speed: 1, fx: "flash", pulse: [], focus: a.focus, face: a.face, score: a.score, keep: true, kind: "video", energy: .5 }); pl.alts.splice(+b.dataset.moins, 1); E.moSel = at; dirty(); }));
+    }
   }
   // refs
   on("#ref-add", "onclick", async () => { const body = { kind: $("#ref-kind", panel).value, url: $("#ref-url", panel).value.trim(), note: $("#ref-note", panel).value.trim(), project_id: $("#ref-global", panel).checked ? null : E.pid };
@@ -1160,6 +1234,14 @@ function titleInspector(it, dis) {
       <div class="irow">${field("बीच में (loop)", animSelect("anim_loop", it.anim_loop, dis))}${field("speed ms", `<input type="number" data-k="loop_ms" min="80" max="8000" step="20" value="${it.loop_ms || ""}" placeholder="auto" ${dis}>`)}</div>
       <button class="btn small" data-act="tplay">▶ animation देखें</button></details>
     <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small" data-act="tdup" ${dis}>Duplicate</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
+}
+function placeAi(x, item, isImg) {
+  const fx = E.rs.effects; const len = x.seconds || 3;
+  if (x.kind === "background") { fx.body = { ...(fx.body || {}), enabled: true, bg: isImg ? "image" : "video", [isImg ? "bg_image" : "bg_video"]: item.id }; touch(); E.ctx.toast("Cutout background लगा — Cutout tab में cutout बनाएँ/देखें"); return; }
+  if (x.kind === "thumbnail") { E.ctx.toast("Library में जुड़ा — Thumbnail studio में background के रूप में चुनें"); return; }
+  const st = +(x.at || 0).toFixed(2); const b = { _id: uid(), id: item.id, start: st, end: +Math.min(outDur(), st + Math.min(len, item.meta?.duration || len)).toFixed(2), fit: "cover", track: 0, ai: x.kind };
+  if (x.kind === "broll" && isImg) Object.assign(b, { fit: "pip", pos: "tr" });
+  fx.broll.push(b); touch(); select({ type: "broll", id: b._id }); renderTimeline(); E.ctx.toast(x.kind === "hook" ? "Hook video शुरुआत में लगा" : "B-roll उस line पर लगा");
 }
 function addAudioClip(x, src, track) {
   if (!x || !E.canEdit) return; const s = { _id: uid(), id: x.id, at: +outOf(src).toFixed(2), volume: x.kind === "music" ? 0.5 : 0.8, track: track || 0 };
