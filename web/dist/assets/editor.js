@@ -733,7 +733,7 @@ function renderPanel() {
       <div id="lib-progress"></div>
       <div class="irow"><input id="lib-q" placeholder="खोजें…" value="${esc(E.libQ || "")}" style="flex:1"><a class="btn small quiet" href="#/library" title="पूरी library">⤢</a></div>
       ${subTags.length ? `<div class="seg wrap" style="flex-wrap:wrap;margin:.3rem 0">${subTags.map((tg) => `<button data-ltag="${tg}" class="${(E.libTag || "") === tg ? "on" : ""}">${tg || "सब"}</button>`).join("")}</div>` : ""}
-      ${t === "audio" ? audioControls(dis) : ""}
+      ${t === "audio" ? audioControls(dis) + dubBox(dis) : ""}
       ${t === "overlay" && E.libKind === "logo" ? `<div class="box"><b>Watermark</b>${wm.id ? `<p class="small">${esc(libItem(wm.id)?.name || "")}</p>` : `<p class="small muted">logo चुनकर “लगाएँ”</p>`}
         <div class="irow">${field("पारदर्शिता", `<input type="range" id="wm-op" min="0.1" max="1" step="0.05" value="${wm.opacity}" ${dis}>`)}${field("आकार", `<input type="range" id="wm-size" min="0.06" max="0.3" step="0.01" value="${wm.size}" ${dis}>`)}</div>
         ${field("कोना", `<select id="wm-pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${wm.pos === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`)}
@@ -946,6 +946,7 @@ function bindPanel() {
     const out = $(`[data-vcv="${k}"]`, panel); if (out) out.textContent = el.value; if (k === "volume") applyPreviewVolume(); touch(); }));
   on("#mus-duck", "onchange", (e) => { fx.music.duck = e.target.checked; touch(); });
   on("#mus-clear", "onclick", () => { fx.music.id = ""; touch(); renderPanel(); });
+  if (E.tab === "audio") dubBox(null, panel);
   on("#wm-op", "oninput", (e) => { fx.watermark.opacity = +e.target.value; touch(); });
   on("#wm-size", "oninput", (e) => { fx.watermark.size = +e.target.value; touch(); });
   on("#wm-pos", "onchange", (e) => { fx.watermark.pos = e.target.value; touch(); });
@@ -1175,6 +1176,66 @@ function audioControls(dis) {
       <div class="irow"><label class="chk small"><input type="checkbox" id="mus-duck" ${music.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा (duck)</label>${field("कितना धीमा", `<input type="range" id="mus-damt" min="0.1" max="1" step="0.05" value="${music.duck_amount ?? 0.6}" ${dis}>`)}</div>
       ${music.id ? `<button class="btn small quiet" id="mus-clear">हटाएँ</button>` : ""}</div>
     <p class="small muted">SFX की volume: timeline पर SFX पर क्लिक करें।</p>`;
+}
+// AI voice-over / dubbing box (Audio tab). dubBox(dis) → HTML; dubBox(null, panel) → binds it.
+function dubBox(dis, panel) {
+  const { esc, api, toast } = E.ctx; const fx = E.rs.effects; const D = E.ctx.S.presets?.dub || { voices: [], langs: { hi: "हिन्दी", en: "English" }, modes: {} };
+  const st = (E.dub = E.dub || { mode: E.montage ? "script" : "revoice", lang: E.p.language === "en" ? "en" : "hi", voice: "", speed: 1, script: "", desc: "" });
+  if (E.montage) st.mode = "script";
+  const tracks = E.p.assets.filter((a) => a.kind === "dub");
+  const job = (E.p.jobs || []).filter((j) => j.kind === "dub").sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))[0];
+  const active = job && ["queued", "running"].includes(job.status);
+  const progText = (j) => !j ? "" : j.status === "queued" ? "⏳ queue में — GPU worker (या TTS_LOCAL वाला CPU worker) का इंतज़ार" : j.status === "running" ? `🔄 ${j.progress || 0}% · ${j.message || "बन रहा है"}`
+    : j.status === "failed" ? `⚠️ नहीं बना: ${(j.error || "").split("\n")[0].replace(/^[\w.]*(TTSMissing|ValueError|RuntimeError): /, "")}` : "";
+  if (panel) {
+    const box = $("#dub-box", panel); if (!box) return;
+    const q = (s) => $(s, box);
+    const keep = () => { st.mode = q("#dub-mode")?.value || st.mode; st.lang = q("#dub-lang")?.value || st.lang; st.voice = q("#dub-voice")?.value ?? st.voice; st.speed = +(q("#dub-speed")?.value || st.speed); st.script = q("#dub-script")?.value ?? st.script; st.desc = q("#dub-desc")?.value ?? st.desc; };
+    ["#dub-mode", "#dub-lang"].forEach((s) => { const el = q(s); if (el) el.onchange = () => { keep(); st.voice = ""; renderPanel(); }; });
+    ["#dub-voice", "#dub-script", "#dub-desc"].forEach((s) => { const el = q(s); if (el) el.oninput = el.onchange = keep; });
+    const sp = q("#dub-speed"); if (sp) sp.oninput = () => { keep(); q("#dub-speed-v").textContent = st.speed.toFixed(2) + "×"; };
+    const go = q("#dub-go"); if (go) go.onclick = async () => {
+      keep(); if (st.mode === "script" && st.script.trim().length < 3) return toast("पहले script लिखें");
+      go.disabled = true; go.textContent = st.mode === "dub" ? "translate हो रहा…" : "भेज रहे…";
+      try { await save(false);
+        const r = await api("POST", `/projects/${E.pid}/dub`, { mode: st.mode, language: st.mode === "revoice" ? null : st.lang, voice: st.voice || null, description: st.desc || null, speed: st.speed, script: st.mode === "script" ? st.script : "" });
+        E.p.jobs = [{ ...r.job, status: "queued", created_at: new Date().toISOString() }, ...(E.p.jobs || [])];
+        toast(`AI voice-over शुरू · ${r.lines} lines${r.translated?.length ? ` · “${r.translated[0].slice(0, 40)}…”` : ""}`); E.ctx.load().catch(() => {});
+      } catch (er) { toast(er.message); }
+      renderPanel(); };
+    let audio = null;
+    $$("[data-dubplay]", box).forEach((b) => (b.onclick = () => { const a = tracks.find((x) => x.id === b.dataset.dubplay); if (!a) return;
+      if (audio && !audio.paused && audio.dataset.id === a.id) { audio.pause(); return; }
+      if (audio) audio.pause(); audio = new Audio(a.url); audio.dataset.id = a.id; audio.play().catch((e) => toast(e.message)); }));
+    $$("[data-dubdel]", box).forEach((b) => (b.onclick = async () => { if (!confirm("यह AI voice track हटाएँ?")) return;
+      try { await api("DELETE", `/projects/${E.pid}/dub/${b.dataset.dubdel}`); E.p.assets = E.p.assets.filter((a) => a.id !== b.dataset.dubdel); if (fx.voice_track === b.dataset.dubdel) { fx.voice_track = "original"; touch(); } renderPanel(); } catch (er) { toast(er.message); } }));
+    const use = q("#dub-use"); if (use) use.onchange = () => { const v = use.value; fx.voice_track = v === "original" ? "original" : v.replace(/^both:/, ""); fx.voice_track_mode = v.startsWith("both:") ? "both" : "replace";
+      touch(); renderPanel(); toast(v === "original" ? "मूल आवाज़ — render में यही" : `AI आवाज़ लगी — ${E.montage ? "Montage दोबारा बनाएँ" : "Render"} में सुनें`); };
+    const un = q("#dub-under"); if (un) un.oninput = () => { fx.voice_track_under = +un.value; q("#dub-under-v").textContent = Math.round(fx.voice_track_under * 100) + "%"; touch(); };
+    clearInterval(E.dubT);
+    if (active) { const me = E; E.dubT = setInterval(() => { if (E !== me || E.tab !== "audio") return clearInterval(me.dubT);
+      const j = (E.p.jobs || []).find((x) => x.id === job.id) || job; const el = $("#dub-prog", E.root); if (el) el.textContent = progText(j);
+      if (!["queued", "running"].includes(j.status)) { clearInterval(E.dubT); if (!(document.activeElement && box.contains(document.activeElement))) renderPanel(); if (j.status === "done") toast("AI voice-over तैयार 🎙"); } }, 2000); }
+    return;
+  }
+  const lang = st.mode === "revoice" ? (E.p.transcript?.language === "en" || E.p.language === "en" ? "en" : "hi") : st.lang;
+  const voices = D.voices.filter((v) => v.lang === lang);
+  const cur = fx.voice_track || "original"; const curVal = cur === "original" ? "original" : (fx.voice_track_mode === "both" && !E.montage ? "both:" : "") + cur;
+  const vlabel = (a) => `${D.langs[a.label] || a.label} · ${a.meta?.voice?.label || ""} · ${fmt(a.meta?.duration || 0)}`;
+  return `<div class="box audioctl" id="dub-box"><b>🗣 AI voice-over / dubbing</b>
+    <p class="small muted">अपनी बात साफ़ AI आवाज़ में, हिन्दी↔English dub, या लिखी script से voice-over (faceless/montage)। Models commercial इस्तेमाल के लिए safe हैं (Indic Parler-TTS, Kokoro)।</p>
+    <div class="irow">${field("क्या बनाना है", `<select id="dub-mode" ${dis}>${(E.montage ? ["script"] : ["revoice", "dub", "script"]).map((m) => `<option value="${m}" ${st.mode === m ? "selected" : ""}>${esc(D.modes[m] || m)}</option>`).join("")}</select>`)}
+      ${field("भाषा", st.mode === "revoice" ? `<select disabled><option>${esc(D.langs[lang] || lang)} (transcript जैसी)</option></select>` : `<select id="dub-lang" ${dis}>${Object.entries(D.langs).map(([k, l]) => `<option value="${k}" ${st.lang === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}</div>
+    ${field("आवाज़", `<select id="dub-voice" ${dis}>${voices.map((v) => `<option value="${v.id}" ${st.voice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>`)}
+    <div class="irow">${field(`speed <b id="dub-speed-v">${(+st.speed).toFixed(2)}×</b>`, `<input type="range" id="dub-speed" min="0.8" max="1.25" step="0.05" value="${st.speed}" ${dis}>`)}</div>
+    <details><summary class="small">अपनी आवाज़ का description (English में, Parler)</summary><input id="dub-desc" value="${esc(st.desc)}" placeholder="Rohit speaks with a deep, confident, warm tone at a moderate pace, very clear audio" ${dis}></details>
+    ${st.mode === "script" ? field("Script", `<textarea id="dub-script" rows="6" placeholder="यहाँ script लिखें या paste करें… (खाली line = नया paragraph, थोड़ा लंबा रुकना)" ${dis}>${esc(st.script)}</textarea>`) : ""}
+    ${st.mode === "dub" ? `<p class="small muted">transcript एक ही AI call में translate होता है (server में GEMINI_API_KEY चाहिए), फिर हर line अपनी जगह fit होती है।</p>` : ""}
+    <div class="irow"><button class="btn small primary" id="dub-go" ${dis || (active ? "disabled" : "")}>🎙 बनाएँ</button><span class="small muted grow" id="dub-prog">${esc(progText(job))}</span></div>
+    ${tracks.length ? `<ul class="plist">${tracks.map((a) => `<li><button class="ibtn" data-dubplay="${a.id}" title="सुनें">${ICON.play}</button><span class="grow small">${esc(vlabel(a))}${a.meta?.mode ? ` <span class="muted">· ${esc(D.modes[a.meta.mode] || a.meta.mode)}</span>` : ""}</span>${E.canEdit ? `<button class="ibtn" data-dubdel="${a.id}" title="हटाएँ">${ICON.trash}</button>` : ""}</li>`).join("")}</ul>` : ""}
+    ${field("इसे इस्तेमाल करें (render की आवाज़)", `<select id="dub-use" ${dis}><option value="original" ${curVal === "original" ? "selected" : ""}>${E.montage ? "कोई voice-over नहीं (सिर्फ़ music)" : "मूल आवाज़ (original)"}</option>${tracks.map((a) => `<option value="${a.id}" ${curVal === a.id ? "selected" : ""}>🗣 ${esc(vlabel(a))}</option>${E.montage ? "" : `<option value="both:${a.id}" ${curVal === "both:" + a.id ? "selected" : ""}>दोनों: ${esc(D.langs[a.label] || a.label)} AI + original धीमी</option>`}`).join("")}</select>`)}
+    ${curVal.startsWith("both:") ? field(`original कितनी <b id="dub-under-v">${Math.round((fx.voice_track_under ?? 0.25) * 100)}%</b>`, `<input type="range" id="dub-under" min="0" max="0.8" step="0.05" value="${fx.voice_track_under ?? 0.25}" ${dis}>`) : ""}
+    ${cur !== "original" ? `<p class="small muted">captions अब AI आवाज़ के शब्दों से बनेंगे। कट/speed बदलें तो dub दोबारा बनाएँ।</p>` : ""}</div>`;
 }
 function showHooks() {
   const box = $("#hk-body", E.root); const h = E.hk; if (!box || !h) return; const { esc } = E.ctx; const col = h.score >= 75 ? "#46a758" : h.score >= 50 ? "#f2b33d" : "#e5484d";

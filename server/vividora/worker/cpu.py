@@ -2,7 +2,8 @@
 or anywhere with ffmpeg (`python -m vividora.worker.cpu`).
 
 With TRANSCRIBE_LOCAL=1 it also transcribes on CPU using faster-whisper
-(slow, but works when the Windows GPU worker is off).
+(slow, but works when the Windows GPU worker is off). With TTS_LOCAL=1 it also
+makes AI voice-overs (`dub` jobs, engine/tts.py) — slow on CPU.
 """
 
 from __future__ import annotations
@@ -94,7 +95,37 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
                     kind = "image" if (p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif") or _is_image(p)) else "video"
                     out.append({**item, "path": str(p), "type": kind})
         e[key] = out
+    # AI voice-over / dub chosen as the voice: download that project file like the other assets
+    vt = e.get("voice_track")
+    if vt and vt != "original":
+        dub = next((a for a in (assets or []) if a["id"] == vt and a["kind"] == "dub"), None)
+        if dub:
+            e["voice_track_path"] = str(client.download(dub["id"], tmp / f"dub_{Path(dub['path']).name}"))
+            meta = dub.get("meta") or {}
+            e["voice_track_words"] = [w for s in (meta.get("segments") or []) for w in (s.get("words") or [])]
+            e["voice_track_sig"] = meta.get("sig")
+        else:
+            log.warning("voice track %s नहीं मिला — original आवाज़ से render", vt)
+            e["voice_track"] = "original"
     return e
+
+
+def _montage_voice(client: ApiClient, p: dict, assets: list[dict], out: dict, tmp: Path) -> list[str]:
+    """Script voice-over (dub asset) chosen for a montage → mix it over the rendered video in place."""
+    v = p.get("voice") or {}
+    dub = next((a for a in assets if a["id"] == v.get("asset_id") and a["kind"] == "dub"), None) if v else None
+    if not dub:
+        return []
+    from ..engine import dub as dub_eng
+    voice = client.download(dub["id"], tmp / f"dub_{Path(dub['path']).name}")
+    warns: list[str] = []
+    for f in out["files"]:
+        if f.get("kind") == "render":
+            src = Path(f["path"])
+            mixed = src.with_name(src.stem + "_vo.mp4")
+            warns += dub_eng.mix_voice_over(src, voice, mixed, duck=bool(v.get("duck", True)))
+            mixed.replace(src)
+    return warns
 
 
 def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> dict:
@@ -144,6 +175,13 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             clean = None if voice_cfg.get("denoise") in ("light", "off") else _fetch(client, assets, "audio_clean", tmp, required=False)
             style = caption_style(p.get("caption_style", "karaoke"))
             preset = platform(p["preset"])
+            effects = _resolve_effects(client, p.get("effects"), tmp, assets)
+            dub_warn = []
+            if effects.get("voice_track_path") and effects.get("voice_track_sig"):
+                from ..engine import dub
+                edl0 = {"duration": float(project["meta"].get("duration") or 0), "cuts": [], **(project.get("edl") or {})}
+                if dub.timeline_sig(edl0, p.get("effects")) != effects["voice_track_sig"]:
+                    dub_warn.append("AI voice-over बनने के बाद कट/speed बदले हैं — आवाज़ खिसक सकती है, dub दोबारा बनाएँ")
             out = render.render(
                 video=raw, audio=clean, meta=project["meta"], edl=project["edl"] or
                 autocut.build_edl({"segments": []}, float(project["meta"]["duration"])),
@@ -153,7 +191,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 focus_x=float(p.get("focus_x", 0.5)), focus_y=float(p.get("focus_y", 0.5)),
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
-                effects={**_resolve_effects(client, p.get("effects"), tmp, assets),
+                effects={**effects,
                          "font_paths": [str(client.download_library(fid, tmp / "fonts" / f"{fid}.ttf")) for fid in (p.get("fonts") or [])]},
                 encoder_preset=os.getenv("X264_PRESET") or None,
                 on_progress=_progress(client, job["id"]),
@@ -164,7 +202,12 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 up = client.upload(job["id"], f["path"], f["kind"], label)
                 files.append({**f, "label": label, "path": up["path"],
                               "meta": {**f.get("meta", {}), "title": p.get("title")}})
-            return {"files": files, "duration": out["duration"], "warnings": out["warnings"]}
+            return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn}
+
+        if kind == "dub":
+            from ..engine import tts
+            prog = _progress(client, job["id"])
+            return tts.handle_job(client, job, tmp / "dub", on_progress=prog)
 
         if kind == "publish":
             from .. import publish as pubmod
@@ -222,11 +265,12 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                                  font=p.get("font") or "Poppins", text_color=p.get("text_color") or "#FFFFFF",
                                  text_size=float(p.get("text_size", 0.07)), watermark=wm,
                                  encoder_preset=os.getenv("X264_PRESET") or None, on_progress=prog)
+            warns = _montage_voice(client, p, assets, out, tmp)
             files = []
             for f in out["files"]:
                 up = client.upload(job["id"], f["path"], f["kind"], f.get("label"))
                 files.append({**f, "path": up["path"]})
-            return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": []}
+            return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": warns}
 
         if kind == "montage":
             p = job["payload"]
@@ -245,11 +289,12 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                                  font=p.get("font") or "Poppins", text_color=p.get("text_color") or "#FFFFFF",
                                  text_size=float(p.get("text_size", 0.07)), watermark=wm, seed=int(p.get("seed", 7)),
                                  encoder_preset=os.getenv("X264_PRESET") or None, on_progress=_progress(client, job["id"]))
+            warns = _montage_voice(client, p, assets, out, tmp)
             files = []
             for f in out["files"]:
                 up = client.upload(job["id"], f["path"], f["kind"], f.get("label"))
                 files.append({**f, "path": up["path"]})
-            return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": []}
+            return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": warns}
 
         if kind == "matte":
             from ..engine import matting
@@ -304,6 +349,8 @@ def main() -> None:
         log.warning("onnxruntime नहीं — cutout (matte) jobs इस worker पर नहीं चलेंगे")
     if os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes"):
         kinds.append("transcribe")
+    if os.getenv("TTS_LOCAL", "").lower() in ("1", "true", "yes"):
+        kinds.append("dub")  # AI voice-over on CPU — works, but slow (normally the GPU worker does it)
     client = ApiClient(base, token, name)
     run_loop(client, kinds, handle, poll=float(os.getenv("POLL_SECONDS", "3")),
              info={"ffmpeg": ffmpeg.have("ffmpeg"), "deepfilter": ffmpeg.have("deep-filter")},

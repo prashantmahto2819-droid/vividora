@@ -39,6 +39,11 @@ $venvPy = Join-Path $here ".venv\Scripts\python.exe"
 New-Item -ItemType Directory -Force -Path lib | Out-Null
 Copy-Item ..\server\vividora\worker\client.py lib\vividora_client.py -Force
 Copy-Item ..\server\vividora\worker\transcribe.py lib\vividora_transcribe.py -Force
+# AI voice-over / dubbing engine (packages: requirements-tts.txt, see README)
+Copy-Item ..\server\vividora\engine\tts.py lib\vividora_tts.py -Force
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+    Write-Host "ffmpeg not found - AI voice-over (dub) jobs need it: winget install Gyan.FFmpeg" -ForegroundColor Yellow
+}
 $shim = @(
     "import json, subprocess",
     "def probe(p):",

@@ -35,6 +35,9 @@ DEFAULT_EFFECTS = {
              "glow_strength": 1.6, "afterimage": False, "after_decay": 0.9, "clones": 0, "anim": "none", "anim_seconds": 0.9,
              "blink_period": 0.4},
     "sfx": [],          # [{id, at, volume}]
+    "voice_track": "original",       # or a `dub` asset id (AI voice-over); see engine/dub.py
+    "voice_track_mode": "replace",   # replace | both (original quieter under the AI voice)
+    "voice_track_under": 0.25,
 }
 
 DEFAULT_RENDER = {
@@ -308,7 +311,8 @@ def after_job(c, job: dict, result: dict) -> None:
         n = len(pl.get("segments") or [])
         if mo.get("auto_render"):
             project = db.get("projects", pid)
-            queue.enqueue(c, pid, "montage", {**{k: v for k, v in mo.items() if k != "auto_render"}, "plan": pl})
+            queue.enqueue(c, pid, "montage", {**{k: v for k, v in mo.items() if k != "auto_render"}, "plan": pl,
+                                              **({"voice": job["payload"]["voice"]} if (job.get("payload") or {}).get("voice") else {})})
             set_status(c, pid, "rendering", f"beat edit बन रहा है · {pl.get('bpm')} BPM · {n} cuts")
         else:
             set_status(c, pid, "review_cuts", f"plan तैयार · {pl.get('bpm')} BPM · {n} cuts — देखें/बदलें, फिर render")
@@ -322,6 +326,14 @@ def after_job(c, job: dict, result: dict) -> None:
         db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now()})
         set_status(c, pid, "review_output", f"montage तैयार · {result.get('bpm')} BPM · {result.get('segments')} cuts")
         notify.on_event("review_output", project, "montage")
+
+    elif kind == "dub":
+        # a side job: adds a voice track, never changes the project's status
+        for f in result.get("files", []):
+            add_asset(c, pid, "dub", f["path"], label=f.get("label"), mime=f.get("mime") or "audio/mp4", meta=f.get("meta"))
+        m = (result.get("files") or [{}])[0].get("meta") or {}
+        db.update(c, "projects", pid, {"status_note": f"AI voice-over तैयार ({m.get('language', '')}, {round(float(m.get('duration') or 0))}s) — Audio tab में “इसे इस्तेमाल करें”",
+                                       "updated_at": db.now()})
 
     elif kind == "render":
         for f in result.get("files", []):
@@ -361,7 +373,7 @@ def fail_job(c, job: dict, error: str) -> None:
     pid = job["project_id"]
     db.update(c, "jobs", job["id"], {"status": "failed", "error": error[:4000],
                                      "finished_at": db.now()})
-    if job["kind"] in ("publish", "shorts_plan"):
+    if job["kind"] in ("publish", "shorts_plan", "dub"):
         # side jobs never take the project out of its editing state
         if job["kind"] == "publish" and job["payload"].get("publication_id"):
             db.update(c, "publications", job["payload"]["publication_id"],
@@ -460,6 +472,13 @@ def request_montage(c, project: dict, opts: dict) -> dict:
                "pace": opts.get("pace") or "auto", "effects_level": opts.get("effects_level") or "auto",
                "reframe": opts.get("reframe") or "smart", "slowmo": bool(opts.get("slowmo", True)),
                "auto_render": bool(opts.get("auto_render", False))}
+    # AI voice-over (Script mode) chosen in the Audio tab → mixed over the montage, music ducked under it
+    r_eff = ((project.get("settings", {}).get("render") or {}).get("effects") or {})
+    vt = r_eff.get("voice_track")
+    if vt and vt != "original":
+        a = db.get("assets", vt)
+        if a and a["project_id"] == project["id"] and a["kind"] == "dub":
+            payload["voice"] = {"asset_id": vt, "duck": bool((r_eff.get("music") or {}).get("duck", True))}
     old = (project.get("settings", {}).get("montage") or {})
     kind = "montage"
     if payload["mode"] == "auto":
@@ -471,7 +490,7 @@ def request_montage(c, project: dict, opts: dict) -> dict:
         payload.pop("plan", None)
     elif payload["mode"] != "auto":
         payload.pop("plan", None)
-    store = {**payload, **({"plan": old.get("plan")} if kind == "montage_plan" and old.get("plan") else {})}
+    store = {**{k: v for k, v in payload.items() if k != "voice"}, **({"plan": old.get("plan")} if kind == "montage_plan" and old.get("plan") else {})}
     db.update(c, "projects", project["id"], {"settings": {**project.get("settings", {}), "montage": store},
                                              "updated_at": db.now()})
     c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? AND kind IN ('montage','montage_plan') AND status='queued'",
