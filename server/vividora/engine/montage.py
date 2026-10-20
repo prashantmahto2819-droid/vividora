@@ -173,7 +173,7 @@ def render(*, clips: list[dict], music: Path, out_dir: Path, name: str, preset: 
         f = work / "montage.ass"
         f.write_text("\n".join(ass) + "\n", encoding="utf-8")
         fonts = Path(__file__).resolve().parent.parent.parent / "fonts"
-        tail += f"subtitles=filename='{ffmpeg.escape_filter_path(f)}':fontsdir='{ffmpeg.escape_filter_path(fonts)}',"
+        tail += f"ass=filename='{ffmpeg.escape_filter_path(f)}':fontsdir='{ffmpeg.escape_filter_path(fonts)}':shaping=complex,"
     mi = len(segs)
     inputs += ["-ss", f"{segs[0][0]:.3f}", "-t", f"{total + 0.5:.3f}", "-i", str(music)]
     if watermark is not None:

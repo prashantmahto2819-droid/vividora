@@ -216,3 +216,6 @@ th { color: var(--muted); font-weight: 500; }
 .ststats { display: flex; flex-wrap: wrap; gap: .35rem; margin: .5rem 0 1rem; } .ststats span { background: rgba(255,255,255,.06); border-radius: 999px; padding: .15rem .6rem; font-size: .75rem; }
 #storage .chk { display: flex; gap: .4rem; margin: .25rem 0; } .tablewrap { overflow-x: auto; }
 #storage input[type=number] { background: var(--panel, #111827); color: var(--text, #e5e7eb); border: 1px solid var(--line, #333); border-radius: 6px; padding: .2rem .4rem; }
+@font-face { font-family: "Lora"; src: url("/assets/Lora.ttf"); font-weight: 400 700; }
+@font-face { font-family: "Lora"; src: url("/assets/Lora-Italic.ttf"); font-style: italic; font-weight: 400 700; }
+@font-face { font-family: "FreeSerif"; src: url("/assets/FreeSerif.ttf"); }

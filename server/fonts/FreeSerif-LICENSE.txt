@@ -1,0 +1,1 @@
+GNU FreeFont (FreeSerif) — Copyright 2002-2012 GNU Freefont contributors. GPLv3 or later WITH the font embedding exception: documents that use this font are not covered by the GPL. https://www.gnu.org/software/freefont/license.html

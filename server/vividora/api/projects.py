@@ -8,8 +8,9 @@ from starlette.routing import Route
 
 from .. import db, service, storage
 from ..engine import autocut
-from ..engine import catalog
-from ..engine.effects import BODY_ANIMS, BODY_BG, EXTRAS, LOOKS, STICKER_ANIMS, TEXT_ANIMS, TRANSITIONS, VOICE_PARAMS, VOICE_PRESETS, ZOOM_MODES
+from ..engine import catalog, textfx
+from ..engine import autopilot as autopilot_eng
+from ..engine.effects import BODY_ANIMS, BODY_BG, EXTRAS, LOOKS, STICKER_ANIMS, TEXT_ANIMS, TRANSITIONS, VOICE_PARAMS, VOICE_PRESETS, ZOOM_MODES, BLENDS
 from ..engine.presets import caption_styles, platforms
 from ..security import media_token, read_token
 from .channels import channel_settings, get_channel
@@ -224,6 +225,35 @@ async def audio_preview(request: Request, user: dict):
     except subprocess.CalledProcessError as e:
         raise ApiError(500, "audio preview नहीं बना: " + (e.stderr or b"").decode(errors="ignore")[-300:]) from None
     return Response(mp3, media_type="audio/mpeg")
+
+
+@require("editor")
+async def autopilot_apply(request: Request, user: dict):
+    """Run autopilot's choices on this project now (without rendering). mode=items: only stickers/text/sfx/CTA;
+    mode=all: every setting autopilot decides. Items the creator added by hand stay."""
+    p = own_project(request, user)
+    if not p.get("transcript"):
+        raise ApiError(400, "पहले transcript बनने दें")
+    data = await body(request)
+    mode = data.get("mode") or "items"
+    plan = service.autopilot_plan(p)
+    plan.pop("autopilot", None)
+    cur = {**service.DEFAULT_RENDER, **p.get("settings", {}).get("render", {})}
+    eff = dict(cur.get("effects") or {})
+    pe = plan["effects"]
+    for key in ("broll", "titles", "sfx"):
+        mine = [x for x in (eff.get(key) or []) if not str(x.get("_id", "")).startswith("ap_")]
+        eff[key] = mine + pe.get(key, [])
+    if mode == "all":
+        for k, v in pe.items():
+            if k not in ("broll", "titles", "sfx"):
+                eff[k] = v
+        cur.update({k: v for k, v in plan.items() if k != "effects"})
+    cur["effects"] = eff
+    with db.tx() as c:
+        db.update(c, "projects", p["id"], {"settings": {**p["settings"], "render": cur}, "updated_at": db.now()})
+        service.log(c, user["workspace_id"], "project.autopilot_apply", user_id=user["id"], project_id=p["id"], detail={"mode": mode})
+    return ok(_with_urls(service.project_view(db.get("projects", p["id"]))))
 
 
 @require("editor")
@@ -498,7 +528,7 @@ async def media(request: Request):
 
 @require("viewer")
 async def presets(request: Request, user: dict):
-    fonts = ["Noto Sans Devanagari", "Poppins", "Baloo 2", "Mukta", "Hind"]
+    fonts = ["Noto Sans Devanagari", "Poppins", "Baloo 2", "Mukta", "Hind", "Lora", "FreeSerif"]
     return ok({"platforms": list(platforms().values()), "caption_styles": list(caption_styles().values()),
                "fonts": fonts, "looks": [{"id": k, "label": v["label"]} for k, v in LOOKS.items()],
                "extras": [{"id": k, "label": v["label"]} for k, v in EXTRAS.items()],
@@ -508,7 +538,7 @@ async def presets(request: Request, user: dict):
                "sticker_anims": [{"id": k, "label": v} for k, v in STICKER_ANIMS.items()],
                "body_bg": [{"id": k, "label": v} for k, v in BODY_BG.items()],
                "body_anims": [{"id": k, "label": v} for k, v in BODY_ANIMS.items()],
-               "voice_params": VOICE_PARAMS, "voice_presets": VOICE_PRESETS,
+               "voice_params": VOICE_PARAMS, "voice_presets": VOICE_PRESETS, "textfx": textfx.presets_json(), "blends": BLENDS, "autopilot": {"defaults": autopilot_eng.AUTOPILOT_DEFAULTS, "labels": autopilot_eng.AUTOPILOT_LABELS},
                "catalog": catalog.catalog_json(),
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
@@ -521,6 +551,7 @@ routes = [
     Route("/projects/{project_id}", delete_project, methods=["DELETE"]),
     Route("/projects/{project_id}/recut", recut, methods=["POST"]),
     Route("/projects/{project_id}/retranscribe", retranscribe, methods=["POST"]),
+    Route("/projects/{project_id}/autopilot/apply", autopilot_apply, methods=["POST"]),
     Route("/projects/{project_id}/suggest", suggestions),
     Route("/projects/{project_id}/audio-preview", audio_preview, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),

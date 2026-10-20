@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 import re
 
-from . import analyze, metadata, shorts
+from . import analyze, autoedit, metadata, shorts
 from .catalog import GRADE_PRESETS
 
 HOOK_MAX_WORDS = 8
@@ -30,10 +30,29 @@ def _first_hook(project: dict) -> str:
 
 def _grade_with_correction(preset: dict, analysis: dict) -> dict:
     """Brand look + the measured correction for this recording (dark room, cold light…)."""
-    g = {k: v for k, v in (preset or {}).items() if k != "label" and not k.startswith("_")}
+    g = {k: v for k, v in (preset or {}).items() if k not in ("label", "cat") and not k.startswith("_")}
     for k, v in analyze.auto_grade(analysis).items():
         g[k] = round(max(-1.0, min(1.0, float(g.get(k, 0)) + float(v))), 3)
     return g
+
+
+# What autopilot does — each switch can be turned off per channel (brand kit → Autopilot)
+AUTOPILOT_DEFAULTS = {"captions": True, "hook": True, "music": True, "cta": True, "zoom": True, "transitions": True,
+                      "keyword_stickers": True, "highlights": True, "sfx": True, "auto_color": True, "voice": True,
+                      "logo": True, "shorts": 3}
+AUTOPILOT_LABELS = {"captions": "Captions (बोले हुए शब्द)", "hook": "शुरू में Hook heading", "music": "Background music",
+                    "cta": "Subscribe / Follow popup", "zoom": "Auto zoom in/out", "transitions": "Transitions (Shorts)",
+                    "keyword_stickers": "शब्दों पर emoji sticker (पैसा → 💰)", "highlights": "ज़रूरी lines पर बड़ा text",
+                    "sfx": "Sound effects (pop, whoosh)", "auto_color": "Auto color correction", "voice": "Voice enhance + noise हटाना",
+                    "logo": "Logo / watermark", "shorts": "लंबी video से कितने Shorts"}
+
+
+def settings_for(brand: dict) -> dict:
+    ap = dict(AUTOPILOT_DEFAULTS)
+    for k, v in ((brand or {}).get("autopilot") or {}).items():
+        if k in ap:
+            ap[k] = int(v) if k == "shorts" else (v in (True, 1, "1", "true", "on", "yes"))
+    return ap
 
 
 def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
@@ -45,6 +64,7 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
     analysis = (project.get("meta") or {}).get("analysis") or {}
     is_short_source = duration <= 75
     lang = project.get("language") or "hi"
+    ap = settings_for(brand)
 
     caption_style = learned.get("caption_style") or brand.get("caption_style") or ("hormozi" if is_short_source else "karaoke")
     hook = _first_hook(project)
@@ -55,7 +75,7 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
         mood = "news" if "news" in niche else "motivational"
     musics = [m for m in library if m.get("kind") == "music"]
     bg = [m for m in musics if mood in (m.get("tags") or "") or mood in (m.get("name") or "").lower()] or musics
-    if bg and brand.get("music", True):
+    if bg and brand.get("music", True) and ap["music"]:
         music = random.Random(project["id"]).choice(bg)["id"]
     stickers = [m for m in library if m.get("kind") == "sticker"]
     sfx = {(m.get("name") or "").lower(): m["id"] for m in library if m.get("kind") == "sfx"}
@@ -66,18 +86,18 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
                 if n in (m.get("name") or "").lower():
                     return m["id"]
         return ""
-    logo = brand.get("logo_id") or next((l["id"] for l in library if l.get("kind") == "logo"), "")
+    logo = (brand.get("logo_id") or next((l["id"] for l in library if l.get("kind") == "logo"), "")) if ap["logo"] else ""
     grade_preset = brand.get("grade_preset") or "natural_skin"
     effects = {
-        "zoom": {"enabled": rec.get("zoom", "on") != "off", "strength": 0.9},
+        "zoom": {"enabled": rec.get("zoom", "on") != "off" and ap["zoom"], "strength": 0.9},
         "look": learned.get("effects", {}).get("look", "none") if isinstance(learned.get("effects"), dict) else "none",
         "transition": "punch" if is_short_source else "none",
         "extras": [],
-        "grade": _grade_with_correction(GRADE_PRESETS.get(grade_preset, {}), analysis),
+        "grade": _grade_with_correction(GRADE_PRESETS.get(grade_preset, {}), analysis if ap["auto_color"] else {}),
         "grade_preset": grade_preset,
         "stack": [],
         "music": {"id": music, "volume": 0.12, "duck": True, "duck_amount": 0.6, "fade": 1.5},
-        "voice": analyze.auto_voice(analysis, brand.get("voice_preset") or "studio"),
+        "voice": analyze.auto_voice(analysis, brand.get("voice_preset") or "studio") if ap["voice"] else {"preset": "off", "denoise": "off"},
         "broll": [], "titles": [], "sfx": [],
         "watermark": {"id": logo, "opacity": 0.7, "size": 0.12, "pos": "tr"},
     }
@@ -87,8 +107,10 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
     # Subscribe on YouTube, Follow on Instagram / Facebook (each item only renders on its platform).
     ctas = [("youtube", ["subscribe red", "subscribe"]), ("instagram", ["follow insta", "follow"]),
             ("facebook", ["follow facebook", "follow insta", "follow"])]
-    if out_dur > 8 and brand.get("cta_popup", True):
+    cta_at = None
+    if out_dur > 8 and brand.get("cta_popup", True) and ap["cta"]:
         at = max(2.0, out_dur * (0.72 if not is_short_source else 0.82))
+        cta_at = at
         added = False
         for fam, names in ctas:
             sid = find(names)
@@ -98,11 +120,13 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
                                      "fit": "free", "x": 0.5, "y": 0.6, "scale": 0.6, "opacity": 1, "rotate": 0, "anim": "pop",
                                      "platforms": [fam]})
             added = True
-        if added and sfx.get("pop"):
+        if added and sfx.get("pop") and ap["sfx"]:
             effects["sfx"].append({"_id": "ap_pop", "id": sfx["pop"], "at": round(at, 2), "volume": 0.7})
-    if hook and sfx.get("whoosh"):
+    if not ap["hook"]:
+        hook = ""
+    if hook and sfx.get("whoosh") and ap["sfx"]:
         effects["sfx"].append({"_id": "ap_whoosh", "id": sfx["whoosh"], "at": 0.0, "volume": 0.6})
-    if not is_short_source and out_dur > 40 and brand.get("cta_popup", True):
+    if not is_short_source and out_dur > 40 and brand.get("cta_popup", True) and ap["cta"]:
         bell = find(["like sub bell"])
         if bell:
             effects["broll"].append({"_id": "ap_bell", "id": bell, "start": 6.0, "end": 9.0, "fit": "free", "x": 0.5, "y": 0.62,
@@ -110,8 +134,20 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
     pc = analyze.pace(project)
     fast = pc["wpm"] >= 150
     effects["zoom"]["mode"] = "punch" if is_short_source else ("emphasis" if fast else "push")
-    if is_short_source:
+    if is_short_source and ap["transitions"]:
         effects["transition"] = "punch" if not fast else "whip"
+    elif not ap["transitions"]:
+        effects["transition"] = "none"
+    # what is said → stickers and highlight text
+    avoid = [(cta_at, cta_at + 2.8)] if cta_at is not None else []
+    if ap["keyword_stickers"]:
+        kb, ks = autoedit.keyword_stickers(project, library, out_dur=out_dur, every=6.0 if is_short_source else 9.0,
+                                           avoid=avoid, sfx_on=ap["sfx"])
+        effects["broll"].extend(kb)
+        effects["sfx"].extend(ks)
+    if ap["highlights"]:
+        effects["titles"].extend(autoedit.highlight_titles(project, out_dur=out_dur, avoid=avoid,
+                                                            style=(brand.get("title_style") or None)))
     if not is_short_source and out_dur > 90:
         effects["extras"] = ["soft_glow"] if (analysis.get("video") or {}).get("contrast", 0.2) < 0.15 else []
     presets = ["yt-short", "ig-reel", "fb-reel"] if is_short_source else ["yt-long", "yt-short"]
@@ -121,13 +157,13 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
         "captions": {"size_scale": 1.0, "position": "", "primary": brand.get("primary", ""), "highlight": brand.get("highlight", ""),
                      "font": brand.get("font", ""), "italic": "", "uppercase": "", "letter_spacing": "", "outline_scale": "",
                      "shadow_scale": "", "outline_color": ""},
-        "burn_captions": True,
+        "burn_captions": ap["captions"],
         "focus_x": 0.5, "focus_y": 0.5,
         "hook": {"text": hook, "seconds": 3},
         "effects": effects,
         "face_track": "auto",
         "shorts_preset": "yt-short",
-        "autopilot": {"shorts": 0 if is_short_source else 3, "language": lang},
+        "autopilot": {"shorts": 0 if is_short_source else ap["shorts"], "language": lang},
     }
 
 

@@ -157,9 +157,13 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     def _for_me(item: dict) -> bool:
         pl = item.get("platforms")
         return not pl or pid in pl or family in pl
+    hidden = set(e.get("hidden_tracks") or [])
+    lane = {"broll": "broll", "sfx": "audio", "titles": "text"}
     for key in ("broll", "sfx", "titles"):
         if isinstance(e.get(key), list):
-            e[key] = [x for x in e[key] if not isinstance(x, dict) or _for_me(x)]
+            items = [x for x in e[key] if not isinstance(x, dict) or (_for_me(x) and f"{lane[key]}:{int(x.get('track', 0) or 0)}" not in hidden)]
+            # higher track = drawn on top (stable within a track)
+            e[key] = sorted(items, key=lambda x: int(x.get("track", 0) or 0) if isinstance(x, dict) else 0)
     w, h = int(preset["width"]), int(preset["height"])
     src_fps = float(meta.get("fps") or 30.0)
     fps_max = float(preset.get("video", {}).get("fps_max", 60))
@@ -291,7 +295,14 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
 
         track_cmds = work / "face.cmd"
         track_cmds.write_text(crop_commands(kf, scaled_w, w, to_out_fn, focus_x), encoding="utf-8")
-    frame = _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
+    tf = e.get("transform") or {}
+    pre_tf, src_w, src_h = fx.transform_pre(tf, src_w, src_h)
+    if pre_tf and (tf.get("crop") or int(tf.get("rotate", 0) or 0) % 360):
+        track_cmds = None  # the face track was measured on the uncropped picture
+    frame = (pre_tf + "," if pre_tf else "") + _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
+    post_tf = fx.transform_post(tf, w, h)
+    if post_tf:
+        frame += "," + post_tf
     if body and not use_segments:
         chains.append(f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB[vcut0]")
         chains.append(f"[{body_alpha_in}:v]scale={src_w0}:{src_h0},fps={fps},select='{sel}',setpts=N/({fps})/TB,format=gray[mcut]")
@@ -384,7 +395,8 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                       extra_styles=[t_style] if t_style else None, extra_events=t_events),
             encoding="utf-8",
         )
-        sub = f"subtitles=filename='{ffmpeg.escape_filter_path(ass)}'"
+        # ass + complex shaping: HarfBuzz places Devanagari matras (ि, र्) correctly
+        sub = f"ass=filename='{ffmpeg.escape_filter_path(ass)}':shaping=complex"
         if FONTS_DIR.exists():
             sub += f":fontsdir='{ffmpeg.escape_filter_path(FONTS_DIR)}'"
         tail += f"{sub},"
@@ -421,7 +433,14 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                 continue
             inputs += ["-i", str(s["path"])]
             ms = int(float(s.get("at", 0)) * 1000)
-            chains.append(f"[{next_in}:a]aformat=sample_rates=48000:channel_layouts=mono,"
+            trim, dur = float(s.get("trim", 0) or 0), float(s.get("dur", 0) or 0)
+            clip = f"atrim=start={trim:.3f}" + (f":duration={dur:.3f}" if dur > 0 else "") + ",asetpts=PTS-STARTPTS," if (trim or dur) else ""
+            fades = ""
+            if float(s.get("fade_in", 0) or 0) > 0:
+                fades += f"afade=t=in:d={float(s['fade_in']):.2f},"
+            if float(s.get("fade_out", 0) or 0) > 0 and dur > 0:
+                fades += f"afade=t=out:st={max(0.0, dur - float(s['fade_out'])):.3f}:d={float(s['fade_out']):.2f},"
+            chains.append(f"[{next_in}:a]{clip}aformat=sample_rates=48000:channel_layouts=mono,{fades}"
                           f"volume={float(s.get('volume', 0.8)):.2f},adelay={ms}|{ms}[sfx{i}]")
             sfx_labels.append(f"[sfx{i}]")
             next_in += 1

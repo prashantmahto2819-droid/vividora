@@ -150,23 +150,145 @@ GRADE_PARAMS = [
     P(name="fade", label="Fade", min=0, max=1, default=0, step=0.02),
     P(name="vignette", label="Vignette", min=0, max=1, default=0, step=0.02),
     P(name="sharpness", label="Sharpness", min=0, max=1, default=0, step=0.02),
+    P(name="tone_shadows", label="Shadows tone (teal ↔ warm)", min=-1, max=1, default=0, step=0.02),
+    P(name="tone_highlights", label="Highlights tone (cool ↔ warm)", min=-1, max=1, default=0, step=0.02),
+    P(name="grain", label="Film grain", min=0, max=1, default=0, step=0.02),
 ]
 GRADE_DEFAULT = {p["name"]: p["default"] for p in GRADE_PARAMS}
 
-GRADE_PRESETS: dict[str, dict] = {
-    "teal_orange": {"label": "Teal & Orange", "temperature": 0.2, "tint": -0.05, "contrast": 0.12, "saturation": 0.1, "shadows": -0.1, "highlights": 0.05, "_tint_shadows": "teal"},
-    "warm_film": {"label": "Warm Film", "temperature": 0.3, "contrast": 0.06, "fade": 0.12, "saturation": -0.05, "vignette": 0.25},
-    "cool_cinema": {"label": "Cool Cinema", "temperature": -0.3, "contrast": 0.15, "saturation": -0.12, "shadows": -0.08, "vignette": 0.3},
-    "moody": {"label": "Moody Contrast", "exposure": -0.2, "contrast": 0.3, "saturation": -0.2, "blacks": -0.2, "vignette": 0.45},
-    "clean_commercial": {"label": "Clean Commercial", "exposure": 0.1, "contrast": 0.08, "whites": 0.1, "vibrance": 0.15, "sharpness": 0.3},
-    "natural_skin": {"label": "Natural Skin", "temperature": 0.08, "vibrance": 0.08, "saturation": -0.04, "contrast": 0.04},
-    "vintage_fade": {"label": "Vintage Fade", "fade": 0.3, "saturation": -0.25, "temperature": 0.15, "contrast": -0.05, "vignette": 0.35},
-    "bw": {"label": "Black & White", "saturation": -1, "contrast": 0.2, "blacks": -0.1},
-    "soft_pastel": {"label": "Soft Pastel", "exposure": 0.15, "contrast": -0.15, "saturation": -0.1, "fade": 0.2, "temperature": 0.05},
-    "night_neon": {"label": "Night Neon", "exposure": -0.1, "contrast": 0.25, "vibrance": 0.4, "temperature": -0.2, "tint": 0.15, "blacks": -0.2},
-    "golden_hour": {"label": "Golden Hour", "temperature": 0.45, "exposure": 0.05, "highlights": -0.1, "saturation": 0.1, "vignette": 0.2},
-    "documentary": {"label": "Documentary Neutral", "contrast": 0.04, "saturation": -0.02, "sharpness": 0.2},
-}
+_G = [  # id, label, category, params — every look is just numbers for the sliders (editable after picking)
+    # Cinematic
+    ("teal_orange", "Teal & Orange", "cinematic", dict(temperature=.2, tint=-.05, contrast=.12, saturation=.1, shadows=-.1, highlights=.05, tone_shadows=-.45, tone_highlights=.35)),
+    ("cool_cinema", "Cool Cinema", "cinematic", dict(temperature=-.3, contrast=.15, saturation=-.12, shadows=-.08, vignette=.3)),
+    ("blockbuster", "Blockbuster", "cinematic", dict(contrast=.25, saturation=.05, tone_shadows=-.5, tone_highlights=.4, vignette=.25, sharpness=.2)),
+    ("noir_teal", "Noir Teal", "cinematic", dict(exposure=-.15, contrast=.3, saturation=-.35, tone_shadows=-.6, blacks=-.15, vignette=.4)),
+    ("desert", "Desert Heat", "cinematic", dict(temperature=.45, contrast=.12, saturation=-.05, highlights=-.1, tone_highlights=.4, fade=.08)),
+    ("arctic", "Arctic", "cinematic", dict(temperature=-.45, exposure=.08, saturation=-.2, whites=.1, tone_shadows=-.3)),
+    ("matrix", "Matrix Green", "cinematic", dict(tint=-.35, contrast=.2, saturation=-.25, tone_shadows=-.2, vignette=.3)),
+    ("bleach", "Bleach Bypass", "cinematic", dict(saturation=-.45, contrast=.35, highlights=.1, blacks=-.15, sharpness=.25)),
+    ("kodak2383", "Film Print 2383", "cinematic", dict(contrast=.2, tone_shadows=-.25, tone_highlights=.3, saturation=.05, blacks=-.08, grain=.15)),
+    ("eterna", "Eterna", "cinematic", dict(contrast=-.1, saturation=-.2, fade=.1, tone_shadows=-.2, tone_highlights=.15)),
+    ("cyberpunk", "Cyberpunk", "cinematic", dict(tint=.3, temperature=-.25, contrast=.25, vibrance=.35, tone_shadows=-.4, tone_highlights=-.2)),
+    ("dune", "Dune Gold", "cinematic", dict(temperature=.5, saturation=-.15, contrast=.15, fade=.1, tone_highlights=.5)),
+    ("interstellar", "Space Drama", "cinematic", dict(temperature=-.1, contrast=.22, saturation=-.25, blacks=-.2, vignette=.35)),
+    ("epic_dark", "Epic Dark", "cinematic", dict(exposure=-.2, contrast=.3, saturation=-.1, tone_shadows=-.35, vignette=.5)),
+    # Film / vintage
+    ("warm_film", "Warm Film", "film", dict(temperature=.3, contrast=.06, fade=.12, saturation=-.05, vignette=.25, grain=.15)),
+    ("vintage_fade", "Vintage Fade", "film", dict(fade=.3, saturation=-.25, temperature=.15, contrast=-.05, vignette=.35, grain=.2)),
+    ("polaroid", "Polaroid", "film", dict(fade=.22, temperature=.18, tint=.08, contrast=-.08, highlights=-.1, grain=.15)),
+    ("kodachrome", "Kodachrome", "film", dict(contrast=.18, saturation=.2, temperature=.1, blacks=-.1, grain=.1)),
+    ("portra", "Portra", "film", dict(temperature=.12, saturation=-.08, contrast=-.05, fade=.08, tone_highlights=.2, grain=.12)),
+    ("ektar", "Ektar Vivid", "film", dict(saturation=.25, contrast=.12, vibrance=.15, temperature=.05)),
+    ("super8", "Super 8", "film", dict(temperature=.35, fade=.18, saturation=-.1, vignette=.5, grain=.45, contrast=.05)),
+    ("seventies", "70s", "film", dict(temperature=.4, tint=.1, fade=.2, saturation=-.15, grain=.25)),
+    ("vhs80s", "80s VHS", "film", dict(tint=.12, saturation=.2, contrast=-.1, fade=.15, grain=.35, sharpness=0)),
+    ("sepia", "Sepia", "film", dict(saturation=-.75, temperature=.55, fade=.12, contrast=.05, grain=.15)),
+    ("matte", "Faded Matte", "film", dict(fade=.35, contrast=-.12, saturation=-.1)),
+    ("cross", "Cross Process", "film", dict(tint=-.2, contrast=.25, saturation=.2, tone_shadows=-.4, tone_highlights=.4)),
+    ("lomo", "Lomo", "film", dict(saturation=.3, contrast=.25, vignette=.7, temperature=.1)),
+    ("expired", "Expired Film", "film", dict(tint=.2, temperature=.2, fade=.25, saturation=-.2, grain=.35)),
+    # Portrait / skin
+    ("natural_skin", "Natural Skin", "portrait", dict(temperature=.08, vibrance=.08, saturation=-.04, contrast=.04)),
+    ("soft_glow", "Soft Glow", "portrait", dict(exposure=.12, contrast=-.12, highlights=.1, fade=.06, saturation=-.05)),
+    ("peach", "Peach", "portrait", dict(temperature=.18, tint=.1, exposure=.06, saturation=-.05)),
+    ("rosy", "Rosy", "portrait", dict(tint=.18, temperature=.06, vibrance=.1)),
+    ("bronze", "Bronze", "portrait", dict(temperature=.3, contrast=.12, saturation=-.1, tone_highlights=.3)),
+    ("porcelain", "Porcelain", "portrait", dict(exposure=.15, temperature=-.08, saturation=-.15, contrast=-.05)),
+    ("golden_skin", "Golden Skin", "portrait", dict(temperature=.25, vibrance=.12, highlights=-.08)),
+    ("studio_clean", "Studio Clean", "portrait", dict(contrast=.08, whites=.1, sharpness=.25, vibrance=.05)),
+    ("beauty", "Beauty", "portrait", dict(exposure=.1, contrast=-.08, saturation=-.06, tint=.05, highlights=.05)),
+    ("warm_portrait", "Warm Portrait", "portrait", dict(temperature=.2, contrast=.06, shadows=.1)),
+    ("cool_portrait", "Cool Portrait", "portrait", dict(temperature=-.15, contrast=.08, saturation=-.08)),
+    ("fresh_face", "Fresh", "portrait", dict(exposure=.08, vibrance=.18, contrast=.05)),
+    # Vlog / bright
+    ("clean_commercial", "Clean Commercial", "bright", dict(exposure=.1, contrast=.08, whites=.1, vibrance=.15, sharpness=.3)),
+    ("bright_airy", "Bright & Airy", "bright", dict(exposure=.25, contrast=-.12, highlights=.1, saturation=-.08, fade=.05)),
+    ("pop_vlog", "Pop Vlog", "bright", dict(vibrance=.35, contrast=.12, exposure=.05, sharpness=.2)),
+    ("sunny", "Sunny Day", "bright", dict(temperature=.2, exposure=.12, vibrance=.2)),
+    ("fresh_day", "Fresh Day", "bright", dict(temperature=-.05, vibrance=.2, exposure=.08, contrast=.06)),
+    ("yt_pop", "YouTube Pop", "bright", dict(contrast=.18, saturation=.18, sharpness=.3, shadows=.08)),
+    ("punchy", "Punchy", "bright", dict(contrast=.3, vibrance=.25, blacks=-.1)),
+    ("crisp", "Crisp", "bright", dict(sharpness=.5, contrast=.12, whites=.08)),
+    ("clear_sky", "Clear Sky", "bright", dict(temperature=-.12, vibrance=.25, highlights=-.12)),
+    ("white_studio", "White Studio", "bright", dict(exposure=.2, whites=.2, saturation=-.1, contrast=-.05)),
+    # Moody / dark
+    ("moody", "Moody Contrast", "moody", dict(exposure=-.2, contrast=.3, saturation=-.2, blacks=-.2, vignette=.45)),
+    ("dark_teal", "Dark Teal", "moody", dict(exposure=-.15, tone_shadows=-.6, saturation=-.2, contrast=.2)),
+    ("shadow_play", "Shadow Play", "moody", dict(shadows=-.3, contrast=.25, vignette=.5)),
+    ("rainy", "Rainy Day", "moody", dict(temperature=-.25, saturation=-.3, fade=.12, contrast=-.05)),
+    ("gloomy", "Gloomy", "moody", dict(exposure=-.1, saturation=-.4, temperature=-.1, fade=.1)),
+    ("stormy", "Stormy", "moody", dict(contrast=.3, saturation=-.35, temperature=-.2, blacks=-.15, vignette=.4)),
+    ("deep_blue", "Deep Blue", "moody", dict(temperature=-.4, exposure=-.12, contrast=.15, tone_shadows=-.4)),
+    ("crimson", "Crimson Dark", "moody", dict(tint=.25, temperature=.15, exposure=-.15, contrast=.25, saturation=-.1, vignette=.4)),
+    ("forest_dark", "Dark Forest", "moody", dict(tint=-.25, exposure=-.15, saturation=-.15, contrast=.2)),
+    ("midnight", "Midnight", "moody", dict(exposure=-.3, temperature=-.35, saturation=-.2, contrast=.15, vignette=.5)),
+    # Nature / travel
+    ("golden_hour", "Golden Hour", "nature", dict(temperature=.45, exposure=.05, highlights=-.1, saturation=.1, vignette=.2)),
+    ("green_lush", "Green Lush", "nature", dict(tint=-.15, vibrance=.35, contrast=.08)),
+    ("ocean", "Ocean", "nature", dict(temperature=-.25, vibrance=.3, contrast=.1, hue=-4)),
+    ("mountain", "Mountain", "nature", dict(contrast=.18, saturation=-.05, temperature=-.1, sharpness=.3, highlights=-.15)),
+    ("autumn", "Autumn", "nature", dict(temperature=.35, hue=-6, saturation=.15, contrast=.1)),
+    ("spring", "Spring", "nature", dict(tint=-.08, vibrance=.25, exposure=.1, contrast=-.04)),
+    ("tropical", "Tropical", "nature", dict(vibrance=.45, saturation=.1, temperature=.08, contrast=.1)),
+    ("sunset", "Sunset Orange", "nature", dict(temperature=.6, tint=.1, saturation=.15, contrast=.12)),
+    ("misty", "Misty", "nature", dict(fade=.25, contrast=-.2, saturation=-.15, exposure=.08)),
+    ("sand", "Desert Sand", "nature", dict(temperature=.35, saturation=-.1, fade=.08, contrast=.08)),
+    # Night / neon
+    ("night_neon", "Night Neon", "neon", dict(exposure=-.1, contrast=.25, vibrance=.4, temperature=-.2, tint=.15, blacks=-.2)),
+    ("neon_pink", "Neon Pink", "neon", dict(tint=.35, vibrance=.4, contrast=.2, temperature=-.1)),
+    ("neon_blue", "Neon Blue", "neon", dict(temperature=-.5, vibrance=.4, contrast=.2)),
+    ("city_night", "City Night", "neon", dict(temperature=-.2, contrast=.2, tone_highlights=.4, blacks=-.15)),
+    ("purple_haze", "Purple Haze", "neon", dict(tint=.3, temperature=-.25, fade=.1, saturation=.1)),
+    ("tokyo", "Tokyo Night", "neon", dict(temperature=-.3, tint=.2, contrast=.25, vibrance=.3, tone_shadows=-.3)),
+    ("vapor", "Vaporwave", "neon", dict(tint=.35, temperature=-.15, fade=.18, vibrance=.25)),
+    ("club", "Club Lights", "neon", dict(vibrance=.55, contrast=.3, exposure=-.1, blacks=-.2)),
+    # B&W
+    ("bw", "Black & White", "bw", dict(saturation=-1, contrast=.2, blacks=-.1)),
+    ("bw_high", "B&W High Contrast", "bw", dict(saturation=-1, contrast=.45, blacks=-.25, whites=.15)),
+    ("bw_soft", "B&W Soft", "bw", dict(saturation=-1, contrast=-.1, fade=.15)),
+    ("bw_noir", "Noir", "bw", dict(saturation=-1, contrast=.4, exposure=-.15, vignette=.6, grain=.3)),
+    ("selenium", "Selenium", "bw", dict(saturation=-.95, tint=.08, temperature=-.05, contrast=.2)),
+    ("cyanotype", "Cyanotype", "bw", dict(saturation=-.9, temperature=-.6, contrast=.15)),
+    ("sepia_mono", "Sepia Mono", "bw", dict(saturation=-.9, temperature=.5, contrast=.1, grain=.2)),
+    ("silver", "Silver", "bw", dict(saturation=-1, exposure=.1, contrast=.15, whites=.15, sharpness=.3)),
+    # Pastel / soft
+    ("soft_pastel", "Soft Pastel", "pastel", dict(exposure=.15, contrast=-.15, saturation=-.1, fade=.2, temperature=.05)),
+    ("dreamy", "Dreamy", "pastel", dict(exposure=.18, contrast=-.2, fade=.15, highlights=.15, saturation=-.1)),
+    ("cotton_candy", "Cotton Candy", "pastel", dict(tint=.2, temperature=-.05, fade=.2, exposure=.1)),
+    ("mint", "Mint", "pastel", dict(tint=-.2, temperature=-.1, fade=.18, exposure=.1)),
+    ("lavender", "Lavender", "pastel", dict(tint=.18, temperature=-.2, fade=.15, saturation=-.1)),
+    ("baby_blue", "Baby Blue", "pastel", dict(temperature=-.25, exposure=.12, fade=.15, saturation=-.15)),
+    ("cream", "Cream", "pastel", dict(temperature=.2, fade=.2, contrast=-.1, saturation=-.15)),
+    ("haze", "Haze", "pastel", dict(fade=.3, exposure=.12, contrast=-.2)),
+    # Indian / festive
+    ("wedding_gold", "Wedding Gold", "indian", dict(temperature=.35, vibrance=.2, highlights=-.08, tone_highlights=.4, vignette=.2)),
+    ("haldi", "Haldi Yellow", "indian", dict(temperature=.4, tint=-.05, vibrance=.3, exposure=.08)),
+    ("holi", "Holi Colours", "indian", dict(vibrance=.6, saturation=.2, contrast=.15)),
+    ("diwali", "Diwali Glow", "indian", dict(temperature=.45, exposure=-.05, vibrance=.3, vignette=.35, tone_highlights=.5)),
+    ("saffron", "Saffron", "indian", dict(temperature=.3, tint=.08, saturation=.15, contrast=.1)),
+    ("royal_maroon", "Royal Maroon", "indian", dict(tint=.2, temperature=.2, contrast=.2, saturation=.05, vignette=.3)),
+    ("mehendi", "Mehendi Green", "indian", dict(tint=-.2, temperature=.15, vibrance=.25)),
+    ("temple", "Temple Warm", "indian", dict(temperature=.4, contrast=.15, fade=.06, vignette=.35)),
+    ("monsoon", "Monsoon", "indian", dict(tint=-.15, temperature=-.2, saturation=.05, contrast=.1, fade=.06)),
+    ("bolly90s", "90s Bollywood", "indian", dict(temperature=.2, saturation=.25, fade=.12, contrast=-.05, grain=.2)),
+    # Food
+    ("food_warm", "Food Warm", "food", dict(temperature=.25, vibrance=.3, contrast=.12, sharpness=.3)),
+    ("food_fresh", "Food Fresh", "food", dict(vibrance=.35, exposure=.1, sharpness=.35)),
+    ("dessert", "Dessert", "food", dict(exposure=.12, tint=.08, fade=.1, saturation=.05)),
+    ("coffee", "Coffee", "food", dict(temperature=.3, contrast=.15, saturation=-.15, vignette=.3)),
+    ("spicy", "Spicy", "food", dict(temperature=.3, tint=.1, vibrance=.4, contrast=.15)),
+    ("bakery", "Bakery", "food", dict(temperature=.3, fade=.1, exposure=.08)),
+    # Neutral
+    ("documentary", "Documentary Neutral", "neutral", dict(contrast=.04, saturation=-.02, sharpness=.2)),
+    ("rec709", "Rec.709 Clean", "neutral", dict(contrast=.06)),
+    ("log_fix", "Flat → Normal (Log fix)", "neutral", dict(contrast=.35, saturation=.25, blacks=-.12, whites=.1)),
+    ("low_light_fix", "Low light fix", "neutral", dict(exposure=.35, shadows=.25, contrast=.05, sharpness=.15)),
+    ("overexposed_fix", "Overexposed fix", "neutral", dict(exposure=-.3, highlights=-.3, contrast=.08)),
+]
+GRADE_CATS = {"cinematic": "Cinematic", "film": "Film / Vintage", "portrait": "Portrait / Skin", "bright": "Vlog / Bright",
+              "moody": "Moody / Dark", "nature": "Nature / Travel", "neon": "Night / Neon", "bw": "Black & White",
+              "pastel": "Pastel / Soft", "indian": "Indian / त्योहार", "food": "Food", "neutral": "Neutral / Fix"}
+GRADE_PRESETS: dict[str, dict] = {gid: {"label": label, "cat": cat, **params} for gid, label, cat, params in _G}
 
 
 def grade_filter(g: dict | None) -> str:
@@ -197,8 +319,14 @@ def grade_filter(g: dict | None) -> str:
         parts.append(f"vibrance=intensity={v['vibrance']:.3f}")
     if v["hue"]:
         parts.append(f"hue=h={v['hue']:.1f}")
+    if v["tone_shadows"] or v["tone_highlights"]:
+        # split toning: + warm (orange), − cool (teal/blue)
+        ts, th = v["tone_shadows"] * .25, v["tone_highlights"] * .2
+        parts.append(f"colorbalance=rs={ts:.3f}:gs={ts * .2:.3f}:bs={-ts:.3f}:rh={th:.3f}:gh={th * .3:.3f}:bh={-th:.3f}")
     if v["sharpness"]:
         parts.append(f"unsharp=5:5:{v['sharpness'] * 1.5:.2f}:5:5:0")
+    if v["grain"]:
+        parts.append(f"noise=alls={int(v['grain'] * 22)}:allf=t")
     if v["vignette"]:
         parts.append(f"vignette=angle={0.25 + v['vignette'] * 0.6:.3f}")
     return ",".join(parts)
@@ -300,5 +428,5 @@ def stack_css(stack: list[dict] | None) -> str:
 def catalog_json() -> dict:
     return {"categories": CATEGORIES,
             "effects": [{k: v for k, v in e.items() if k != "ffmpeg"} for e in EFFECTS],
-            "grade_params": GRADE_PARAMS, "grade_presets": {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")}
-                                                           for k, v in GRADE_PRESETS.items()}}
+            "grade_params": GRADE_PARAMS, "grade_cats": GRADE_CATS,
+            "grade_presets": {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")} for k, v in GRADE_PRESETS.items()}}

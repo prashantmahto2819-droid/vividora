@@ -6,6 +6,8 @@ Times are on the OUTPUT timeline (after cuts), in seconds.
 
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 
 from .ffmpeg import escape_filter_path
@@ -296,6 +298,27 @@ def overlay_input_args(item: dict, path: Path) -> list[str]:
     return ["-t", f"{dur + 0.5:.3f}", "-i", str(path)]
 
 
+BLENDS = {"normal": "Normal", "screen": "Screen (काला हटे — light leak, particles)", "black": "काला background हटाएँ",
+          "white": "सफ़ेद background हटाएँ", "green": "Green screen हटाएँ", "blue": "Blue screen हटाएँ"}
+
+
+def _key(item: dict) -> str:
+    """Make part of an overlay transparent (green screen, black/white background, screen-like glow)."""
+    b = item.get("blend") or "normal"
+    sim = float(item.get("key_sim", .25) or .25)
+    if b == "green":
+        return f",format=rgba,colorkey=0x00FF00:{sim:.2f}:0.15"
+    if b == "blue":
+        return f",format=rgba,colorkey=0x0000FF:{sim:.2f}:0.15"
+    if b == "black":
+        return f",format=rgba,colorkey=0x000000:{min(sim, .2):.2f}:0.1"
+    if b == "white":
+        return f",format=rgba,colorkey=0xFFFFFF:{min(sim, .2):.2f}:0.1"
+    if b == "screen":
+        return ",format=rgba,lumakey=threshold=0:tolerance=0.08:softness=0.35"
+    return ""
+
+
 def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, out_label: str, idx: int) -> str:
     """Full-frame B-roll (fit: cover), a picture-in-picture box, or a free transform
     (fit: free → x, y, scale, opacity, rotate, optional keyframe `to` for a move/zoom)."""
@@ -305,11 +328,11 @@ def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, 
         return _free_overlay(item, input_index, w, h, in_label, out_label, idx)
     if pip:
         bw, bh = int(w * 0.42), int(h * 0.42 * (9 / 16) if w < h else h * 0.42)
-        prep = (f"[{input_index}:v]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
+        prep = (f"[{input_index}:v]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh}{_key(item)},"
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = {"tl": "24:24", "tr": f"W-w-24:24", "bl": f"24:H-h-{int(h*0.28)}", "br": f"W-w-24:H-h-{int(h*0.28)}"}.get(item.get("pos", "tr"), "W-w-24:24")
     else:
-        prep = (f"[{input_index}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        prep = (f"[{input_index}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}{_key(item)},"
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = "0:0"
     fade = ""
@@ -334,7 +357,7 @@ def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_la
     to = item.get("to") or {}
     x1, y1, sc1 = float(to.get("x", x0)), float(to.get("y", y0)), float(to.get("scale", sc0))
     ow = max(8, int(w * max(sc0, sc1)))
-    prep = (f"[{idx_in}:v]scale={ow}:-2:flags=bicubic,format=rgba,setpts=PTS-STARTPTS+{s:.3f}/TB")
+    prep = (f"[{idx_in}:v]scale={ow}:-2:flags=bicubic,format=rgba{_key(item)},setpts=PTS-STARTPTS+{s:.3f}/TB")
     if rot:
         prep += f",rotate={rot}*PI/180:c=black@0:ow='hypot(iw,ih)':oh=ow"
     if op < 1:
@@ -387,42 +410,9 @@ def watermark_filter(input_index: int, w: int, h: int, in_label: str, out_label:
 
 
 def title_events(titles: list[dict], width: int, height: int, font: str = "Poppins") -> tuple[str, list[str]]:
-    """ASS style + events for title/text overlays: [{start,end,text,pos: top|center|bottom, size, color, bg}]."""
-    base = min(width, height)
-    style = (f"Style: Title,{font},{round(0.075 * base)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,"
-             f"-1,0,0,0,100,100,0,0,1,{round(0.006 * base, 1)},{round(0.003 * base, 1)},8,"
-             f"{round(0.06 * width)},{round(0.06 * width)},{round(0.1 * height)},1")
-    out = []
-    from .captions import _esc, _t, ass_color
-    for t in titles:
-        txt = _esc(str(t.get("text", ""))).replace("|", "\\N")
-        if not txt.strip():
-            continue
-        an = {"top": 8, "center": 5, "bottom": 2}.get(t.get("pos", "top"), 8)
-        size = round(float(t.get("size", 0.075)) * base)
-        s0, e0 = float(t["start"]), float(t["end"])
-        dur_ms = max(200, int((e0 - s0) * 1000))
-        anim = t.get("anim") or "fade"
-        tags = f"\\an{an}\\fs{size}" + text_anim_tags(anim, an, width, height, dur_ms)
-        if t.get("color"):
-            tags += f"\\c{ass_color(t['color'])}"
-        if t.get("bg"):
-            tags += f"\\bord{round(0.02 * base, 1)}\\3c{ass_color(t['bg'])}"
-        if t.get("font"):
-            tags += f"\\fn{t['font']}"
-        if anim == "typewriter":
-            # reveal one character at a time: one event per prefix
-            plain = str(t.get("text", "")).replace("|", "\n")
-            n = max(1, len(plain))
-            step = min(80, dur_ms * 0.6 / n)
-            for i in range(1, n + 1):
-                a = s0 + (i - 1) * step / 1000
-                b = s0 + i * step / 1000 if i < n else e0
-                part = _esc(plain[:i]).replace("\n", "\\N")
-                out.append(f"Dialogue: 2,{_t(a)},{_t(b)},Title,,0,0,0,,{{{tags}}}{part}")
-            continue
-        out.append(f"Dialogue: 2,{_t(s0)},{_t(e0)},Title,,0,0,0,,{{{tags}}}{txt}")
-    return style, out
+    """Text items → ASS (templates, in/out/loop animations): see engine/textfx.py."""
+    from .textfx import title_events as _te
+    return _te(titles, width, height, font)
 
 
 STICKER_ANIMS = {"none": "कोई नहीं", "fade": "Fade", "pop": "Pop (bounce in)", "bounce": "Bounce", "zoom": "Zoom in",
@@ -564,7 +554,7 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
     base = bg_label
     # --- text behind person goes on the background
     if ass_behind:
-        sub = f"subtitles=filename='{ass_behind}'" + (f":fontsdir='{fonts_dir}'" if fonts_dir else "")
+        sub = f"ass=filename='{ass_behind}':shaping=complex" + (f":fontsdir='{fonts_dir}'" if fonts_dir else "")
         ch.append(f"{base}{sub}[bgt]")
         base = "[bgt]"
     anim = body.get("anim", "none") or "none"
@@ -645,3 +635,57 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
 
 def _c(hex_color: str) -> str:
     return "0x" + str(hex_color or "#000000").lstrip("#")[:6]
+
+
+# ---------------------------------------------------------------------------
+# Main video transform: crop / rotate / mirror (before framing) and
+# position & size inside the frame (after framing)
+
+def transform_pre(t: dict | None, src_w: int, src_h: int) -> tuple[str, int, int]:
+    t = t or {}
+    f: list[str] = []
+    w, h = src_w, src_h
+    c = t.get("crop") or None
+    if c and (float(c.get("w", 1)) < .999 or float(c.get("h", 1)) < .999):
+        cw = max(16, int(w * float(c.get("w", 1)) / 2) * 2)
+        ch = max(16, int(h * float(c.get("h", 1)) / 2) * 2)
+        cx = int(max(0, min(w - cw, w * float(c.get("x", 0)))))
+        cy = int(max(0, min(h - ch, h * float(c.get("y", 0)))))
+        f.append(f"crop={cw}:{ch}:{cx}:{cy}")
+        w, h = cw, ch
+    rot = int(t.get("rotate", 0) or 0) % 360
+    if rot == 90:
+        f.append("transpose=1"); w, h = h, w
+    elif rot == 180:
+        f.append("hflip,vflip")
+    elif rot == 270:
+        f.append("transpose=2"); w, h = h, w
+    if t.get("flip_h"):
+        f.append("hflip")
+    if t.get("flip_v"):
+        f.append("vflip")
+    ang = float(t.get("angle", 0) or 0)
+    if abs(ang) > .05:
+        a = math.radians(ang)
+        # rotate and zoom just enough that no empty corners show
+        k = abs(math.cos(a)) + abs(math.sin(a)) * max(w / h, h / w)
+        f.append(f"rotate={a:.5f}:ow=iw:oh=ih:c=black,scale=iw*{k:.4f}:ih*{k:.4f},crop={w}:{h}")
+    return ",".join(f), w, h
+
+
+def transform_post(t: dict | None, w: int, h: int) -> str:
+    t = t or {}
+    s = float(t.get("scale", 1) or 1)
+    dx, dy = float(t.get("x", 0) or 0), float(t.get("y", 0) or 0)
+    if abs(s - 1) < 1e-3 and abs(dx) < 1e-3 and abs(dy) < 1e-3:
+        return ""
+    sw, sh = max(16, int(w * s / 2) * 2), max(16, int(h * s / 2) * 2)
+    bg = t.get("bg", "blur")
+    if bg == "blur":
+        back = f"[tpa]gblur=sigma=30,eq=brightness=-0.08[tpbg]"
+    else:
+        col = "black" if bg in ("black", "", None) else "0x" + str(t.get("bg_color", "#000000")).lstrip("#")[:6]
+        back = f"[tpa]drawbox=x=0:y=0:w=iw:h=ih:color={col}:t=fill[tpbg]"
+    x = f"(W-w)/2+{dx * w:.1f}"
+    y = f"(H-h)/2+{dy * h:.1f}"
+    return f"split[tpa][tpb];{back};[tpb]scale={sw}:{sh}[tpfg];[tpbg][tpfg]overlay=x='{x}':y='{y}'"

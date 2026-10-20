@@ -131,6 +131,18 @@ def transcribe_payload(project: dict) -> dict:
             "polish": st.get("llm_polish", True)}
 
 
+def autopilot_plan(project: dict, c=None) -> dict:
+    """Autopilot's render settings for this project, using its channel's brand kit and library."""
+    c = c or db.conn()
+    ch = db.get("channels", project.get("channel_id") or "") or db.row(c.execute(
+        "SELECT * FROM channels WHERE workspace_id = ? ORDER BY created_at LIMIT 1", (project["workspace_id"],)).fetchone())
+    ch_settings = {**((ch or {}).get("settings") or (db.get("workspaces", project["workspace_id"]) or {}).get("settings") or {}),
+                   "niche": (ch or {}).get("niche") or ""}
+    lib = db.rows(c.execute("SELECT id, kind, name, tags FROM library WHERE workspace_id = ? AND (channel_id IS NULL OR channel_id = ?)",
+                            (project["workspace_id"], (ch or {}).get("id"))))
+    return autopilot.plan(project, ch_settings, lib)
+
+
 def after_job(c, job: dict, result: dict) -> None:
     """Move the project to its next step once a job reports success."""
     pid = job["project_id"]
@@ -171,13 +183,7 @@ def after_job(c, job: dict, result: dict) -> None:
         st = result.get("edl", {}).get("stats", {})
         if project.get("settings", {}).get("autopilot"):
             project = db.get("projects", pid)
-            ch = db.get("channels", project.get("channel_id") or "") or db.row(c.execute(
-                "SELECT * FROM channels WHERE workspace_id = ? ORDER BY created_at LIMIT 1", (project["workspace_id"],)).fetchone())
-            ch_settings = {**((ch or {}).get("settings") or (db.get("workspaces", project["workspace_id"]) or {}).get("settings") or {}),
-                           "niche": (ch or {}).get("niche") or ""}
-            lib = db.rows(c.execute("SELECT id, kind, name, tags FROM library WHERE workspace_id = ? AND (channel_id IS NULL OR channel_id = ?)",
-                                    (project["workspace_id"], (ch or {}).get("id"))))
-            opts = autopilot.plan(project, ch_settings, lib)
+            opts = autopilot_plan(project, c)
             ap = opts.pop("autopilot")
             try:
                 request_render(c, project, opts)

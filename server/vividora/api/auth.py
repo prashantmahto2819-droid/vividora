@@ -123,7 +123,7 @@ async def brand_get(request: Request, user: dict):
 @require("admin")
 async def brand_set(request: Request, user: dict):
     data = await body(request)
-    keys = ("name", "logo_id", "primary", "highlight", "font", "caption_style", "grade_preset", "music", "watermark_pos", "hashtags", "cta", "vocab_words", "voice_preset", "cta_popup")
+    keys = ("name", "logo_id", "primary", "highlight", "font", "caption_style", "grade_preset", "music", "watermark_pos", "hashtags", "cta", "vocab_words", "voice_preset", "cta_popup", "autopilot", "title_style")
     brand = {k: data[k] for k in keys if k in data}
     from .channels import get_channel
     ch = get_channel(user["workspace_id"], data.get("channel_id") or request.query_params.get("channel"))
