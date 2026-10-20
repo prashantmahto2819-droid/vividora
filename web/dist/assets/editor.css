@@ -359,3 +359,14 @@ body.dragging, body.dragging * { user-select: none !important; }
 .apchip .ibtn { width: 22px; height: 22px; font-size: .7rem; }
 .apbox .aptag { font-size: .6rem; background: rgba(0,0,0,.35); color: #ffd98a; border-radius: 3px; padding: 0 3px; }
 .cropdone { position: absolute; right: 8px; bottom: 8px; pointer-events: auto; }
+/* live person cutout (cutout.js) */
+.ed-frame canvas#pv-cut { position: absolute; display: block; max-width: none; max-height: none; pointer-events: none; }
+.ed-frame canvas#pv-cut[hidden] { display: none; }
+.ed-cutmedia { position: absolute; left: 0; top: 0; width: 2px; height: 2px; overflow: hidden; opacity: 0; pointer-events: none; }
+.ed-cutmedia video { width: 2px; height: 2px; }
+.ed-cutbadge { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: .5rem; max-width: 92%;
+  background: rgba(15,18,25,.88); color: #fff; border: 1px solid var(--ed-line, #333); border-radius: 10px; padding: .35rem .6rem; font-size: .75rem; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.ed-cutbadge[hidden] { display: none; }
+.ed-cutbadge small { display: block; opacity: .75; font-size: .66rem; }
+.ov-cutslot { width: 100%; height: 100%; }
+.ov-cut { pointer-events: none; }
