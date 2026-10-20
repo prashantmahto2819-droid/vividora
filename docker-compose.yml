@@ -10,11 +10,14 @@ services:
     environment:
       DATA_ROOT: /data
       MEDIA_ROOT: /media
+      RAW_ROOT: /raw
       ARCHIVE_ROOT: /archive
     volumes:
       - ${DATA_DIR:-/srv/studio/data}:/data
       - ${MEDIA_DIR:-/srv/studio/media}:/media
       - ${ARCHIVE_DIR:-/srv/studio/archive}:/archive
+      # big originals (uploads, library videos) — set RAW_DIR to the Windows D: drive share, see docs/storage-d-drive.md
+      - ${RAW_DIR:-/srv/studio/raw}:/raw
       - ./web/dist:/app/web-dist:ro
       - ${RCLONE_CONFIG_DIR:-/home/prashant/.config/rclone}:/root/.config/rclone
     ports:

@@ -27,6 +27,13 @@ class Settings:
     media_root: Path = field(
         default_factory=lambda: Path(os.getenv("MEDIA_ROOT", "./media")).resolve()
     )
+    # big originals (uploads, library videos/music) can live on another disk, e.g. the Windows D: drive
+    # shared into the VM; proxies, renders and the database stay on MEDIA_ROOT (fast VM disk)
+    raw_root: Path | None = field(
+        default_factory=lambda: Path(os.environ["RAW_ROOT"]).resolve()
+        if os.getenv("RAW_ROOT")
+        else None
+    )
     archive_root: Path | None = field(
         default_factory=lambda: Path(os.environ["ARCHIVE_ROOT"]).resolve()
         if os.getenv("ARCHIVE_ROOT")
