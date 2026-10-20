@@ -60,7 +60,9 @@ def _url(item: dict) -> str:
 
 
 def _view(item: dict) -> dict:
-    return {**{k: v for k, v in item.items() if k != "path"}, "url": _url(item)}
+    from .. import cutout
+    alpha = f"/api/library/{item['id']}/alpha?t={media_token(item['id'])}"
+    return {**{k: v for k, v in item.items() if k != "path"}, "url": _url(item), "meta": cutout.view_meta(item, alpha)}
 
 
 @require("viewer")
@@ -332,6 +334,8 @@ async def delete(request: Request, user: dict):
         c.execute("DELETE FROM library WHERE id = ?", (item["id"],))
     try:
         storage.abs_path(item["path"]).unlink(missing_ok=True)
+        from .. import cutout
+        cutout.delete_lib_alpha(item)
     except (ValueError, OSError):
         pass
     return ok()
@@ -348,6 +352,29 @@ async def file(request: Request):
     if not path.exists():
         raise ApiError(404, "file missing on disk")
     return FileResponse(path, media_type=item["mime"] or "application/octet-stream")
+
+
+async def alpha_file(request: Request):
+    """The cached person matte of a library video (gray H.264) for the editor's live cutout preview."""
+    from .. import cutout
+    item = db.get("library", request.path_params["item_id"])
+    tok = request.query_params.get("t")
+    data = read_token(tok, kind="media") if tok else None
+    if not item or not data or data.get("sub") != item["id"]:
+        raise ApiError(401, "media link expired")
+    p = cutout.lib_alpha_path(item)
+    if not p:
+        raise ApiError(404, "cutout अभी नहीं बना")
+    return FileResponse(p, media_type="video/mp4")
+
+
+@require_worker
+async def worker_alpha(request: Request):
+    from .. import cutout
+    p = cutout.lib_alpha_path(db.get("library", request.path_params["item_id"]))
+    if not p:
+        raise ApiError(404, "cutout not found")
+    return FileResponse(p, media_type="video/mp4")
 
 
 async def frame(request: Request):
@@ -403,5 +430,7 @@ routes = [
     Route("/library/{item_id}", delete, methods=["DELETE"]),
     Route("/library/{item_id}/file", file),
     Route("/library/{item_id}/frame", frame),
+    Route("/library/{item_id}/alpha", alpha_file),
+    Route("/worker/library/{item_id}/alpha", worker_alpha),
     Route("/worker/library/{item_id}", worker_file),
 ]

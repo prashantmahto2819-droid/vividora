@@ -519,13 +519,35 @@ async def matte_now(request: Request, user: dict):
     p = own_project(request, user)
     if not service.asset_of(p["id"], "proxy"):
         raise ApiError(400, "पहले preview बनने दें")
+    data = await body(request)
+    q = data.get("quality") if data.get("quality") in ("fast", "balanced", "hair") else "balanced"
     with db.tx() as c:
         running = c.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'matte' AND status IN ('queued','running')", (p["id"],)).fetchone()[0]
         if running:
             return ok({"job": None, "running": True})
-        job = service.queue.enqueue(c, p["id"], "matte", {})
+        job = service.queue.enqueue(c, p["id"], "matte", {"quality": q})
         service.log(c, user["workspace_id"], "matte.start", user_id=user["id"], project_id=p["id"])
     return ok({"job": job})
+
+
+@require("editor")
+async def matte_lib_now(request: Request, user: dict):
+    """Person cutout of one library video (for a "सिर्फ़ इंसान" overlay) — cached on the library item."""
+    from .. import cutout
+    p = own_project(request, user)
+    data = await body(request)
+    lid = str(data.get("library_id") or "")
+    item = db.get("library", lid)
+    if not item or item["workspace_id"] != user["workspace_id"]:
+        raise ApiError(404, "library item नहीं मिला")
+    with db.tx() as c:
+        try:
+            job = cutout.queue_lib(c, p["id"], lid, str(data.get("quality") or "balanced"), force=bool(data.get("force")))
+        except ValueError as e:
+            raise ApiError(400, str(e))
+        if job:
+            service.log(c, user["workspace_id"], "matte_lib.start", user_id=user["id"], project_id=p["id"], detail={"library_id": lid})
+    return ok({"job": job, "cached": job is None and cutout.lib_alpha(item) is not None})
 
 
 @require("editor")
@@ -716,6 +738,7 @@ routes = [
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
     Route("/projects/{project_id}/matte", matte_now, methods=["POST"]),
+    Route("/projects/{project_id}/matte_lib", matte_lib_now, methods=["POST"]),
     Route("/projects/{project_id}/frame", preview_frame, methods=["POST"]),
     Route("/projects/{project_id}/archive", archive_now, methods=["POST"]),
     Route("/projects/{project_id}/history", history_list),

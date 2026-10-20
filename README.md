@@ -28,7 +28,7 @@ Windows PC (NVIDIA GPU)            Ubuntu VM (Docker)
 - **AI** — `engine/llm.py` Gemini or Claude, optional; everything has an offline fallback
 - **Channels** — multi-channel workspaces: brand kit, niche, connections, library, analytics per channel (`api/channels.py`)
 - **Library** — 248-item licence-safe starter pack (`server/starter/`), free online search/import (Openverse, Pixabay, Jamendo)
-- **Body effects** — RVM cutout (`engine/matting.py`), stroke/glow/afterimage/clones/drop-in/blink/text-behind (`engine/effects.py`)
+- **Body effects** — RVM cutout of moving video (`engine/matting.py`; GPL-3.0 weights downloaded at runtime, never vendored), stroke/glow/afterimage/clones/drop-in/blink/text-behind (`engine/effects.py`); live WebGL preview in the editor (`web/dist/assets/cutout.js`); "सिर्फ़ इंसान" B-roll overlays with a matte cached per library item (`cutout.py`, job `matte_lib`)
 - **Recorder** — camera + teleprompter (`web/dist/assets/record.js`)
 - **Autopilot** — `engine/autopilot.py`
 - Setup guides: `docs/first-video.md`, `docs/cloudflare-tunnel.md`, `docs/google-drive.md`; research: `docs/research-editors-2026.md`

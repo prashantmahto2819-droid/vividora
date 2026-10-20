@@ -372,6 +372,20 @@ def after_job(c, job: dict, result: dict) -> None:
             except ValueError:
                 pass
 
+    elif kind == "matte_lib":
+        # cutout of a library clip ("सिर्फ़ इंसान" overlay) — see cutout.py
+        from . import cutout
+        cutout.after_lib(c, job, result)
+        pend = ((db.get("projects", pid) or {}).get("meta") or {}).get("render_after_matte")
+        if pend and not c.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind IN ('matte','matte_lib') "
+                                  "AND status IN ('queued','running') AND id != ?", (pid, job["id"])).fetchone()[0]:
+            p2 = db.get("projects", pid)
+            db.update(c, "projects", pid, {"meta": {k: v for k, v in p2["meta"].items() if k != "render_after_matte"}})
+            try:
+                request_render(c, db.get("projects", pid), pend)
+            except ValueError:
+                pass
+
     elif kind == "montage_plan":
         st = project.get("settings", {})
         mo = {**(st.get("montage") or {}), "plan": result.get("plan")}
@@ -442,6 +456,11 @@ def fail_job(c, job: dict, error: str) -> None:
     pid = job["project_id"]
     db.update(c, "jobs", job["id"], {"status": "failed", "error": error[:4000],
                                      "finished_at": db.now()})
+    if job["kind"] == "matte_lib" and not ((db.get("projects", pid) or {}).get("meta") or {}).get("render_after_matte"):
+        # a library clip's cutout is a side job unless a render is waiting for it
+        db.update(c, "projects", pid, {"status_note": f"cutout (B-roll) असफल: {error.splitlines()[-1][:160] if error else 'error'}",
+                                       "updated_at": db.now()})
+        return
     if job["kind"] in ("publish", "shorts_plan", "dub"):
         # side jobs never take the project out of its editing state
         if job["kind"] == "publish" and job["payload"].get("publication_id"):
@@ -465,7 +484,7 @@ def fail_job(c, job: dict, error: str) -> None:
     if job["kind"] in ("montage", "montage_plan"):
         set_status(c, pid, "review_cuts", f"{'beat plan' if job['kind'] == 'montage_plan' else 'montage'} असफल: {error.splitlines()[-1][:160] if error else 'error'} — settings बदलकर फिर कोशिश करें")
         return
-    if job["kind"] in ("render", "matte") and (db.get("projects", pid) or {}).get("edl"):
+    if job["kind"] in ("render", "matte", "matte_lib") and (db.get("projects", pid) or {}).get("edl"):
         # a failed export must not lock the project out of the editor: back to editing, with the reason
         set_status(c, pid, "review_cuts", f"{job['kind']} असफल: {error.splitlines()[-1][:160] if error else 'error'} — editing वैसी ही है, ठीक करके फिर render करें")
         notify.on_event("failed", db.get("projects", pid) or {"id": pid}, f"{job['kind']}: {error.splitlines()[-1][:160] if error else ''}")
@@ -495,6 +514,11 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
         db.update(c, "projects", pid, {"meta": {**project.get("meta", {}), "render_after_matte": settings_in}})
         set_status(c, pid, "rendering", "पहले cutout बन रहा है (CPU, कुछ मिनट) — फिर render")
         return [{"deferred": "matte"}]
+    from . import cutout  # "सिर्फ़ इंसान" overlays need their library clip's matte first
+    if cutout.missing(c, project, opts.get("effects")):
+        db.update(c, "projects", pid, {"meta": {**(db.get("projects", pid) or project).get("meta", {}), "render_after_matte": settings_in}})
+        set_status(c, pid, "rendering", "पहले overlay clip का cutout बन रहा है (CPU) — फिर render")
+        return [{"deferred": "matte_lib"}]
     # cancel renders still waiting from an earlier click
     c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? "
               "AND kind='render' AND status='queued'", (db.now(), pid))
@@ -632,6 +656,10 @@ def resolve_effects_local(project: dict, effects: dict) -> dict:
                 if p:
                     kind = "image" if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif") else "video"
                     out.append({**item, "path": str(p), "type": item.get("type") or kind})
+                    if key == "broll" and item.get("cutout"):
+                        from . import cutout
+                        ap = cutout.lib_alpha_path(db.get("library", item["id"]))
+                        out[-1]["alpha_path"] = str(ap) if ap else None
         e[key] = out
     body = e.get("body") if isinstance(e.get("body"), dict) else None
     if body and body.get("enabled"):

@@ -62,6 +62,23 @@ def _font(client: ApiClient, fid: str, tmp: Path) -> Path | None:
         return None
 
 
+def _lib_alpha(client: ApiClient, item_id: str, tmp: Path, e: dict) -> str | None:
+    """Person matte of a library video for a "सिर्फ़ इंसान" overlay; None (whole clip shown) if not made yet."""
+    try:
+        return str(client.download_library_alpha(item_id, tmp / "lib_alpha" / f"{item_id}.mp4"))
+    except urllib.error.HTTPError as err:
+        if err.code not in (404, 410):
+            raise
+        e.setdefault("_cutout_missing", []).append(item_id)
+        return None
+
+
+def _matte_resets(project: dict) -> list[float]:
+    """Joins of merged clips: the matte's recurrent state starts fresh there (new shot, new light)."""
+    clips = (project.get("meta") or {}).get("clips") or []
+    return [float(c.get("start") or 0) for c in clips if isinstance(c, dict) and float(c.get("start") or 0) > 0]
+
+
 def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets: list[dict] | None = None) -> dict:
     """Download library items the render refers to; replace ids with local paths."""
     e = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
@@ -116,6 +133,8 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
                 if p:
                     kind = "image" if (p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif") or _is_image(p)) else "video"
                     out.append({**item, "path": str(p), "type": kind})
+                    if key == "broll" and item.get("cutout") and kind == "video":
+                        out[-1]["alpha_path"] = _lib_alpha(client, item["id"], tmp, e)
         e[key] = out
     # AI voice-over / dub chosen as the voice: download that project file like the other assets
     vt = e.get("voice_track")
@@ -225,6 +244,8 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 files.append({**f, "label": label, "path": up["path"],
                               "meta": {**f.get("meta", {}), "title": p.get("title")}})
             miss = [f"library की {len(effects['_missing'])} file नहीं मिली — वह item छोड़कर render हुआ"] if effects.get("_missing") else []
+            if effects.get("_cutout_missing"):
+                miss.append(f"{len(effects['_cutout_missing'])} overlay का cutout अभी नहीं बना — वह पूरा clip दिखा")
             return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn + miss}
 
         if kind == "dub":
@@ -320,15 +341,36 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             return {"files": files, "duration": out["duration"], "bpm": out["bpm"], "segments": out["segments"], "warnings": warns}
 
         if kind == "matte":
+            # person cutout of the main video, on the 720p proxy (same size / clock as the editor's preview)
             from ..engine import matting
             proxy = _fetch(client, assets, "proxy", tmp)
             info = ffmpeg.probe(proxy)
             out = tmp / "alpha.mp4"
+            pl = job["payload"] or {}
             r = matting.matte(proxy, out, width=info["width"], height=info["height"], fps=float(info["fps"]),
-                              duration=float(info["duration"]), downsample=float(job["payload"].get("downsample", 0.375)),
-                              on_progress=_progress(client, job["id"]))
+                              duration=float(info["duration"]), quality=pl.get("quality") or "balanced",
+                              downsample=float(pl["downsample"]) if pl.get("downsample") else None,
+                              resets=_matte_resets(project), on_progress=_progress(client, job["id"]))
             up = client.upload(job["id"], out, "alpha")
             return {"files": [{"kind": "alpha", "path": up["path"], "mime": "video/mp4", "meta": r}]}
+
+        if kind == "matte_lib":
+            # person cutout of a library video ("सिर्फ़ इंसान" overlay) — stored on the library item (cutout.py)
+            from ..engine import matting
+            pl = job["payload"] or {}
+            src = client.download_library(pl["library_id"], tmp / "lib" / pl["library_id"])
+            info = ffmpeg.probe(src)
+            if not info.get("width") or float(info.get("duration") or 0) <= 0:
+                raise ValueError("यह library item video नहीं है")
+            q = pl.get("quality") or "balanced"
+            size = matting.plan(info["width"], info["height"], q, out_short=720 if q != "hair" else 1080)["out"]
+            out = tmp / "alpha_lib.mp4"
+            r = matting.matte(src, out, width=info["width"], height=info["height"], fps=float(info["fps"] or 30),
+                              duration=float(info["duration"]), quality=q, out_size=size,
+                              on_progress=_progress(client, job["id"]))
+            up = client.upload(job["id"], out, "alpha_lib")
+            return {"files": [{"kind": "alpha_lib", "path": up["path"], "mime": "video/mp4",
+                               "meta": {**r, "library_id": pl["library_id"]}}]}
 
         if kind == "shorts_plan":
             o = job["payload"].get("options") or {}
@@ -372,8 +414,9 @@ def main() -> None:
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
     kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan"]
     try:
-        import onnxruntime  # noqa: F401
-        kinds.append("matte")
+        if not os.getenv("VIVIDORA_MATTE_MOCK"):
+            import onnxruntime  # noqa: F401
+        kinds += ["matte", "matte_lib"]
     except ImportError:
         log.warning("onnxruntime नहीं — cutout (matte) jobs इस worker पर नहीं चलेंगे")
     if os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes"):
