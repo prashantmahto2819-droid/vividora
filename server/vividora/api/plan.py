@@ -157,8 +157,13 @@ async def notify_status(request: Request, user: dict):
 async def notify_test(request: Request, user: dict):
     if not notify.enabled():
         raise ApiError(400, ".env में NOTIFY_URL और NOTIFY_TO सेट करें")
-    notify.send("✅ Vividora जुड़ा हुआ है — यह test message है।")
-    return ok()
+    from starlette.concurrency import run_in_threadpool
+    good, info = await run_in_threadpool(notify.send_now, "✅ Vividora जुड़ा हुआ है — यह test message है।")
+    if not good:
+        hint = ("token गलत है — Relay में नई API key बनाकर NOTIFY_TOKEN में डालें" if " 401" in " " + info or " 403" in " " + info
+                else "NOTIFY_URL में number का नाम जाँचें (Relay → Numbers)" if " 404" in " " + info else "Relay चालू है? NOTIFY_URL सही है?")
+        raise ApiError(502, f"WhatsApp नहीं गया ({info}) — {hint}")
+    return ok({"info": info})
 
 
 def _flatten_inbound(data: dict) -> dict:

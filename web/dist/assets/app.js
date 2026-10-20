@@ -97,7 +97,7 @@ async function load() {
   if (r.kind === "publish") { const [o, p] = await Promise.all([api("GET", "/overview" + ovQ).catch(() => null), api("GET", "/publications" + ovQ).catch(() => [])]); S.overview = o; S.pubs = p; }
   if (r.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
   if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
-  if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; }
+  if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; S.notify = await api("GET", "/notify").catch(() => null); }
   const ids = new Set(S.projects.map((p) => p.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   schedulePoll();
 }
@@ -672,6 +672,8 @@ function settingsView() {
         <div class="field" style="flex:1;min-width:220px"><label>शब्दावली (नाम/खास शब्द — transcript इन्हें सही लिखेगा)</label><input name="vocab_words" value="${esc(S.brand?.vocab_words || "")}" placeholder="Prashant Mahto, UPSC, सफलता, मोटिवेशन"></div>
         <div class="field"><label>आवाज़ enhance</label><select name="voice_preset">${[["studio", "Studio"], ["soft", "Soft / warm"], ["podcast", "Podcast"], ["bright", "Clear / bright"], ["phone", "Phone mic fix"], ["clean", "हल्का"], ["off", "बंद"]].map(([k, l]) => `<option value="${k}" ${(S.brand?.voice_preset || "studio") === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
         ${S.user.role === "admin" ? `<button class="btn primary">सेव</button>` : ""}</form></div>
+    <div class="section"><div class="row between"><h2>📱 WhatsApp (Vivid Relay)</h2>${S.user.role === "admin" ? `<button class="btn" id="wa-test" ${S.notify?.enabled ? "" : "disabled"}>test message भेजें</button>` : ""}</div>
+      <p class="small muted">${S.notify?.enabled ? `भेजना: चालू (नंबर …${esc(S.notify.to || "")})` : "भेजना: बंद — .env में NOTIFY_URL, NOTIFY_TOKEN, NOTIFY_TO डालें"} · ${S.notify?.inbound ? "आने वाले commands: चालू" : "आने वाले commands: बंद — .env में NOTIFY_INBOUND_SECRET डालें"}</p></div>
     ${autopilotSection()}
     <div id="sched-wrap">${scheduleSection()}</div>
     <div class="section"><h2>एक बार का setup</h2>
@@ -717,6 +719,7 @@ function bindSchedule() {
 }
 function bindSettings() {
   bindSchedule();
+  const wt = $("#wa-test"); if (wt) wt.onclick = async () => { wt.disabled = true; wt.textContent = "भेज रहा…"; try { await api("POST", "/notify/test"); toast("✅ भेज दिया — WhatsApp देखें"); } catch (e) { toast(e.message, 7000); } wt.disabled = false; wt.textContent = "test message भेजें"; };
   const apf = $("#ap-form"); if (apf) apf.onsubmit = async (e) => { e.preventDefault(); const ap = {}; for (const el of apf.elements) if (el.name) ap[el.name] = el.type === "checkbox" ? el.checked : +el.value;
     try { await api("PUT", `/brand?channel=${S.channel}`, { autopilot: ap }); S.brand = { ...(S.brand || {}), autopilot: ap }; toast("autopilot settings सेव"); } catch (err) { toast(err.message); } };
   const stl = $("#st-load"); if (stl) stl.onclick = () => loadStorage();

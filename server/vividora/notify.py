@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import urllib.error
 import urllib.request
 
 from .config import settings
@@ -25,6 +26,24 @@ log = logging.getLogger("vividora.notify")
 
 def enabled() -> bool:
     return bool(settings.notify_url and settings.notify_to)
+
+
+def send_now(text: str) -> tuple[bool, str]:
+    """Send and report the gateway's answer (for the Settings test button)."""
+    body = settings.notify_template.replace("{to}", settings.notify_to).replace("{text}", json.dumps(text)[1:-1])
+    headers = {"Content-Type": "application/json"}
+    if settings.notify_token:
+        headers["Authorization"] = f"Bearer {settings.notify_token}"
+        headers["X-Api-Key"] = settings.notify_token
+    req = urllib.request.Request(settings.notify_url, data=body.encode(), method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return True, f"HTTP {r.status}"
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="ignore")[:200]
+        return False, f"HTTP {e.code}: {detail}"
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)[:200]
 
 
 def _send(text: str) -> None:
