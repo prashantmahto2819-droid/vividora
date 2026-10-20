@@ -424,7 +424,17 @@ function newView() {
     <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का" value="${idea ? esc(idea.title) : ""}"></div>
     <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
     <div class="drop" id="drop" data-upload="1"><input type="file" id="file" accept="video/*,audio/*,.mkv,.mts" multiple hidden><b>फ़ाइलें यहाँ खींचकर छोड़ें, या click करके चुनें</b><br><span class="muted small">MP4, MOV, MKV, WebM — 20 GB तक। कई clips चुनें तो वे क्रम से एक timeline पर जुड़ेंगी।</span><div id="fname" class="small" style="margin-top:.5rem"></div></div>
-    <label class="chk" style="margin:.5rem 0;display:flex;gap:.5rem;align-items:center"><input type="checkbox" name="autopilot" checked> <span><b>✈ Autopilot</b> — upload के बाद पूरा edit अपने-आप होगा (cuts, captions, zoom, music, Shorts, titles)। आपको बस देखकर मंज़ूरी देनी है।</span></label>
+    <div id="mo-new" hidden>
+      <div class="drop" id="mo-drop"><input type="file" id="mo-files" accept="video/*,image/*,.mov,.mkv" multiple hidden><b>Clips और photos यहाँ छोड़ें, या click करके चुनें</b><br><span class="muted small">छोटे-बड़े, किसी भी ratio के — best हिस्से अपने-आप चुने जाएँगे</span><div id="mo-fnames" class="small" style="margin-top:.5rem"></div></div>
+      <div class="row" style="gap:1rem;flex-wrap:wrap;align-items:flex-end;margin-top:.75rem">
+        <div class="field" style="flex:1;min-width:220px"><label>Song / music</label><label class="btn small" style="display:inline-flex">गाना चुनें (mp3, m4a, या reel का mp4)<input type="file" id="mo-song" accept="audio/*,video/mp4,.m4a,.mp3,.wav" hidden></label> <span id="mo-songname" class="small muted"></span>
+          <select id="mo-libsong" style="margin-top:.4rem"><option value="">…या library का music</option></select></div>
+        <div class="field"><label>Format</label><select id="mo-preset"><option value="ig-reel">9:16 Reel / Short</option><option value="yt-short">9:16 YouTube Short</option><option value="yt-long">16:9 YouTube</option></select></div>
+        <div class="field"><label>लंबाई</label><select id="mo-len">${[10, 15, 20, 30, 45, 60].map((n) => `<option value="${n}" ${n === 30 ? "selected" : ""}>${n}s</option>`).join("")}</select></div>
+      </div>
+      <label class="chk" style="margin:.5rem 0;display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="mo-auto" checked> <span><b>✨ Auto beat-edit तुरंत शुरू करें</b> — beat पर cut, effects, color, auto-crop। बाद में हर cut बदल सकते हैं।</span></label>
+    </div>
+    <label class="chk" id="ap-row" style="margin:.5rem 0;display:flex;gap:.5rem;align-items:center"><input type="checkbox" name="autopilot" checked> <span><b>✈ Autopilot</b> — upload के बाद पूरा edit अपने-आप होगा (cuts, captions, zoom, music, Shorts, titles)। आपको बस देखकर मंज़ूरी देनी है।</span></label>
     <div id="up-progress"></div>
     <div class="actionbar"><a class="btn quiet" href="#/">रद्द करें</a><button class="btn primary" id="start" disabled>Upload शुरू करें</button></div></form>`;
 }
@@ -437,12 +447,38 @@ function bindNew() {
   file.onchange = () => { chosenAll = [...file.files]; chosen = chosenAll[0]; pick(); };
   function pick() { if (!chosen) return; $("#fname").innerHTML = chosenAll.length > 1 ? chosenAll.map((f, i) => `${i + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : `${esc(chosen.name)} · ${gb(chosen.size)}`; $("#start").disabled = false; }
   let ptype = "talking_head";
-  if (/type=montage/.test(location.hash)) { const r = document.querySelector('input[name=ptype][value=montage]'); if (r) { r.checked = true; r.dispatchEvent(new Event("change")); } }
-  document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage"; drop.style.display = mont ? "none" : ""; $("#start").textContent = mont ? "Montage project बनाएँ" : "Upload शुरू करें"; $("#start").disabled = mont ? false : !chosen; }));
+  const moBox = $("#mo-new"), moFiles = []; let moSong = null;
+  document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage";
+    drop.style.display = mont ? "none" : ""; moBox.hidden = !mont; $("#ap-row").style.display = mont ? "none" : "flex"; $("#start").textContent = mont ? "Montage बनाएँ" : "Upload शुरू करें"; $("#start").disabled = mont ? false : !chosen;
+    if (mont && !moBox.dataset.lib) { moBox.dataset.lib = "1"; api("GET", "/library").then((lib) => { $("#mo-libsong").innerHTML += lib.filter((x) => x.kind === "music").map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join(""); }).catch(() => {}); } }));
+  const moDrop = $("#mo-drop"), moIn = $("#mo-files");
+  const moShow = () => { $("#mo-fnames").innerHTML = moFiles.length ? moFiles.map((f, n) => `${n + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : ""; };
+  moDrop.onclick = (e) => { if (e.target === moIn) return; moIn.click(); };
+  moDrop.ondragover = (e) => { e.preventDefault(); moDrop.classList.add("over"); }; moDrop.ondragleave = () => moDrop.classList.remove("over");
+  moDrop.ondrop = (e) => { e.preventDefault(); moDrop.classList.remove("over"); moFiles.push(...[...e.dataTransfer.files].filter((f) => /^(video|image)\//.test(f.type) || /\.(mov|mkv|mp4|jpe?g|png|webp)$/i.test(f.name))); moShow(); };
+  moIn.onchange = () => { moFiles.push(...moIn.files); moIn.value = ""; moShow(); };
+  $("#mo-song").onchange = (e) => { moSong = e.target.files[0] || null; $("#mo-songname").textContent = moSong ? moSong.name : ""; };
+  if (/type=montage/.test(location.hash)) { const r = document.querySelector('input[name=ptype][value=montage]'); if (r) { r.checked = true; r.onchange(); } }
   $("#new").onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target;
-    if (ptype === "montage") { $("#start").disabled = true; try { const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, kind: "montage", channel_id: S.channel }); go("/projects/" + p.id); } catch (err) { toast(err.message); $("#start").disabled = false; } return; }
+    if (ptype === "montage") {
+      const auto = $("#mo-auto").checked; const libSong = $("#mo-libsong").value;
+      if (auto && !moFiles.length) return toast("पहले clips/photos चुनें");
+      if (auto && !moSong && !libSong) return toast("गाना चुनें (या library का music)");
+      $("#start").disabled = true; const prog = $("#up-progress");
+      try {
+        const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, kind: "montage", channel_id: S.channel });
+        const ids = [];
+        for (let n = 0; n < moFiles.length; n++) { const fl = moFiles[n]; const kind = fl.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(fl.name) ? "image" : "broll";
+          const d = await libPut(kind, fl, (pc) => { prog.innerHTML = `<p class="small muted">Clip ${n + 1}/${moFiles.length} upload — ${pc}%</p><div class="progress"><i style="width:${pc}%"></i></div>`; }); ids.push({ id: d.id, duration: d.meta?.duration }); }
+        let music = libSong;
+        if (moSong) { const d = await libPut("music", moSong, (pc) => { prog.innerHTML = `<p class="small muted">गाना upload — ${pc}%</p><div class="progress"><i style="width:${pc}%"></i></div>`; }); music = d.id; }
+        if (auto) { await api("POST", `/projects/${p.id}/montage`, { mode: "auto", replan: true, auto_render: true, plan: null, clips: ids, music, preset: $("#mo-preset").value, max_seconds: +$("#mo-len").value, look: "auto", pace: "auto", effects_level: "auto", reframe: "smart", slowmo: true, texts: [] }); toast("Clips देखे जा रहे हैं → beat plan → video ⏳"); }
+        go("/projects/" + p.id);
+      } catch (err) { prog.innerHTML = `<div class="note err">${esc(err.message)}</div>`; $("#start").disabled = false; }
+      return;
+    }
     if (!chosen) return;
     $("#start").disabled = true;
     try {
@@ -455,6 +491,18 @@ function bindNew() {
       toast("Upload पूरा हुआ — जाँच शुरू हो गई"); go("/projects/" + p.id);
     } catch (err) { $("#up-progress").innerHTML = `<div class="note err">${esc(err.message)} — फिर से कोशिश करें, upload वहीं से आगे चलेगा।</div>`; $("#start").disabled = false; }
   };
+}
+function libPut(kind, file, onPct) {
+  // library upload with progress (fetch has no upload progress)
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("PUT", `/api/library?kind=${kind}&filename=${encodeURIComponent(file.name)}${S.channel ? "&channel=" + S.channel : ""}`);
+    x.setRequestHeader("authorization", "Bearer " + S.token); x.setRequestHeader("content-type", "application/octet-stream");
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onPct(Math.round(e.loaded / e.total * 100)); };
+    x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch {} if (x.status < 300) resolve(d); else reject(new Error(d.error || `upload ${x.status}`)); };
+    x.onerror = () => reject(new Error("network — upload टूट गया, फिर कोशिश करें"));
+    x.send(file);
+  });
 }
 async function uploadFile(pid, file, onProgress, opts = {}) {
   const up = await api("POST", `/projects/${pid}/uploads`, { filename: file.name, size: file.size, clip: !!opts.clip });
