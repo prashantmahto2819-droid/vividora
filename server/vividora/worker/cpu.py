@@ -139,7 +139,9 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
         if kind == "render":
             p = job["payload"]
             raw = _fetch(client, assets, "raw", tmp)
-            clean = _fetch(client, assets, "audio_clean", tmp, required=False)
+            voice_cfg = (p.get("effects") or {}).get("voice") or {}
+            # "strong" = the deep-cleaned track from prepare; "light"/"off" start from the original audio
+            clean = None if voice_cfg.get("denoise") in ("light", "off") else _fetch(client, assets, "audio_clean", tmp, required=False)
             style = caption_style(p.get("caption_style", "karaoke"))
             preset = platform(p["preset"])
             out = render.render(
@@ -229,8 +231,21 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
         if kind == "transcribe":
             from .transcribe import transcribe_file
             audio = _fetch(client, assets, "audio_asr", tmp)
-            return {"transcript": transcribe_file(audio, language=job["payload"].get("language", "hi"),
-                                                  on_progress=_progress(client, job["id"]))}
+            pl = job["payload"]
+            prog = _progress(client, job["id"])
+            tr = transcribe_file(audio, language=pl.get("language", "hi"), prompt=pl.get("prompt"),
+                                 on_progress=lambda f, m: prog(f * 0.93, m))
+            from ..engine import vocab
+            tr, nfix = vocab.apply_fixes(tr, pl.get("fixes"))
+            npol = 0
+            if pl.get("polish", True):
+                prog(0.95, "AI से spelling सुधार")
+                try:
+                    tr, npol = vocab.llm_polish(tr, tr.get("language") or pl.get("language", "hi"), pl.get("context", ""))
+                except Exception as e:  # noqa: BLE001 — polishing is optional
+                    log.warning("llm polish failed: %s", e)
+            tr["fixes_applied"], tr["polished_words"] = nfix, npol
+            return {"transcript": tr}
 
         raise ValueError(f"unknown job kind {kind}")
 

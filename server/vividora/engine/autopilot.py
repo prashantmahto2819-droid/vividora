@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 import re
 
-from . import metadata, shorts
+from . import analyze, metadata, shorts
 from .catalog import GRADE_PRESETS
 
 HOOK_MAX_WORDS = 8
@@ -28,12 +28,21 @@ def _first_hook(project: dict) -> str:
     return line if len(line) >= 8 else ""
 
 
+def _grade_with_correction(preset: dict, analysis: dict) -> dict:
+    """Brand look + the measured correction for this recording (dark room, cold light…)."""
+    g = {k: v for k, v in (preset or {}).items() if k != "label" and not k.startswith("_")}
+    for k, v in analyze.auto_grade(analysis).items():
+        g[k] = round(max(-1.0, min(1.0, float(g.get(k, 0)) + float(v))), 3)
+    return g
+
+
 def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
     """Render settings for this recording. Pure function: no I/O."""
     learned = (workspace_settings or {}).get("render_defaults", {}) or {}
     rec = (workspace_settings or {}).get("recommend", {}) or {}
     brand = (workspace_settings or {}).get("brand", {}) or {}
     duration = float(project.get("meta", {}).get("duration") or 0)
+    analysis = (project.get("meta") or {}).get("analysis") or {}
     is_short_source = duration <= 75
     lang = project.get("language") or "hi"
 
@@ -64,22 +73,32 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
         "look": learned.get("effects", {}).get("look", "none") if isinstance(learned.get("effects"), dict) else "none",
         "transition": "punch" if is_short_source else "none",
         "extras": [],
-        "grade": {k: v for k, v in GRADE_PRESETS.get(grade_preset, {}).items() if k != "label"},
+        "grade": _grade_with_correction(GRADE_PRESETS.get(grade_preset, {}), analysis),
         "grade_preset": grade_preset,
         "stack": [],
-        "music": {"id": music, "volume": 0.12, "duck": True},
+        "music": {"id": music, "volume": 0.12, "duck": True, "duck_amount": 0.6, "fade": 1.5},
+        "voice": analyze.auto_voice(analysis, brand.get("voice_preset") or "studio"),
         "broll": [], "titles": [], "sfx": [],
         "watermark": {"id": logo, "opacity": 0.7, "size": 0.12, "pos": "tr"},
     }
     # CTA popup + SFX (output timeline ≈ source minus cuts; place relative to the end)
     out_dur = duration - float(((project.get("edl") or {}).get("stats") or {}).get("removed_seconds") or 0)
-    hindi = lang != "en"
-    cta = find(["subscribe hindi"] if hindi else ["subscribe red"]) or find(["subscribe"])
-    if cta and out_dur > 8 and brand.get("cta_popup", True):
+    # Call-to-action popups — English text on every platform, and the right ask per platform:
+    # Subscribe on YouTube, Follow on Instagram / Facebook (each item only renders on its platform).
+    ctas = [("youtube", ["subscribe red", "subscribe"]), ("instagram", ["follow insta", "follow"]),
+            ("facebook", ["follow facebook", "follow insta", "follow"])]
+    if out_dur > 8 and brand.get("cta_popup", True):
         at = max(2.0, out_dur * (0.72 if not is_short_source else 0.82))
-        effects["broll"].append({"_id": "ap_cta", "id": cta, "start": round(at, 2), "end": round(min(out_dur, at + 2.8), 2),
-                                 "fit": "free", "x": 0.5, "y": 0.6, "scale": 0.6, "opacity": 1, "rotate": 0, "anim": "pop"})
-        if sfx.get("pop"):
+        added = False
+        for fam, names in ctas:
+            sid = find(names)
+            if not sid:
+                continue
+            effects["broll"].append({"_id": f"ap_cta_{fam}", "id": sid, "start": round(at, 2), "end": round(min(out_dur, at + 2.8), 2),
+                                     "fit": "free", "x": 0.5, "y": 0.6, "scale": 0.6, "opacity": 1, "rotate": 0, "anim": "pop",
+                                     "platforms": [fam]})
+            added = True
+        if added and sfx.get("pop"):
             effects["sfx"].append({"_id": "ap_pop", "id": sfx["pop"], "at": round(at, 2), "volume": 0.7})
     if hook and sfx.get("whoosh"):
         effects["sfx"].append({"_id": "ap_whoosh", "id": sfx["whoosh"], "at": 0.0, "volume": 0.6})
@@ -87,8 +106,14 @@ def plan(project: dict, workspace_settings: dict, library: list[dict]) -> dict:
         bell = find(["like sub bell"])
         if bell:
             effects["broll"].append({"_id": "ap_bell", "id": bell, "start": 6.0, "end": 9.0, "fit": "free", "x": 0.5, "y": 0.62,
-                                     "scale": 0.7, "opacity": 1, "rotate": 0, "anim": "slide_up"})
-    effects["zoom"]["mode"] = "punch" if is_short_source else "push"
+                                     "scale": 0.7, "opacity": 1, "rotate": 0, "anim": "slide_up", "platforms": ["youtube"]})
+    pc = analyze.pace(project)
+    fast = pc["wpm"] >= 150
+    effects["zoom"]["mode"] = "punch" if is_short_source else ("emphasis" if fast else "push")
+    if is_short_source:
+        effects["transition"] = "punch" if not fast else "whip"
+    if not is_short_source and out_dur > 90:
+        effects["extras"] = ["soft_glow"] if (analysis.get("video") or {}).get("contrast", 0.2) < 0.15 else []
     presets = ["yt-short", "ig-reel", "fb-reel"] if is_short_source else ["yt-long", "yt-short"]
     return {
         "presets": presets,

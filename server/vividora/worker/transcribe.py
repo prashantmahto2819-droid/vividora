@@ -18,7 +18,8 @@ from pathlib import Path
 ProgressFn = Callable[[float, str], None]
 
 
-def transcribe_file(audio: Path, *, language: str = "hi", on_progress: ProgressFn | None = None) -> dict:
+def transcribe_file(audio: Path, *, language: str = "hi", prompt: str | None = None,
+                    on_progress: ProgressFn | None = None) -> dict:
     model_name = os.getenv("WHISPER_MODEL", "large-v3")
     if model_name == "stub":
         return _stub(audio)
@@ -31,13 +32,18 @@ def transcribe_file(audio: Path, *, language: str = "hi", on_progress: ProgressF
     model = WhisperModel(model_name, device=device, compute_type=compute,
                          cpu_threads=int(os.getenv("WHISPER_THREADS", "0") or 0),
                          download_root=os.getenv("WHISPER_CACHE") or None)
-    segments, info = model.transcribe(
-        _load_wav(audio), language=None if language == "auto" else language, word_timestamps=True,
-        vad_filter=True, vad_parameters={"min_silence_duration_ms": 400},
-        beam_size=int(os.getenv("WHISPER_BEAM", "5")), condition_on_previous_text=False,
-        initial_prompt=os.getenv("WHISPER_PROMPT") or None,
-        language_detection_segments=3,
-    )
+    wav = _load_wav(audio)
+    base = dict(language=None if language == "auto" else language, word_timestamps=True,
+                vad_filter=True, vad_parameters={"min_silence_duration_ms": 400},
+                beam_size=int(os.getenv("WHISPER_BEAM", "5")), condition_on_previous_text=False,
+                initial_prompt=prompt or os.getenv("WHISPER_PROMPT") or None,
+                language_detection_segments=3)
+    extra = dict(temperature=[0.0, 0.2, 0.4, 0.6], compression_ratio_threshold=2.4, log_prob_threshold=-1.0,
+                 no_speech_threshold=0.6, hallucination_silence_threshold=2.0, patience=1.2)
+    try:
+        segments, info = model.transcribe(wav, **base, **extra)
+    except TypeError:  # older faster-whisper without some of the tuning knobs
+        segments, info = model.transcribe(wav, **base)
     total = float(info.duration or 0) or 1.0
     out_segs = []
     for s in segments:

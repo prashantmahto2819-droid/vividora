@@ -118,7 +118,8 @@ def _atempo(rate: float) -> str:
     return ",".join(parts)
 
 
-def _body(body: dict, w: int, h: int, v_in: str, a_in: str, out: str, extra_in: dict, work: Path, e: dict, dur: float) -> list[str]:
+def _body(body: dict, w: int, h: int, v_in: str, a_in: str, out: str, extra_in: dict, work: Path, e: dict, dur: float,
+          fps: float = 30.0) -> list[str]:
     behind = [t for t in (e.get("titles") or []) if t.get("text") and t.get("behind")]
     ass_path = None
     if behind:
@@ -128,7 +129,8 @@ def _body(body: dict, w: int, h: int, v_in: str, a_in: str, out: str, extra_in: 
         p.write_text(build_ass([], {}, w, h, margin_v_ratio=0.2, extra_styles=[t_style], extra_events=t_events), encoding="utf-8")
         ass_path = ffmpeg.escape_filter_path(p)
     return fx.body_chain(body, w, h, v_in, a_in, out, extra_inputs=extra_in, ass_behind=ass_path,
-                         fonts_dir=ffmpeg.escape_filter_path(FONTS_DIR) if FONTS_DIR.exists() else None)
+                         fonts_dir=ffmpeg.escape_filter_path(FONTS_DIR) if FONTS_DIR.exists() else None,
+                         fps=fps, duration=dur)
 
 
 def _cut_points(keep: list[tuple[float, float]]) -> list[float]:
@@ -147,7 +149,17 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
            clip: dict | None = None, face_track: str = "auto",
            encoder_preset: str | None = None, on_progress: ProgressFn | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
-    e = effects or {}
+    e = dict(effects or {})
+    # items can be limited to some platforms (Subscribe popup only on YouTube, Follow on IG/FB…)
+    pid = preset.get("id", "")
+    family = "youtube" if pid.startswith("yt") else "instagram" if pid.startswith("ig") else "facebook" if pid.startswith("fb") else pid
+
+    def _for_me(item: dict) -> bool:
+        pl = item.get("platforms")
+        return not pl or pid in pl or family in pl
+    for key in ("broll", "sfx", "titles"):
+        if isinstance(e.get(key), list):
+            e[key] = [x for x in e[key] if not isinstance(x, dict) or _for_me(x)]
     w, h = int(preset["width"]), int(preset["height"])
     src_fps = float(meta.get("fps") or 30.0)
     fps_max = float(preset.get("video", {}).get("fps_max", 60))
@@ -252,7 +264,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         if body:
             chains.append(f"{cur_v}setpts=PTS-STARTPTS[vseg0]")
             chains.append(f"{cur_m}setpts=PTS-STARTPTS[mseg]")
-            chains.extend(_body(body, src_w0, src_h0, "[vseg0]", "[mseg]", "[vseg]", extra_in, work, e, new_dur))
+            chains.extend(_body(body, src_w0, src_h0, "[vseg0]", "[mseg]", "[vseg]", extra_in, work, e, new_dur, src_fps))
         else:
             chains.append(f"{cur_v}setpts=PTS-STARTPTS[vseg]")
         if cur_a:
@@ -283,7 +295,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     if body and not use_segments:
         chains.append(f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB[vcut0]")
         chains.append(f"[{body_alpha_in}:v]scale={src_w0}:{src_h0},fps={fps},select='{sel}',setpts=N/({fps})/TB,format=gray[mcut]")
-        chains.extend(_body(body, src_w0, src_h0, "[vcut0]", "[mcut]", "[vseg]", extra_in, work, e, new_dur))
+        chains.extend(_body(body, src_w0, src_h0, "[vcut0]", "[mcut]", "[vseg]", extra_in, work, e, new_dur, src_fps))
         v = f"[vseg]{frame}"
     else:
         v = (f"[vseg]{frame}" if use_segments else f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}")
@@ -391,11 +403,16 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                 a_in = "[0:a]"
             chains.append(f"{a_in}aselect='{sel}',asetpts=N/SR/TB,aformat=sample_rates=48000:channel_layouts=mono[voice]")
         cur_a = "[voice]"
+        vchain = fx.voice_chain(e.get("voice"), new_dur)
+        if vchain:
+            chains.append(f"[voice]{vchain}[voicefx]")
+            cur_a = "[voicefx]"
         music = e.get("music") or {}
         if music.get("path"):
             inputs += ["-stream_loop", "-1", "-i", str(music["path"])]
             chain, cur_a = fx.music_chain(cur_a, next_in, volume=float(music.get("volume", 0.18)),
-                                          duck=bool(music.get("duck", True)), duration=new_dur)
+                                          duck=bool(music.get("duck", True)), duration=new_dur,
+                                          fade=float(music.get("fade", 1.5)), duck_amount=float(music.get("duck_amount", 0.6)))
             chains.append(chain)
             next_in += 1
         sfx_labels = []
@@ -412,7 +429,8 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             chains.append(f"{cur_a}{''.join(sfx_labels)}amix=inputs={1 + len(sfx_labels)}:duration=first:"
                           f"dropout_transition=0:normalize=0[asfx]")
             cur_a = "[asfx]"
-        chains.append(f"{cur_a}loudnorm=I={a_cfg.get('loudness', -14)}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,"
+        target = fx.voice_settings(e.get("voice")).get("loudness") if (e.get("voice") or {}).get("loudness") not in (None, "") else a_cfg.get("loudness", -14)
+        chains.append(f"{cur_a}loudnorm=I={target}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,"
                       f"aresample=48000[a]")
         maps += ["-map", "[a]"]
 

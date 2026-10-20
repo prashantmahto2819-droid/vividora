@@ -28,13 +28,27 @@ def ensure_admin() -> None:
 
 
 def ensure_starter() -> None:
-    """Fill an empty library with the bundled starter pack (music, SFX, stickers, frames, LUTs…)."""
-    from .api.library import install_starter
-    for ws in db.rows(db.conn().execute("SELECT id FROM workspaces")):
+    """Fill the library with the bundled starter pack. Runs on every start: an
+    empty library gets everything; an existing one gets only items added to the
+    pack since its last sync (so items the user deleted are not brought back)."""
+    import json as _json
+    from .api.library import install_starter, STARTER
+    try:
+        version = int(_json.loads((STARTER / "manifest.json").read_text()).get("version", 1))
+    except Exception:  # noqa: BLE001
+        version = 1
+    for ws in db.rows(db.conn().execute("SELECT id, settings FROM workspaces")):
+        raw = ws.get("settings") or {}
+        settings = dict(raw) if isinstance(raw, dict) else _json.loads(raw or "{}")
         has = db.conn().execute("SELECT COUNT(*) FROM library WHERE workspace_id = ? AND source = 'starter'", (ws["id"],)).fetchone()[0]
-        if not has:
-            try:
-                n = install_starter(ws["id"])
-                log.info("starter pack: %s items added", n)
-            except Exception as e:  # noqa: BLE001
-                log.warning("starter pack failed: %s", e)
+        seen = int(settings.get("starter_version", 1 if has else 0))
+        if has and seen >= version:
+            continue
+        try:
+            n = install_starter(ws["id"], only_new_since=seen if has else None)
+            settings["starter_version"] = version
+            with db.tx() as c:
+                db.update(c, "workspaces", ws["id"], {"settings": settings})
+            log.info("starter pack: %s items added", n)
+        except Exception as e:  # noqa: BLE001
+            log.warning("starter pack failed: %s", e)

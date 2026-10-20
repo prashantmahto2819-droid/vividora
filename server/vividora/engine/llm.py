@@ -41,7 +41,7 @@ def ask_json(prompt: str, *, system: str = "", max_tokens: int = 2048, timeout: 
         return None
     try:
         if which == "gemini":
-            model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+            model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
             url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                    f"?key={os.environ['GEMINI_API_KEY']}")
             body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],

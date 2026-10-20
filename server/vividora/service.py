@@ -24,7 +24,8 @@ DEFAULT_EFFECTS = {
     "grade_preset": "",
     "stack": [],                                      # effects stack [{id, params, enabled}] from engine/catalog.py
     "extras": [],                                     # global extras: vignette, grain, sharpen, mirror, letterbox, shake, soft_glow, fade_in
-    "music": {"id": "", "volume": 0.18, "duck": True},
+    "music": {"id": "", "volume": 0.18, "duck": True, "duck_amount": 0.6, "fade": 1.5},
+    "voice": {"preset": "studio"},                    # voice enhancement (engine/effects.py VOICE_PRESETS / VOICE_PARAMS)
     "broll": [],        # [{id, start, end, fit: cover|pip, pos: tl|tr|bl|br}]
     "titles": [],       # [{start, end, text, pos: top|center|bottom, size, color, bg}]
     "watermark": {"id": "", "opacity": 0.75, "size": 0.14, "pos": "tr"},
@@ -108,6 +109,28 @@ def start_pipeline(c, project: dict, merge: bool = False) -> dict:
     return queue.enqueue(c, project["id"], "prepare", {"merge": merge})
 
 
+def project_channel(project: dict) -> dict:
+    """The channel row a project belongs to (or the workspace's first channel)."""
+    row = None
+    if project.get("channel_id"):
+        row = db.get("channels", project["channel_id"])
+    if row is None:
+        row = db.row(db.conn().execute("SELECT * FROM channels WHERE workspace_id = ? ORDER BY created_at LIMIT 1",
+                                       (project["workspace_id"],)).fetchone())
+    return row or {}
+
+
+def transcribe_payload(project: dict) -> dict:
+    """Language + the channel's vocabulary (prompt + learned corrections) for the transcriber."""
+    from .engine import vocab
+    ch = project_channel(project)
+    st = ch.get("settings") or {}
+    lang = project.get("language", "hi")
+    return {"language": lang, "prompt": vocab.prompt(lang, st), "fixes": st.get("vocab_fixes") or {},
+            "context": " ".join(x for x in [ch.get("niche") or "", project.get("title") or ""] if x)[:200],
+            "polish": st.get("llm_polish", True)}
+
+
 def after_job(c, job: dict, result: dict) -> None:
     """Move the project to its next step once a job reports success."""
     pid = job["project_id"]
@@ -126,7 +149,7 @@ def after_job(c, job: dict, result: dict) -> None:
             add_asset(c, pid, f["kind"], f["path"], mime=f.get("mime"), meta=f.get("meta"))
         if meta.get("has_audio"):
             set_status(c, pid, "transcribing", "transcript बन रहा है (GPU worker)")
-            queue.enqueue(c, pid, "transcribe", {"language": project.get("language", "hi")})
+            queue.enqueue(c, pid, "transcribe", transcribe_payload(project))
         else:
             # no speech → nothing to cut or caption; go straight to review
             db.update(c, "projects", pid, {"transcript": {"segments": [], "text": ""},

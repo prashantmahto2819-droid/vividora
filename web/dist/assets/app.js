@@ -5,6 +5,7 @@ import * as REC from "./record.js";
 const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null, channels: [], channel: localStorage.getItem("vividora_channel") || "",
             route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null };
 const $ = (sel, el = document) => el.querySelector(sel);
+const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (t) => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = (t % 60); return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`; };
 const gb = (b) => b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(1) + " GB" : (b / 1024 ** 2).toFixed(0) + " MB";
@@ -328,7 +329,7 @@ function outputsSection(p, canEdit) {
 function bindProject(p) {
   const title = $("#title");
   if (title && title.isContentEditable) title.onblur = async () => { const t = title.textContent.trim(); if (t && t !== p.title) { await api("PATCH", `/projects/${p.id}`, { title: t }); toast("नाम बदला"); load().then(render); } };
-  const del = $("#del"); if (del) del.onclick = async () => { if (confirm(`"${p.title}" और उसकी सारी फ़ाइलें हटाएँ?`)) { await api("DELETE", `/projects/${p.id}`); go("/"); } };
+  const del = $("#del"); if (del) del.onclick = async () => { if (confirm(`"${p.title}" और उसकी सारी फ़ाइलें server से हटाएँ? (recording, cutout, renders — सब। वापस नहीं आएगा)`)) { const arc = p.meta?.archived_at ? confirm("Google Drive / archive में रखी copy भी हटाएँ?") : false; await api("DELETE", `/projects/${p.id}${arc ? "?archive=1" : ""}`); toast("project और उसकी फ़ाइलें हट गईं"); go("/"); } };
   const retry = $("#retry-cuts"); if (retry) retry.onclick = () => api("POST", `/projects/${p.id}/recut`, {}).then(() => load().then(render));
   const video = $("#preview"), track = $("#track"), play = $("#play");
   const dur = p.edl?.duration || p.meta.duration || 1;
@@ -412,6 +413,8 @@ function settingsView() {
     ${!st.public_url ? `<div class="note err">.env में <b>PUBLIC_URL</b> नहीं है (जैसे https://studio.yourdomain.com — Cloudflare Tunnel का पता)। बिना इसके Google/Meta login वापस नहीं आ सकता और Instagram/Facebook वीडियो नहीं ले पाएँगे।</div>` : ""}
     <div class="section"><div class="row between"><h2>जुड़े हुए</h2>${admin ? `<span class="row"><button class="btn" id="c-yt" ${st.youtube ? "" : "disabled"} title="${st.youtube ? "" : ".env में YT_CLIENT_ID/YT_CLIENT_SECRET चाहिए"}">+ YouTube</button><button class="btn" id="c-meta" ${st.meta ? "" : "disabled"} title="${st.meta ? "" : ".env में META_APP_ID/META_APP_SECRET चाहिए"}">+ Instagram / Facebook</button></span>` : ""}</div>
       ${c.connections.length ? `<table><tr><th>platform</th><th>नाम</th><th>channel</th><th>जुड़ा</th><th></th></tr>${c.connections.map((x) => `<tr><td>${PLAT[x.platform] || x.platform}</td><td>${esc(x.name)}${x.meta?.subscribers ? ` <span class="muted small">· ${x.meta.subscribers} subs</span>` : ""}${x.meta?.page ? ` <span class="muted small">· page: ${esc(x.meta.page)}</span>` : ""}</td><td>${admin ? `<select class="c-move small" data-id="${x.id}">${S.channels.map((ch) => `<option value="${ch.id}" ${x.channel_id === ch.id ? "selected" : ""}>${esc(ch.name)}</option>`).join("")}</select>` : esc(S.channels.find((ch) => ch.id === x.channel_id)?.name || "")}</td><td class="small muted">${new Date(x.created_at).toLocaleDateString("hi-IN")}</td><td>${admin ? `<button class="btn quiet small danger c-del" data-id="${x.id}">हटाएँ</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">अभी कोई channel नहीं जुड़ा।</p>`}</div>
+    ${S.user.role === "admin" ? `<div class="section" id="storage"><div class="row between"><h2>Storage / जगह</h2><button class="btn small" id="st-load">जाँचें</button></div>
+      <p class="muted small">server की disk कितनी भरी है, किस project ने कितनी जगह ली — और सुरक्षित तरीके से साफ़ करें। project हटाने पर उसकी सारी फ़ाइलें अपने-आप हट जाती हैं।</p><div id="st-body"></div></div>` : ""}
     <div class="section"><h2>Brand kit</h2><p class="muted small">हर नए project और autopilot में यही default लगेगा।</p>
       <form id="brand" class="row" style="align-items:flex-end">
         <div class="field"><label>channel का नाम</label><input name="name" value="${esc(S.brand?.name || "")}" placeholder="@theprashantmahto"></div>
@@ -424,12 +427,15 @@ function settingsView() {
         <div class="field"><label>logo कोना</label><select name="watermark_pos">${[["tr", "ऊपर दाएँ"], ["tl", "ऊपर बाएँ"], ["br", "नीचे दाएँ"], ["bl", "नीचे बाएँ"]].map(([v, l]) => `<option value="${v}" ${(S.brand?.watermark_pos || "tr") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
         <div class="field" style="flex:1;min-width:220px"><label>CTA line (description में)</label><input name="cta" value="${esc(S.brand?.cta || "")}" placeholder="ऐसी कहानियों के लिए follow करें"></div>
         <div class="field" style="flex:1;min-width:220px"><label>hashtags</label><input name="hashtags" value="${esc(S.brand?.hashtags || "")}" placeholder="#motivation #hindi"></div>
+        <div class="field" style="flex:1;min-width:220px"><label>शब्दावली (नाम/खास शब्द — transcript इन्हें सही लिखेगा)</label><input name="vocab_words" value="${esc(S.brand?.vocab_words || "")}" placeholder="Prashant Mahto, UPSC, सफलता, मोटिवेशन"></div>
+        <div class="field"><label>आवाज़ enhance</label><select name="voice_preset">${[["studio", "Studio"], ["soft", "Soft / warm"], ["podcast", "Podcast"], ["bright", "Clear / bright"], ["phone", "Phone mic fix"], ["clean", "हल्का"], ["off", "बंद"]].map(([k, l]) => `<option value="${k}" ${(S.brand?.voice_preset || "studio") === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
         ${S.user.role === "admin" ? `<button class="btn primary">सेव</button>` : ""}</form></div>
     <div class="section"><h2>एक बार का setup</h2>
       <details><summary><b>YouTube</b> (free, 10 मिनट)</summary><ol class="small muted"><li>console.cloud.google.com → नया project → "YouTube Data API v3" enable करें</li><li>OAuth consent screen → External → अपना Gmail test user में जोड़ें</li><li>Credentials → OAuth client ID → Web application → Authorized redirect URI: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/youtube/callback</code></li><li>client id/secret को .env में <code>YT_CLIENT_ID</code> / <code>YT_CLIENT_SECRET</code> में डालें, <code>docker compose up -d</code>, फिर यहाँ "+ YouTube"</li></ol><p class="small muted">quota: ~6 upload/दिन (10,000 units, upload 1,600)।</p></details>
       <details><summary><b>Instagram / Facebook</b> (free, Business account चाहिए)</summary><ol class="small muted"><li>Instagram को Professional (Creator/Business) बनाएँ और एक Facebook Page से link करें</li><li>developers.facebook.com → Create App (Business) → products: Facebook Login for Business + Instagram Graph API</li><li>Facebook Login → Settings → Valid OAuth Redirect URIs: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/meta/callback</code></li><li>App ID/Secret को .env में <code>META_APP_ID</code> / <code>META_APP_SECRET</code>; फिर "+ Instagram / Facebook"</li><li>Cloudflare Access में <code>/pub/*</code> path को bypass करें (Meta वहीं से वीडियो उठाता है)</li></ol><p class="small muted">limit: Instagram 100 post/24h, Facebook Reels ~30/24h।</p></details></div>`;
 }
 function bindSettings() {
+  const stl = $("#st-load"); if (stl) stl.onclick = () => loadStorage();
   const bf = $("#brand"); if (bf) bf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const body = {}; for (const el of f.elements) if (el.name) body[el.name] = el.type === "color" ? (el.value === "#ffffff" && el.name === "primary" ? "" : el.value) : el.value; try { await api("PUT", `/brand?channel=${S.channel}`, body); toast("brand kit सेव"); } catch (err) { toast(err.message); } };
   const start = async (pl) => { try { const r = await api("POST", `/connect/${pl}/start?channel=${S.channel}`); location.href = r.url; } catch (e) { toast(e.message); } };
   document.querySelectorAll(".c-move").forEach((sel) => (sel.onchange = async () => { await api("PATCH", `/connections/${sel.dataset.id}`, { channel_id: sel.value }); toast("channel बदला"); load().then(render); }));
@@ -584,3 +590,27 @@ function bindAnalytics() {
   if (S.token) { try { const me = await api("GET", "/auth/me"); S.user = me.user; S.ws = me.workspace; await load(); } catch { S.token = null; } }
   render();
 })();
+
+function fmtBytes(n) { n = +n || 0; const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return `${n.toFixed(n >= 100 || i === 0 ? 0 : 1)} ${u[i]}`; }
+async function loadStorage() {
+  const box = $("#st-body"); if (!box) return; box.innerHTML = `<p class="muted small">गिनती हो रही है…</p>`;
+  let d; try { d = await api("GET", "/storage"); } catch (e) { box.innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+  const m = d.disk.media; const pct = Math.round(m.used / m.total * 100); const g = d.groups || {};
+  const rows = (d.projects || []).slice(0, 25).map((p) => `<tr><td>${esc(p.title)}${p.published ? ` <span class="pill small">published</span>` : ""}</td><td class="muted small">${esc(p.status)}</td><td>${fmtBytes(p.total)}</td><td class="muted small">rec ${fmtBytes(p.source || 0)} · cache ${fmtBytes(p.cache || 0)} · video ${fmtBytes(p.render || 0)}</td><td><button class="btn small danger quiet" data-stdel="${p.id}" data-t="${esc(p.title)}">हटाएँ</button></td></tr>`).join("");
+  box.innerHTML = `<div class="stbar"><i style="width:${pct}%;background:${pct > 85 ? "#e5484d" : pct > 70 ? "#f2b33d" : "#46a758"}"></i></div>
+    <p class="small"><b>${fmtBytes(m.used)}</b> भरा / ${fmtBytes(m.total)} · <b>${fmtBytes(m.free)} खाली</b> (${pct}%)${d.disk.archive ? ` · archive drive: ${fmtBytes(d.disk.archive.free)} खाली` : ""}</p>
+    <div class="ststats"><span>recordings ${fmtBytes(g.source || 0)}</span><span>cache ${fmtBytes(g.cache || 0)}</span><span>final videos ${fmtBytes(g.render || 0)}</span><span>library ${fmtBytes(d.library)}</span><span>बेकार फ़ाइलें ${fmtBytes(d.orphans.bytes)}</span><span>अधूरे upload ${fmtBytes(d.uploads.bytes)}</span></div>
+    <h3 class="small">साफ़ करें</h3>
+    <label class="chk small"><input type="checkbox" data-stw="orphans" checked> बेकार फ़ाइलें (किसी project/library में नहीं — हमेशा सुरक्षित) · ${fmtBytes(d.orphans.bytes)}</label>
+    <label class="chk small"><input type="checkbox" data-stw="uploads" checked> अधूरे uploads (1 दिन से पुराने) · ${fmtBytes(d.uploads.bytes)}</label>
+    <label class="chk small"><input type="checkbox" data-stw="cache"> पूरे हो चुके projects का cache (preview copy, speech audio, cutout) — editor में दोबारा बन सकता है</label>
+    <label class="chk small"><input type="checkbox" data-stw="sources"> पूरे हो चुके projects की original recording (final videos रहेंगे) — सबसे ज़्यादा जगह</label>
+    <label class="chk small"><input type="checkbox" data-stw="renders"> publish हो चुके projects की final videos (YouTube/IG पर हैं)</label>
+    <div class="row"><label class="small">कितने दिन पुराने पूरे projects: <input type="number" id="st-days" value="7" min="0" max="365" style="width:5rem"></label><button class="btn primary small" id="st-clean">साफ़ करें</button></div>
+    <h3 class="small">सबसे बड़े projects</h3><div class="tablewrap"><table><tr><th>project</th><th>status</th><th>कुल</th><th></th><th></th></tr>${rows || `<tr><td colspan="5" class="muted small">कोई project नहीं</td></tr>`}</table></div>
+    <p class="muted small">Docker की पुरानी images भी जगह लेती हैं — VM पर कभी-कभी चलाएँ: <code>docker image prune -f</code></p>`;
+  $("#st-clean").onclick = async () => { const what = $$("[data-stw]").filter((x) => x.checked).map((x) => x.dataset.stw); if (!what.length) return toast("कुछ चुनें");
+    if ((what.includes("sources") || what.includes("renders")) && !confirm("चुनी हुई फ़ाइलें हमेशा के लिए हटेंगी। आगे बढ़ें?")) return;
+    const r = await api("POST", "/storage/clean", { what, days: +$("#st-days").value }); toast(`${fmtBytes(r.freed)} जगह खाली हुई`); loadStorage(); };
+  $$("[data-stdel]").forEach((b) => (b.onclick = async () => { if (!confirm(`"${b.dataset.t}" और उसकी सारी फ़ाइलें हटाएँ?`)) return; await api("DELETE", `/projects/${b.dataset.stdel}`); toast("हट गया"); await load(); loadStorage(); }));
+}

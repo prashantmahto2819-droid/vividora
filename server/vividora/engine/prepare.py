@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,7 +22,8 @@ def _deepfilter(src_wav: Path, out_wav: Path) -> bool:
         return False
     tmp = out_wav.parent / "df"
     tmp.mkdir(exist_ok=True)
-    r = subprocess.run([exe, "-o", str(tmp), str(src_wav)], capture_output=True, text=True)
+    r = subprocess.run([exe, "-D", "-a", os.getenv("DENOISE_ATTEN_DB", "35"), "-o", str(tmp), str(src_wav)],
+                       capture_output=True, text=True)
     produced = next(tmp.glob("*.wav"), None)
     if r.returncode != 0 or produced is None:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -137,6 +139,13 @@ def prepare(raw: Path, work: Path, *, denoise: bool = True, on_progress: Progres
                       "meta": {"method": method}})
         info["denoise"] = method
 
+    if report:
+        report(0.86, "रोशनी, रंग और आवाज़ जाँच रहे हैं")
+    try:
+        from .analyze import measure
+        info["analysis"] = measure(proxy, dur, work / "audio_asr.wav" if info.get("has_audio") else None)
+    except Exception as e:  # noqa: BLE001 — analysis is advice, never a reason to fail
+        info["analysis_error"] = str(e)[:200]
     if report:
         report(0.9, "चेहरा ढूँढा जा रहा है")
     try:

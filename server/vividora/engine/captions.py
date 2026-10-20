@@ -173,8 +173,13 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
     upper = bool(style.get("uppercase"))
     word_box = box == "word"
 
-    hook_size = round(0.085 * base * scale)
-    hook_font = style.get("hook_font", font)
+    hk = hook or {}
+    hook_size = round(0.085 * base * scale * float(hk.get("size_scale") or 1.0))
+    hook_font = hk.get("font") or style.get("hook_font", font)
+    hook_fg = ass_color(hk.get("color") or "#111111")
+    hook_bg = ass_color(hk["bg"]) if hk.get("bg") else hl
+    hook_align = {"top": 8, "center": 5, "bottom": 2}.get(hk.get("position") or "top", 8)
+    hook_mv = round(0.13 * height if height > width else 0.06 * height) if hook_align != 2 else round(0.22 * height)
     lines = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
         "WrapStyle: 2", "ScaledBorderAndShadow: yes", "YCbCr Matrix: TV.709", "",
@@ -184,9 +189,8 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
         "Alignment, MarginL, MarginR, MarginV, Encoding",
         f"Style: Cap,{font},{size},{primary},{hl},{outline_c},{back},{bold},{italic},0,0,100,100,{spacing},0,"
         f"{border_style},{outline},{shadow},{align},{margin_lr},{margin_lr},{margin_v},1",
-        f"Style: Hook,{hook_font},{hook_size},{ass_color('#111111')},{hl},{hl},{hl},-1,0,0,0,100,100,0,0,"
-        f"3,{round(0.02 * base, 1)},0,8,{margin_lr},{margin_lr},"
-        f"{round(0.13 * height if height > width else 0.06 * height)},1",
+        f"Style: Hook,{hook_font},{hook_size},{hook_fg},{hook_bg},{hook_bg},{hook_bg},-1,{-1 if hk.get('italic') else 0},0,0,100,100,0,0,"
+        f"3,{round(0.02 * base, 1)},0,{hook_align},{margin_lr},{margin_lr},{hook_mv},1",
         *(extra_styles or []),
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

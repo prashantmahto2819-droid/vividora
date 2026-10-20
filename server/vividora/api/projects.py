@@ -9,7 +9,7 @@ from starlette.routing import Route
 from .. import db, service, storage
 from ..engine import autocut
 from ..engine import catalog
-from ..engine.effects import BODY_ANIMS, BODY_BG, EXTRAS, LOOKS, STICKER_ANIMS, TEXT_ANIMS, TRANSITIONS, ZOOM_MODES
+from ..engine.effects import BODY_ANIMS, BODY_BG, EXTRAS, LOOKS, STICKER_ANIMS, TEXT_ANIMS, TRANSITIONS, VOICE_PARAMS, VOICE_PRESETS, ZOOM_MODES
 from ..engine.presets import caption_styles, platforms
 from ..security import media_token, read_token
 from .channels import channel_settings, get_channel
@@ -118,6 +118,16 @@ async def update_project(request: Request, user: dict):
         changes["edl"] = edl
     if "transcript" in data and isinstance(data["transcript"], dict):
         changes["transcript"] = data["transcript"]
+        # remember the creator's word corrections for this channel → future transcripts get them automatically
+        from ..engine import vocab
+        learned = vocab.learn(p.get("transcript"), data["transcript"])
+        if learned:
+            ch = service.project_channel(p)
+            if ch.get("id"):
+                st = ch.get("settings") or {}
+                st["vocab_fixes"] = vocab.merge_fixes(st.get("vocab_fixes"), learned)
+                with db.tx() as c2:
+                    db.update(c2, "channels", ch["id"], {"settings": st, "updated_at": db.now()})
     if isinstance(data.get("meta"), dict) and isinstance(data["meta"].get("shorts"), list):
         changes["meta"] = {**p["meta"], "shorts": data["meta"]["shorts"][:40]}
     if changes:
@@ -138,15 +148,112 @@ async def update_project(request: Request, user: dict):
     return ok(_with_urls(service.project_view(db.get("projects", p["id"]))))
 
 
+def _analysis(p: dict) -> dict:
+    """Cached picture/sound measurements; measured on demand for older projects."""
+    a = (p.get("meta") or {}).get("analysis")
+    if a:
+        return a
+    from ..engine import analyze
+    proxy = service.asset_of(p["id"], "proxy") or service.asset_of(p["id"], "raw")
+    asr = service.asset_of(p["id"], "audio_asr")
+    if not proxy:
+        return {}
+    a = analyze.measure(storage.abs_path(proxy["path"]), float(p["meta"].get("duration") or 0),
+                        storage.abs_path(asr["path"]) if asr else None)
+    with db.tx() as c:
+        cur = db.get("projects", p["id"])
+        db.update(c, "projects", p["id"], {"meta": {**(cur.get("meta") or {}), "analysis": a}})
+    return a
+
+
+@require("viewer")
+async def suggestions(request: Request, user: dict):
+    """“क्या कमी है” — measured problems + one-click fixes for the editor."""
+    from starlette.concurrency import run_in_threadpool
+    from ..engine import analyze
+    p = own_project(request, user)
+    a = await run_in_threadpool(_analysis, p)
+    rs = {**service.DEFAULT_RENDER, **p.get("settings", {}).get("render", {})}
+    lib = db.rows(db.conn().execute("SELECT id, kind, name, tags FROM library WHERE workspace_id = ? AND kind = 'music' ORDER BY created_at",
+                                    (user["workspace_id"],)))
+    return ok({"analysis": a, "pace": analyze.pace(p), "items": analyze.suggest(p, rs, a, library=lib),
+               "auto_grade": analyze.auto_grade(a)})
+
+
+@require("viewer")
+async def audio_preview(request: Request, user: dict):
+    """~12 s of the finished sound (voice enhancement + music) from time t, as MP3 — to hear settings before rendering."""
+    import subprocess
+    import tempfile
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import Response
+    from ..engine import effects as fxm
+    p = own_project(request, user)
+    data = await body(request)
+    t = max(0.0, float(data.get("t") or 0))
+    dur = min(20.0, max(3.0, float(data.get("seconds") or 12)))
+    opts = {**service.DEFAULT_RENDER, **p.get("settings", {}).get("render", {}), **(data.get("render") or {})}
+    eff = service.resolve_effects_local(p, opts.get("effects") or {})
+    voice = eff.get("voice") or {}
+    src = None if voice.get("denoise") in ("light", "off") else service.asset_of(p["id"], "audio_clean")
+    src = src or service.asset_of(p["id"], "raw")
+    if not src:
+        raise ApiError(400, "आवाज़ नहीं मिली")
+
+    def work() -> bytes:
+        with tempfile.TemporaryDirectory(prefix="vap_") as td:
+            out = Path(td) / "p.mp3"
+            args = ["ffmpeg", "-v", "error", "-y", "-ss", f"{t:.2f}", "-t", f"{dur:.2f}", "-i", str(storage.abs_path(src["path"]))]
+            vchain = fxm.voice_chain(voice, dur)
+            fc = f"[0:a]aformat=sample_rates=48000:channel_layouts=mono{',' + vchain if vchain else ''}[voice]"
+            cur = "[voice]"
+            music = eff.get("music") or {}
+            if music.get("path"):
+                args += ["-stream_loop", "-1", "-i", music["path"]]
+                chain, cur = fxm.music_chain(cur, 1, volume=float(music.get("volume", 0.18)), duck=bool(music.get("duck", True)),
+                                             duration=dur, fade=min(1.0, float(music.get("fade", 1.5))),
+                                             duck_amount=float(music.get("duck_amount", 0.6)))
+                fc += ";" + chain
+            target = fxm.voice_settings(voice).get("loudness", -14)
+            fc += f";{cur}loudnorm=I={target}:TP=-1.5:LRA=11,aresample=48000[a]"
+            subprocess.run([*args, "-filter_complex", fc, "-map", "[a]", "-t", f"{dur:.2f}", "-c:a", "libmp3lame", "-b:a", "128k", str(out)],
+                           check=True, capture_output=True)
+            return out.read_bytes()
+    try:
+        mp3 = await run_in_threadpool(work)
+    except subprocess.CalledProcessError as e:
+        raise ApiError(500, "audio preview नहीं बना: " + (e.stderr or b"").decode(errors="ignore")[-300:]) from None
+    return Response(mp3, media_type="audio/mpeg")
+
+
+@require("editor")
+async def retranscribe(request: Request, user: dict):
+    """Run speech-to-text again (new model / new vocabulary). Cuts are rebuilt afterwards."""
+    p = own_project(request, user)
+    if not any(a["kind"] == "audio_asr" for a in service.project_view(p).get("assets", [])):
+        raise ApiError(400, "इस project में आवाज़ नहीं है")
+    from .. import queue
+    with db.tx() as c:
+        service.set_status(c, p["id"], "transcribing", "transcript दोबारा बन रहा है")
+        queue.enqueue(c, p["id"], "transcribe", service.transcribe_payload(p))
+        service.log(c, user["workspace_id"], "project.retranscribe", user_id=user["id"], project_id=p["id"])
+    return ok()
+
+
 @require("editor")
 async def delete_project(request: Request, user: dict):
     p = own_project(request, user)
     if p["status"] == "approved" and user["role"] != "admin":
         raise ApiError(403, "approved project सिर्फ़ admin हटा सकता है")
+    also_archive = request.query_params.get("archive") in ("1", "true", "yes")
     with db.tx() as c:
         service.delete_project(c, p)
         service.log(c, user["workspace_id"], "project.delete", user_id=user["id"], project_id=p["id"],
-                    detail={"title": p["title"]})
+                    detail={"title": p["title"], "archive_copy_deleted": also_archive})
+    if also_archive:
+        from starlette.concurrency import run_in_threadpool
+        from .. import cleanup
+        await run_in_threadpool(cleanup.delete_archive_copy, p["workspace_id"], p["id"])
     return ok()
 
 
@@ -252,6 +359,9 @@ async def preview_frame(request: Request, user: dict):
     style = caption_style(opts.get("caption_style", "karaoke"))
     fps = float(p["meta"].get("fps") or 30)
 
+    # start a little earlier so text fade-ins have finished on the frame we grab
+    t0 = max(0.0, t - 0.4)
+
     def work() -> bytes:
         with tempfile.TemporaryDirectory(prefix="vfr_") as td:
             out = render_engine.render(video=storage.abs_path(raw["path"]), audio=None, meta={**p["meta"], "has_audio": False},
@@ -259,11 +369,11 @@ async def preview_frame(request: Request, user: dict):
                                        preset=preset, style=style, out_dir=Path(td), name="frame", hook=opts.get("hook"),
                                        focus_x=float(opts.get("focus_x", 0.5)), focus_y=float(opts.get("focus_y", 0.5)),
                                        burn_captions=opts.get("burn_captions"), caption_overrides=opts.get("captions"),
-                                       effects=eff, clip={"start": t, "end": t + 2.5 / fps}, face_track="off",
+                                       effects=eff, clip={"start": t0, "end": t + 2.5 / fps}, face_track="off",
                                        encoder_preset="ultrafast", on_progress=None)
             jpg = Path(td) / "frame.jpg"
             import subprocess
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(out["files"][0]["path"]), "-frames:v", "1", "-q:v", "4", str(jpg)], check=True)
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{max(0.0, t - t0 - 0.5 / fps):.3f}", "-i", str(out["files"][0]["path"]), "-frames:v", "1", "-q:v", "4", str(jpg)], check=True)
             return jpg.read_bytes()
 
     try:
@@ -398,6 +508,7 @@ async def presets(request: Request, user: dict):
                "sticker_anims": [{"id": k, "label": v} for k, v in STICKER_ANIMS.items()],
                "body_bg": [{"id": k, "label": v} for k, v in BODY_BG.items()],
                "body_anims": [{"id": k, "label": v} for k, v in BODY_ANIMS.items()],
+               "voice_params": VOICE_PARAMS, "voice_presets": VOICE_PRESETS,
                "catalog": catalog.catalog_json(),
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
@@ -409,6 +520,9 @@ routes = [
     Route("/projects/{project_id}", update_project, methods=["PATCH"]),
     Route("/projects/{project_id}", delete_project, methods=["DELETE"]),
     Route("/projects/{project_id}/recut", recut, methods=["POST"]),
+    Route("/projects/{project_id}/retranscribe", retranscribe, methods=["POST"]),
+    Route("/projects/{project_id}/suggest", suggestions),
+    Route("/projects/{project_id}/audio-preview", audio_preview, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),

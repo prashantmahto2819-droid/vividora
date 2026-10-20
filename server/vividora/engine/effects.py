@@ -184,18 +184,108 @@ def flash_filter(cut_times: list[float], color: str = "white", alpha: float = 0.
 
 
 def music_chain(voice_label: str, music_index: int, *, volume: float = 0.18, duck: bool = True,
-                duration: float, fade: float = 1.5) -> tuple[str, str]:
-    """Mix background music under the voice. Returns (filter_text, output_label)."""
+                duration: float, fade: float = 1.5, duck_amount: float = 0.6) -> tuple[str, str]:
+    """Mix background music under the voice. Returns (filter_text, output_label).
+    duck_amount 0..1 — how much the music drops while someone speaks."""
+    fade = max(0.0, min(float(fade), duration / 3))
     m = (f"[{music_index}:a]aformat=sample_rates=48000:channel_layouts=mono,"
-         f"atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,volume={volume:.3f},"
-         f"afade=t=in:d={fade},afade=t=out:st={max(0.0, duration - fade):.3f}:d={fade}[mus]")
+         f"atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,volume={volume:.3f}"
+         + (f",afade=t=in:d={fade:.2f},afade=t=out:st={max(0.0, duration - fade):.3f}:d={fade:.2f}" if fade > 0 else "")
+         + "[mus]")
     if duck:
+        da = max(0.05, min(1.0, float(duck_amount)))
+        ratio = round(2 + 18 * da, 1)
         chain = (f"{m};{voice_label}asplit[vmain][vside];"
-                 f"[mus][vside]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=450:makeup=1[mduck];"
+                 f"[mus][vside]sidechaincompress=threshold=0.02:ratio={ratio}:attack=15:release=450:makeup=1[mduck];"
                  f"[vmain][mduck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amixed]")
     else:
         chain = f"{m};{voice_label}[mus]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[amixed]"
     return chain, "[amixed]"
+
+
+# ---- voice enhancement ---------------------------------------------------
+# Every preset is just a starting point for the sliders in the editor's Audio
+# panel; any value the creator sets overrides the preset's.
+VOICE_PARAMS = {
+    "volume":   {"label": "आवाज़ volume", "min": 0, "max": 2.5, "step": 0.05, "default": 1.0},
+    "denoise":  {"label": "noise हटाना", "choices": ["strong", "light", "off"], "default": "strong"},
+    "highpass": {"label": "rumble cut (Hz)", "min": 0, "max": 200, "step": 5, "default": 80},
+    "bass":     {"label": "bass / गर्माहट (dB)", "min": -12, "max": 12, "step": 0.5, "default": 0},
+    "mud":      {"label": "भारीपन कम (300Hz dB)", "min": -12, "max": 6, "step": 0.5, "default": 0},
+    "presence": {"label": "साफ़पन / presence (dB)", "min": -12, "max": 12, "step": 0.5, "default": 0},
+    "treble":   {"label": "treble / चमक (dB)", "min": -12, "max": 12, "step": 0.5, "default": 0},
+    "deess":    {"label": "स-स कम (de-ess)", "min": 0, "max": 1, "step": 0.05, "default": 0},
+    "compress": {"label": "आवाज़ बराबर (compress)", "min": 0, "max": 1, "step": 0.05, "default": 0},
+    "gate":     {"label": "बीच की साँस/शोर दबाएँ", "min": 0, "max": 1, "step": 0.05, "default": 0},
+    "fade_in":  {"label": "fade in (s)", "min": 0, "max": 5, "step": 0.1, "default": 0},
+    "fade_out": {"label": "fade out (s)", "min": 0, "max": 5, "step": 0.1, "default": 0},
+    "loudness": {"label": "कुल loudness (LUFS)", "min": -24, "max": -9, "step": 0.5, "default": -14},
+}
+VOICE_PRESETS = {
+    "off":     {"label": "कुछ नहीं (original)", "denoise": "off", "highpass": 0},
+    "clean":   {"label": "साफ़ (हल्का)", "highpass": 80, "compress": 0.3},
+    "studio":  {"label": "Studio (recommended)", "highpass": 80, "bass": 1, "mud": -2, "presence": 3, "treble": 2, "deess": 0.4, "compress": 0.5, "gate": 0.2},
+    "soft":    {"label": "Soft / warm (मुलायम)", "highpass": 70, "bass": 3, "mud": -1, "presence": 0.5, "treble": -2, "deess": 0.6, "compress": 0.4, "gate": 0.15},
+    "podcast": {"label": "Podcast / radio (भरी हुई)", "highpass": 90, "bass": 2.5, "mud": -3, "presence": 4, "treble": 1, "deess": 0.5, "compress": 0.75, "gate": 0.3},
+    "bright":  {"label": "Clear / bright (तेज़ साफ़)", "highpass": 100, "mud": -3, "presence": 5, "treble": 3, "deess": 0.5, "compress": 0.5, "gate": 0.2},
+    "phone":   {"label": "Phone mic fix", "highpass": 120, "bass": 2, "mud": -4, "presence": 3, "treble": 1.5, "deess": 0.6, "compress": 0.6, "gate": 0.35},
+}
+
+
+def voice_settings(cfg: dict | None) -> dict:
+    """Merge preset defaults with the creator's overrides → final numbers."""
+    cfg = dict(cfg or {})
+    preset = cfg.get("preset") or "studio"
+    out = {k: v["default"] for k, v in VOICE_PARAMS.items()}
+    out.update({k: v for k, v in VOICE_PRESETS.get(preset, {}).items() if k != "label"})
+    for k, spec in VOICE_PARAMS.items():
+        v = cfg.get(k)
+        if v is None or v == "":
+            continue
+        if "choices" in spec:
+            if v in spec["choices"]:
+                out[k] = v
+        else:
+            try:
+                out[k] = max(spec["min"], min(spec["max"], float(v)))
+            except (TypeError, ValueError):
+                pass
+    out["preset"] = preset
+    return out
+
+
+def voice_chain(cfg: dict | None, duration: float) -> str:
+    """ffmpeg filters (comma-joined, no labels) that polish a spoken voice track."""
+    v = voice_settings(cfg)
+    f: list[str] = []
+    if v["highpass"] > 0:
+        f.append(f"highpass=f={v['highpass']:.0f}:p=2")
+    if v["denoise"] == "light":
+        f.append("afftdn=nf=-24:tn=1")
+    if v["gate"] > 0:
+        # gentle expander: quiet breaths/room noise between words go down, never to silence
+        f.append(f"agate=threshold={0.004 + 0.02 * v['gate']:.4f}:ratio={1.5 + 3 * v['gate']:.2f}:range={10 ** (-(4 + 14 * v['gate']) / 20):.3f}:attack=5:release=180")
+    if v["bass"]:
+        f.append(f"bass=g={v['bass']:.1f}:f=120:w=0.7")
+    if v["mud"]:
+        f.append(f"equalizer=f=300:t=q:w=1.1:g={v['mud']:.1f}")
+    if v["presence"]:
+        f.append(f"equalizer=f=3500:t=q:w=1.2:g={v['presence']:.1f}")
+    if v["treble"]:
+        f.append(f"treble=g={v['treble']:.1f}:f=9000:w=0.6")
+    if v["deess"] > 0:
+        f.append(f"deesser=i={0.15 + 0.6 * v['deess']:.2f}:m=0.5:f=0.5:s=o")
+    if v["compress"] > 0:
+        c = v["compress"]
+        f.append(f"acompressor=threshold={-14 - 12 * c:.1f}dB:ratio={1.5 + 4.5 * c:.2f}:attack=6:release=140:makeup={1 + 3 * c:.2f}:knee=4")
+    if abs(v["volume"] - 1.0) > 1e-3:
+        f.append(f"volume={v['volume']:.3f}")
+    if v["fade_in"] > 0:
+        f.append(f"afade=t=in:d={min(v['fade_in'], duration / 2):.2f}")
+    if v["fade_out"] > 0:
+        d = min(v["fade_out"], duration / 2)
+        f.append(f"afade=t=out:st={max(0.0, duration - d):.3f}:d={d:.2f}")
+    return ",".join(f)
 
 
 def overlay_input_args(item: dict, path: Path) -> list[str]:
@@ -381,11 +471,31 @@ BODY_ANIMS = {"none": "कोई नहीं", "drop": "आसमान से 
 
 
 def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str, *, extra_inputs: dict,
-               ass_behind: str | None = None, fonts_dir: str | None = None) -> list[str]:
+               ass_behind: str | None = None, fonts_dir: str | None = None, fps: float = 30.0,
+               duration: float = 60.0) -> list[str]:
     """Compose: background → glow → stroke → text-behind → subject (animated) → clones.
     v_in: cut video label; a_in: cut alpha (gray, same size). extra_inputs: {'bg_image': idx, 'bg_video': idx}."""
     ch: list[str] = []
     bg_mode = body.get("bg", "blur")
+    fr = f"{fps:.3f}".rstrip("0").rstrip(".")
+    # --- person transform (size / position / mirror) — applied to picture and mask together
+    s_ = max(0.3, min(2.0, float(body.get("subj_scale", 1.0) or 1.0)))
+    dx, dy = float(body.get("subj_x", 0) or 0), float(body.get("subj_y", 0) or 0)
+    flip = bool(body.get("flip"))
+    moved = abs(s_ - 1) > 1e-3 or abs(dx) > 1e-3 or abs(dy) > 1e-3 or flip
+
+    def _xf(src: str, dst: str, gray: bool) -> str:
+        sw, sh = max(2, int(w * s_ / 2) * 2), max(2, int(h * s_ / 2) * 2)
+        f = f"{src}" + ("format=gray," if gray else "") + ("hflip," if flip else "") + f"scale={sw}:{sh}"
+        if s_ <= 1:
+            ox = int(max(0, min(w - sw, (w - sw) / 2 + dx * w)))
+            oy = int(max(0, min(h - sh, (h - sh) / 2 + dy * h)))
+            f += f",pad={w}:{h}:{ox}:{oy}:black"
+        else:
+            cx = int(max(0, min(sw - w, (sw - w) / 2 - dx * w)))
+            cy = int(max(0, min(sh - h, (sh - h) / 2 - dy * h)))
+            f += f",crop={w}:{h}:{cx}:{cy}"
+        return f + dst
     # --- background
     if bg_mode == "blur":
         ch.append(f"{v_in}split[bsrc][bsub];[bsrc]gblur=sigma={float(body.get('bg_blur', 18)):.1f},eq=brightness=-0.04[bg0]")
@@ -394,34 +504,94 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
         ch.append(f"{v_in}split[bsrc][bsub];[bsrc]eq=brightness=-0.35:saturation=0.6[bg0]")
         v_sub = "[bsub]"
     elif bg_mode == "flat":
-        ch.append(f"color=c={_c(body.get('bg_color', '#111111'))}:s={w}x{h}:r=30,format=yuv420p[bg0]")
+        ch.append(f"color=c={_c(body.get('bg_color', '#111111'))}:s={w}x{h}:r={fr},format=yuv420p[bg0]")
         ch.append(f"{v_in}copy[bsub]")
         v_sub = "[bsub]"
     elif bg_mode == "gradient":
         c1, c2 = _c(body.get("bg_color", "#1b1f3a")), _c(body.get("bg_color2", "#f2b33d"))
-        ch.append(f"gradients=s={w}x{h}:c0={c1}:c1={c2}:x0=0:y0=0:x1={w}:y1={h}:speed=0.02:r=30,format=yuv420p[bg0]")
+        ch.append(f"gradients=s={w}x{h}:c0={c1}:c1={c2}:x0=0:y0=0:x1={w}:y1={h}:speed=0.02:r={fr},format=yuv420p[bg0]")
         ch.append(f"{v_in}copy[bsub]")
         v_sub = "[bsub]"
     elif bg_mode in ("image", "video") and extra_inputs.get("bg_" + bg_mode) is not None:
         idx = extra_inputs["bg_" + bg_mode]
-        ch.append(f"[{idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,format=yuv420p[bg0]")
+        sp = max(0.25, min(4.0, float(body.get("bg_speed", 1.0) or 1.0)))
+        pre = f"[{idx}:v]" + (f"setpts=PTS/{sp:.3f}," if bg_mode == "video" and abs(sp - 1) > 1e-3 else "") + f"fps={fr},"
+        if body.get("bg_fit") == "contain":
+            ch.append(f"{pre}split[bgA][bgB];[bgA]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},gblur=sigma=30[bgAb];"
+                      f"[bgB]scale={w}:{h}:force_original_aspect_ratio=decrease[bgBf];[bgAb][bgBf]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[bg0]")
+        else:
+            ch.append(f"{pre}scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,format=yuv420p[bg0]")
         ch.append(f"{v_in}copy[bsub]")
         v_sub = "[bsub]"
     else:
         ch.append(f"{v_in}split[bg0][bsub]")
         v_sub = "[bsub]"
+    # --- background adjustments: slow zoom, extra blur, darken, colour tint
+    adj = []
+    z = max(0.0, min(0.5, float(body.get("bg_zoom", 0) or 0)))
+    if z > 0:
+        n = max(1, int(duration * fps))
+        adj.append(f"scale={w * 2}:{h * 2},zoompan=z='1+{z:.3f}*min(on/{n}\\,1)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fr}")
+    bb = float(body.get("bg_blur2", 0) or 0)
+    if bb > 0 and bg_mode not in ("blur",):
+        adj.append(f"gblur=sigma={bb:.1f}")
+    dim = max(0.0, min(0.9, float(body.get("bg_dim", 0) or 0)))
+    if dim > 0:
+        adj.append(f"eq=brightness={-0.5 * dim:.3f}:saturation={1 - 0.4 * dim:.3f}")
+    if adj:
+        ch.append(f"[bg0]{','.join(adj)},format=yuv420p[bg0a]")
+        bg_label = "[bg0a]"
+    else:
+        bg_label = "[bg0]"
+    ta = max(0.0, min(0.9, float(body.get("bg_tint_amt", 0) or 0)))
+    if ta > 0:
+        ch.append(f"color=c={_c(body.get('bg_tint', '#F2B33D'))}@{ta:.2f}:s={w}x{h}:r={fr},format=rgba[tintc];"
+                  f"{bg_label}[tintc]overlay=0:0:shortest=1:format=auto[bg0t]")
+        bg_label = "[bg0t]"
+    if moved:
+        ch.append(_xf(v_sub, "[bsubT]", False))
+        v_sub = "[bsubT]"
+        ch.append(_xf(a_in, "[aT]", True))
+        a_in = "[aT]"
     # alpha copies
-    n_alpha = 1 + (1 if body.get("glow") else 0) + (1 if body.get("stroke") else 0)
+    shadow = bool(body.get("shadow"))
+    n_alpha = 1 + (1 if body.get("glow") else 0) + (1 if body.get("stroke") else 0) + (1 if shadow else 0)
     labels = "".join(f"[al{i}]" for i in range(n_alpha))
-    ch.append(f"{a_in}format=gray,split={n_alpha}{labels}" if n_alpha > 1 else f"{a_in}format=gray[al0]")
+    # matte videos are limited-range (black = 16): stretch to 0…255 so "empty" is really transparent
+    rng = "lut=y='if(lt(val\\,22)\\,0\\,clip((val-16)*255/219\\,0\\,255))'"
+    ch.append(f"{a_in}format=gray,{rng},split={n_alpha}{labels}" if n_alpha > 1 else f"{a_in}format=gray,{rng}[al0]")
     ai = 1
-    cur = "[bg0]"
-    # --- glow (blurred, coloured alpha screened over bg)
+    base = bg_label
+    # --- text behind person goes on the background
+    if ass_behind:
+        sub = f"subtitles=filename='{ass_behind}'" + (f":fontsdir='{fonts_dir}'" if fonts_dir else "")
+        ch.append(f"{base}{sub}[bgt]")
+        base = "[bgt]"
+    anim = body.get("anim", "none") or "none"
+    T = float(body.get("anim_seconds", 0.9))
+    # an animated person moves as one layer: shadow + glow + outline + body together
+    layered = anim != "none"
+    of = "rgb" if layered else "auto"
+    if layered:
+        ch.append(f"color=c=black@0.0:s={w}x{h}:r={fr},format=rgba[lay0]")
+        cur = "[lay0]"
+    else:
+        cur = base
+    # --- drop shadow under the person
+    if shadow:
+        so = max(0.0, min(1.0, float(body.get("shadow_opacity", 0.55))))
+        sb = max(1, int(body.get("shadow_blur", 18)))
+        off = int(float(body.get("shadow_offset", 0.012)) * w)
+        ch.append(f"[al{ai}]boxblur={sb}:1,lutyuv=y='val*{so:.2f}'[shda];color=c=black:s={w}x{h}:r={fr},format=rgba[shdc];"
+                  f"[shdc][shda]alphamerge[shd];{cur}[shd]overlay={off}:{off}:format={of}[bgsh]")
+        cur = "[bgsh]"
+        ai += 1
+    # --- glow (blurred, coloured alpha)
     if body.get("glow"):
         gc = _c(body.get("glow_color", "#F2B33D")); gs = float(body.get("glow_size", 24))
         ch.append(f"[al{ai}]boxblur={gs:.0f}:1,lutyuv=y='min(255\\,val*{float(body.get('glow_strength', 1.6)):.2f})'[glowa]")
-        ch.append(f"color=c={gc}:s={w}x{h}:r=30,format=rgba[glowc];[glowc][glowa]alphamerge[glow]")
-        ch.append(f"{cur}[glow]overlay=0:0:format=auto[bgg]")
+        ch.append(f"color=c={gc}:s={w}x{h}:r={fr},format=rgba[glowc];[glowc][glowa]alphamerge[glow]")
+        ch.append(f"{cur}[glow]overlay=0:0:format={of}[bgg]")
         cur = "[bgg]"
         ai += 1
     # --- stroke (ring = dilate(alpha) − alpha)
@@ -429,21 +599,16 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
         sc = _c(body.get("stroke_color", "#FFFFFF")); sw = max(1, int(body.get("stroke_width", 8)))
         ch.append(f"[al{ai}]split[sa1][sa2];[sa1]boxblur={sw}:1,lutyuv=y='if(gt(val\\,24)\\,255\\,0)'[dil];"
                   f"[dil][sa2]blend=all_mode=subtract[ring]")
-        ch.append(f"color=c={sc}:s={w}x{h}:r=30,format=rgba[strc];[strc][ring]alphamerge[stroke]")
-        ch.append(f"{cur}[stroke]overlay=0:0:format=auto[bgs]")
+        ch.append(f"color=c={sc}:s={w}x{h}:r={fr},format=rgba[strc];[strc][ring]alphamerge[stroke]")
+        ch.append(f"{cur}[stroke]overlay=0:0:format={of}[bgs]")
         cur = "[bgs]"
         ai += 1
-    # --- text behind person
-    if ass_behind:
-        sub = f"subtitles=filename='{ass_behind}'" + (f":fontsdir='{fonts_dir}'" if fonts_dir else "")
-        ch.append(f"{cur}{sub}[bgt]")
-        cur = "[bgt]"
     # --- subject
     ch.append(f"{v_sub}format=rgba[vsub];[vsub][al0]alphamerge[subj0]")
     subj = "[subj0]"
     if body.get("afterimage"):
         ch.append(f"{subj}split[sa][sb];[sa]lagfun=decay={float(body.get('after_decay', 0.9)):.2f},colorchannelmixer=aa=0.6[trail];"
-                  f"{cur}[trail]overlay=0:0:format=auto[bga]")
+                  f"{cur}[trail]overlay=0:0:format={of}[bga]")
         cur = "[bga]"
         subj = "[sb]"
     clones = int(body.get("clones", 0) or 0)
@@ -451,10 +616,14 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
         ch.append(f"{subj}split={clones + 1}" + "".join(f"[cl{i}]" for i in range(clones + 1)))
         for i in range(clones):
             off = int(w * 0.22 * (i + 1)) * (-1 if i % 2 else 1)
-            ch.append(f"[cl{i + 1}]colorchannelmixer=aa=0.45[clo{i}];{cur}[clo{i}]overlay={off}:0:format=auto[bgc{i}]")
+            ch.append(f"[cl{i + 1}]colorchannelmixer=aa=0.45[clo{i}];{cur}[clo{i}]overlay={off}:0:format={of}[bgc{i}]")
             cur = f"[bgc{i}]"
         subj = "[cl0]"
-    anim = body.get("anim", "none"); T = float(body.get("anim_seconds", 0.9))
+    if not layered:
+        ch.append(f"{cur}{subj}overlay=0:0:format=auto{out_label}")
+        return ch
+    ch.append(f"{cur}{subj}overlay=0:0:format=rgb,format=rgba[layer]")
+    lay = "[layer]"
     enable = ""
     x, y = "0", "0"
     if anim == "drop":
@@ -466,11 +635,11 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
     elif anim == "blink":
         P = float(body.get("blink_period", 0.4))
         enable = f":enable='lt(mod(t\\,{P})\\,{P * 0.55:.3f})'"
-    if anim == "pop":
-        ch.append(f"{subj}scale=w='trunc(iw*if(lt(t\\,{T})\\,0.6+0.5*min(1\\,t/{T})\\,1.0)/2)*2':h=-2:eval=frame[subjp]")
-        subj = "[subjp]"
+    elif anim == "pop":
+        ch.append(f"{lay}scale=w='trunc(iw*if(lt(t\\,{T})\\,0.6+0.5*min(1\\,t/{T})\\,1.0)/2)*2':h=-2:eval=frame[layp]")
+        lay = "[layp]"
         x, y = "'(W-w)/2'", "'(H-h)/2'"
-    ch.append(f"{cur}{subj}overlay=x={x}:y={y}:format=auto:eval=frame{enable}{out_label}")
+    ch.append(f"{base}{lay}overlay=x={x}:y={y}:format=auto:eval=frame{enable}{out_label}")
     return ch
 
 

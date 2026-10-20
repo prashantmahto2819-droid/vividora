@@ -100,7 +100,7 @@ def _add_file(workspace_id: str, user_id: str | None, kind: str, src: Path, *, n
     return item
 
 
-def install_starter(workspace_id: str, user_id: str | None = None) -> int:
+def install_starter(workspace_id: str, user_id: str | None = None, only_new_since: int | None = None) -> int:
     """Copy the bundled starter pack into the workspace library (skips what's already there)."""
     man = json.loads((STARTER / "manifest.json").read_text())
     have = {(r["source"], r["name"]) for r in db.rows(db.conn().execute(
@@ -115,6 +115,8 @@ def install_starter(workspace_id: str, user_id: str | None = None) -> int:
                 continue
             nice = f.stem.replace("_", " ")
             if ("starter", nice) in have:
+                continue
+            if only_new_since is not None and int(man.get("added", {}).get(f"{folder}/{f.name}", 1)) <= only_new_since:
                 continue
             sub = folder
             extra = []
