@@ -172,8 +172,11 @@ function render() {
     return;
   }
   if ((app.dataset.mode || "").startsWith("thumbs:")) TH.unmount();
-  if (detail && S.project && EDITOR_STATUS.includes(S.project.status) && S.presets) {
-    const key = "editor:" + S.project.id;
+  const edKey = S.project ? "editor:" + S.project.id : "";
+  // a re-transcribe / re-cut of a project that is already open keeps the editor (it shows the progress and locks editing)
+  const reworking = S.project && ["transcribing", "cutting"].includes(S.project.status) && S.project.edl && app.dataset.mode === edKey;
+  if (detail && S.project && (EDITOR_STATUS.includes(S.project.status) || reworking) && S.presets) {
+    const key = edKey;
     if (app.dataset.mode !== key) { app.dataset.mode = key; app.innerHTML = `<div id="edroot"></div>`; }
     ED.mount($("#edroot"), S.project, { S, api, esc, fmt, toast, load, render, go, stylePreview });
     const top = $(".ed-top-right");
