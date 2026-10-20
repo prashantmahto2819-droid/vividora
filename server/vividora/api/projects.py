@@ -449,10 +449,17 @@ async def preview_frame(request: Request, user: dict):
     # start a little earlier so text fade-ins have finished on the frame we grab
     t0 = max(0.0, t - 0.4)
 
+    # the real cut list, so text / overlays / effect clips (timed after cuts) land where the editor shows them;
+    # a playhead inside a removed part falls back to the uncut recording
+    from ..engine.autocut import keep_segments
+    edl_now = {"duration": p["meta"]["duration"], "cuts": [], **(p.get("edl") or {})}
+    if not any(a <= t < b for a, b in keep_segments(edl_now)):
+        edl_now = {"duration": p["meta"]["duration"], "cuts": []}
+
     def work() -> bytes:
         with tempfile.TemporaryDirectory(prefix="vfr_") as td:
             out = render_engine.render(video=storage.abs_path(raw["path"]), audio=None, meta={**p["meta"], "has_audio": False},
-                                       edl={"duration": p["meta"]["duration"], "cuts": []}, transcript=p.get("transcript"),
+                                       edl=edl_now, transcript=p.get("transcript"),
                                        preset=preset, style=style, out_dir=Path(td), name="frame", hook=opts.get("hook"),
                                        focus_x=float(opts.get("focus_x", 0.5)), focus_y=float(opts.get("focus_y", 0.5)),
                                        burn_captions=opts.get("burn_captions"), caption_overrides=opts.get("captions"),

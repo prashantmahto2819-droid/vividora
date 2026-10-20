@@ -385,6 +385,11 @@ def fail_job(c, job: dict, error: str) -> None:
     if job["kind"] in ("montage", "montage_plan"):
         set_status(c, pid, "review_cuts", f"{'beat plan' if job['kind'] == 'montage_plan' else 'montage'} असफल: {error.splitlines()[-1][:160] if error else 'error'} — settings बदलकर फिर कोशिश करें")
         return
+    if job["kind"] in ("render", "matte") and (db.get("projects", pid) or {}).get("edl"):
+        # a failed export must not lock the project out of the editor: back to editing, with the reason
+        set_status(c, pid, "review_cuts", f"{job['kind']} असफल: {error.splitlines()[-1][:160] if error else 'error'} — editing वैसी ही है, ठीक करके फिर render करें")
+        notify.on_event("failed", db.get("projects", pid) or {"id": pid}, f"{job['kind']}: {error.splitlines()[-1][:160] if error else ''}")
+        return
     set_status(c, pid, "failed", f"{job['kind']}: {error.splitlines()[-1][:200] if error else 'error'}")
     notify.on_event("failed", db.get("projects", pid) or {"id": pid}, f"{job['kind']}: {error.splitlines()[-1][:160] if error else ''}")
 
