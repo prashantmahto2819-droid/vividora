@@ -59,3 +59,16 @@ services:
 volumes:
   worker-tmp:
   whisper-models:
+
+  # Cloudflare Tunnel — Vividora को https://studio.<domain> पर खोलता है (port forward नहीं चाहिए).
+  # .env में CLOUDFLARE_TUNNEL_TOKEN डालें, फिर: docker compose --profile tunnel up -d
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - api
+    profiles: ["tunnel"]
+
