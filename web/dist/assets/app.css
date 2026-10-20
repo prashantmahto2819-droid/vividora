@@ -208,3 +208,6 @@ th { color: var(--muted); font-weight: 500; }
 .box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: .8rem; margin: .5rem 0; } .box[hidden] { display: none; }
 .hlibq { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; } .hlibq .hbtn { flex-direction: row; align-items: center; gap: .5rem; padding: .6rem; }
 .chk { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; }
+
+.c-move { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: .3rem .5rem; }
+.c-move option, select option { background: var(--panel); color: var(--text); }
