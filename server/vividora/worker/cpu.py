@@ -319,12 +319,18 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             audio = _fetch(client, assets, "audio_asr", tmp)
             pl = job["payload"]
             prog = _progress(client, job["id"])
+            rng = pl.get("range")
+            window = (float(rng[0]), float(rng[1])) if isinstance(rng, (list, tuple)) and len(rng) == 2 else None
             tr = transcribe_file(audio, language=pl.get("language", "hi"), prompt=pl.get("prompt"),
-                                 on_progress=lambda f, m: prog(f * 0.93, m))
+                                 on_progress=lambda f, m: prog(f * 0.93, m), window=window,
+                                 alternatives=int(pl.get("alternatives", 0) or 0), model=pl.get("model") or None)
             from ..engine import vocab
             tr, nfix = vocab.apply_fixes(tr, pl.get("fixes"))
+            for alt in tr.get("alts") or []:
+                vocab.apply_fixes({"segments": [alt]}, pl.get("fixes"))
+                alt["text"] = " ".join(w["w"] for w in alt.get("words") or [])
             npol = 0
-            if pl.get("polish", True):
+            if pl.get("polish", True) and not window:  # one line: speed first, the creator picks / edits
                 prog(0.95, "AI से spelling सुधार")
                 try:
                     tr, npol = vocab.llm_polish(tr, tr.get("language") or pl.get("language", "hi"), pl.get("context", ""))

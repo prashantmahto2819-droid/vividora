@@ -23,7 +23,7 @@ from pathlib import Path
 from . import catalog
 from . import effects as fx
 from . import ffmpeg
-from .autocut import keep_segments, remap_words, words_of
+from .autocut import keep_segments, map_words, remap_words, words_of
 from .captions import build_ass, build_srt, resolve_style
 from .ffmpeg import ProgressFn
 
@@ -231,11 +231,11 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         cuts = [sg["out_start"] for sg in segs[1:] if not fx.is_xfade(sg["tr"])]
         to_out = _src_to_out(segs)
         raw_words = words_of(transcript) if transcript else []
-        words = []
-        for wd in raw_words:
-            ws_, we_ = to_out(wd["start"]), to_out(min(wd["end"], wd["start"] + 3))
-            if ws_ is not None and we_ is not None and we_ > ws_:
-                words.append({**wd, "start": round(ws_, 3), "end": round(we_, 3)})
+        # a word that starts just inside a cut (or ends on a segment edge) used to vanish here;
+        # map_words keeps every mostly-kept word
+        words = map_words([{**wd, "end": min(wd["end"], wd["start"] + 3)} for wd in raw_words],
+                          [(sg["a"], sg["b"]) for sg in segs],
+                          lambda t: to_out(t) if to_out(t) is not None else to_out(t - 1e-3))
     else:
         new_dur = sum(b - a for a, b in keep)
         cuts = _cut_points(keep)

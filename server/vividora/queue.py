@@ -56,7 +56,10 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
     marks = ", ".join("?" for _ in kinds)
     job = db.row(c.execute(
         f"SELECT * FROM jobs WHERE status = 'queued' AND kind IN ({marks}) "
-        "AND (run_after IS NULL OR run_after <= ?) ORDER BY created_at LIMIT 1", [*kinds, db.now()]).fetchone())
+        "AND (run_after IS NULL OR run_after <= ?) "
+        # a one-line re-transcribe is seconds of work the creator is waiting for in the editor: first
+        "ORDER BY (kind = 'transcribe' AND json_extract(payload, '$.range') IS NOT NULL) DESC, created_at LIMIT 1",
+        [*kinds, db.now()]).fetchone())
     if job is None:
         return None
     n = c.execute(
