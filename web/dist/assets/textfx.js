@@ -80,7 +80,7 @@ export function textStyle(t, base) {
 }
 export function anchorCss(t, fb) {
   const pos = t.pos || "top";
-  const x = pos === "free" ? (t.x ?? 0.5) : 0.5; const y = pos === "free" ? (t.y ?? 0.5) : ({ top: 0.14, center: 0.5, bottom: 0.84 }[pos] ?? 0.14);
+  const x = pos === "free" ? (t.x ?? 0.5) : 0.5; const y = pos === "free" ? (t.y ?? 0.5) : ({ top: 0.18, center: 0.5, bottom: 0.78 }[pos] ?? 0.18);
   return `left:${(x * 100).toFixed(2)}%;top:${(y * 100).toFixed(2)}%;`;
 }
 // Full HTML for one text item at output time `now`.

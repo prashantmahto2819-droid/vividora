@@ -227,6 +227,37 @@ async def audio_preview(request: Request, user: dict):
     return Response(mp3, media_type="audio/mpeg")
 
 
+@require("viewer")
+async def preflight(request: Request, user: dict):
+    """Platform rule check (duration, hook, safe zones, hashtags, originality) for the chosen presets."""
+    from ..engine import platform_rules
+    p = own_project(request, user)
+    rs = {**service.DEFAULT_RENDER, **p.get("settings", {}).get("render", {})}
+    q = request.query_params.get("presets")
+    presets = q.split(",") if q else (rs.get("presets") or ["yt-short", "ig-reel", "fb-reel"])
+    plan = (p.get("meta") or {}).get("publish_plan") or []
+    mt = {}
+    for it in plan:
+        key = {"youtube": "yt-long" if it.get("label") == "yt-long" else "yt-short", "instagram": "ig-reel", "facebook": "fb-reel"}.get(it.get("platform"))
+        if key:
+            mt[key] = {"title": it.get("title"), "description": it.get("description"), "tags": it.get("tags")}
+    return ok({"presets": presets, "items": platform_rules.check(p, rs, presets, mt)})
+
+
+@require("viewer")
+async def hook_studio(request: Request, user: dict):
+    """Hook score for the opening + three hook options."""
+    from starlette.concurrency import run_in_threadpool
+    from ..engine import hooks
+    p = own_project(request, user)
+    rs = {**service.DEFAULT_RENDER, **p.get("settings", {}).get("render", {})}
+    dur = float((p.get("meta") or {}).get("duration") or 0)
+    plat = request.query_params.get("platform") or ("short" if dur <= 75 else "long")
+    sc = hooks.score(p, rs, plat)
+    opts = await run_in_threadpool(hooks.options, p)
+    return ok({**sc, "options": opts, "platform": plat})
+
+
 @require("editor")
 async def autopilot_apply(request: Request, user: dict):
     """Run autopilot's choices on this project now (without rendering). mode=items: only stickers/text/sfx/CTA;
@@ -552,6 +583,8 @@ routes = [
     Route("/projects/{project_id}/recut", recut, methods=["POST"]),
     Route("/projects/{project_id}/retranscribe", retranscribe, methods=["POST"]),
     Route("/projects/{project_id}/autopilot/apply", autopilot_apply, methods=["POST"]),
+    Route("/projects/{project_id}/hooks", hook_studio),
+    Route("/projects/{project_id}/preflight", preflight),
     Route("/projects/{project_id}/suggest", suggestions),
     Route("/projects/{project_id}/audio-preview", audio_preview, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),

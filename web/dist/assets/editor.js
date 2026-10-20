@@ -436,7 +436,7 @@ function renderOverlay() {
   $$(".ov-title", ovl).forEach((el) => (el.onmousedown = (e) => { e.preventDefault(); const ti = E.rs.effects.titles.find((x) => x._id === el.dataset.id); if (!ti) return;
     if (E.sel?.type !== "title" || E.sel.id !== ti._id) select({ type: "title", id: ti._id });
     if (!E.canEdit) return; const r = $("#ovl", E.root).getBoundingClientRect(); const x0 = e.clientX, y0 = e.clientY;
-    const P0 = ti.pos === "free" ? [ti.x ?? 0.5, ti.y ?? 0.5] : [0.5, { top: 0.14, center: 0.5, bottom: 0.84 }[ti.pos || "top"] ?? 0.14]; let moved = false;
+    const P0 = ti.pos === "free" ? [ti.x ?? 0.5, ti.y ?? 0.5] : [0.5, { top: 0.18, center: 0.5, bottom: 0.78 }[ti.pos || "top"] ?? 0.18]; let moved = false;
     const mv = (ev) => { if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 3 && !moved) return; moved = true; ti.pos = "free";
       ti.x = +clamp(P0[0] + (ev.clientX - x0) / fb.w, 0.02, 0.98).toFixed(3); ti.y = +clamp(P0[1] + (ev.clientY - y0) / fb.h, 0.02, 0.98).toFixed(3); renderOverlay(); };
     const up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); if (moved) { touch(); renderInspector(); } };
@@ -688,6 +688,7 @@ function renderPanel() {
   } else if (t === "text") {
     h = `<div class="ph"><h3>Text</h3><span class="small muted">playhead पर जुड़ेगा</span></div>
       <div class="irow" style="margin-bottom:.6rem"><button class="btn small" id="hook-edit" ${dis}>🪝 Heading / Hook ${E.rs.hook.text ? "बदलें" : "जोड़ें"}</button>${E.rs.hook.text ? `<span class="small muted grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(E.rs.hook.text)}</span>` : ""}</div>
+      <div class="box hookbox"><div class="row between"><b>🎯 Hook studio</b><button class="btn small" id="hk-load">score + options</button></div><div id="hk-body" class="small muted">पहले 3 सेकंड कितने दमदार हैं — score, सुधार और 3 hook options।</div></div>
       ${textGallery(dis)}
       <div class="box"><b>अपने fonts</b><p class="small muted">Google Fonts या किसी free site से .ttf/.otf font upload करें — text, captions और heading सब में चुन सकेंगे। ${(E.lib || []).filter((x) => x.kind === "font").map((x) => `<span class="pill small" style="font-family:'${esc(x.meta?.family || x.name)}'">${esc(x.meta?.family || x.name)}</span>`).join(" ")}</p>
         <label class="btn small">⬆ Font upload<input type="file" id="font-up" accept=".ttf,.otf" multiple hidden ${dis}></label><div id="lib-progress"></div></div>
@@ -861,6 +862,8 @@ function bindPanel() {
   $$("[data-tcat]", panel).forEach((b) => (b.onclick = () => { E.tCat = b.dataset.tcat; renderPanel(); }));
   $$("[data-tlang]", panel).forEach((b) => (b.onclick = () => { E.tLang = b.dataset.tlang; renderPanel(); }));
   on("#t-blank", "onclick", () => addTemplate(null));
+  on("#hk-load", "onclick", async () => { const box = $("#hk-body", panel); box.textContent = "जाँच हो रही है…"; try { await save(false); E.hk = await api("GET", `/projects/${E.pid}/hooks`); showHooks(); } catch (e) { box.textContent = e.message; } });
+  if (E.hk) showHooks();
   on("#font-up", "onchange", async (e) => { for (const f of e.target.files) await libUpload("font", f); });
   on("#t-q", "oninput", (e) => { E.tQ = e.target.value; clearTimeout(E.tqT); E.tqT = setTimeout(() => { renderPanel(); const q = $("#t-q", panel); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 250); });
   $$("[data-title-id]", panel).forEach((li) => (li.onclick = () => { const ti = fx.titles.find((x) => x._id === li.dataset.titleId); select({ type: "title", id: ti._id }); seek(srcOf(ti.start)); }));
@@ -1012,6 +1015,17 @@ function autopilotBox() {
 }
 function toLocalInput(iso) { const d = new Date(iso); if (isNaN(d)) return ""; const z = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`; }
 function fromLocalInput(v) { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d.toISOString(); }
+function pfHtml() {
+  const { esc } = E.ctx; if (!E.pf) return `<span class="muted">duration, hook, safe zone, hashtags — हर platform के नियम</span>`;
+  if (!E.pf.items.length) return "✅ सब platforms के नियम पूरे";
+  const ic = { block: "⛔", warn: "⚠️", tip: "💡" };
+  return E.pf.items.map((x, i) => `<div class="pfrow">${ic[x.level]} <b>${esc(x.platform)}</b> — ${esc(x.msg)}${x.fix && E.canEdit ? ` <button class="btn small" data-pffix="${i}">ठीक करें</button>` : ""}${x.item ? ` <button class="btn small quiet" data-pfsel="${esc(x.item)}">दिखाएँ</button>` : ""}</div>`).join("");
+}
+function bindPf(m) {
+  $$("[data-pffix]", m).forEach((b) => (b.onclick = () => { applyPatch(E.rs, E.pf.items[+b.dataset.pffix].fix); E.pf.items.splice(+b.dataset.pffix, 1); touch(); renderExport(); }));
+  $$("[data-pfsel]", m).forEach((b) => (b.onclick = () => { const id = b.dataset.pfsel; const fx = E.rs.effects; const t = fx.titles.find((x) => x._id === id); E.exportOpen = false; renderExport();
+    if (t) { seek(srcOf(t.start)); select({ type: "title", id }); } else if (fx.broll.find((x) => x._id === id)) { const bb = fx.broll.find((x) => x._id === id); seek(srcOf(bb.start)); select({ type: "broll", id }); } }));
+}
 function applyPatch(target, patch) {
   for (const [k, v] of Object.entries(patch || {})) {
     if (k === "effects" && v && typeof v === "object") { target.effects = target.effects || {}; for (const [k2, v2] of Object.entries(v)) target.effects[k2] = JSON.parse(JSON.stringify(v2)); }
@@ -1087,6 +1101,15 @@ function audioControls(dis) {
       <div class="irow"><label class="chk small"><input type="checkbox" id="mus-duck" ${music.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा (duck)</label>${field("कितना धीमा", `<input type="range" id="mus-damt" min="0.1" max="1" step="0.05" value="${music.duck_amount ?? 0.6}" ${dis}>`)}</div>
       ${music.id ? `<button class="btn small quiet" id="mus-clear">हटाएँ</button>` : ""}</div>
     <p class="small muted">SFX की volume: timeline पर SFX पर क्लिक करें।</p>`;
+}
+function showHooks() {
+  const box = $("#hk-body", E.root); const h = E.hk; if (!box || !h) return; const { esc } = E.ctx; const col = h.score >= 75 ? "#46a758" : h.score >= 50 ? "#f2b33d" : "#e5484d";
+  box.innerHTML = `<div class="row" style="gap:.6rem;align-items:center"><span class="hkscore" style="border-color:${col};color:${col}">${h.score}</span><span>${h.platform === "long" ? "पहले 8s (long video)" : "पहले 3s (Shorts/Reels)"} · पहला शब्द ${h.first_word_at ?? "—"}s पर</span></div>
+    ${h.reasons.map((r) => `<div>✅ ${esc(r)}</div>`).join("")}${h.fixes.map((r) => `<div>⚠️ ${esc(r)}</div>`).join("")}
+    <h4 style="margin:.5rem 0 .2rem">Hook options</h4>${(h.options || []).map((o, i) => `<div class="hkopt"><b>${esc(o.heading)}</b><span class="muted">बोलें: “${esc(o.say)}” · ${esc(o.type || "")}${o.source === "ai" ? " · AI" : ""}</span>
+      <span class="row" style="gap:.3rem"><button class="btn small" data-hkuse="${i}" ${E.canEdit ? "" : "disabled"}>heading लगाएँ</button><button class="btn small quiet" data-hkcopy="${i}">line copy</button></span></div>`).join("") || "<div>transcript से option नहीं बने</div>"}`;
+  $$("[data-hkuse]", box).forEach((b) => (b.onclick = () => { E.rs.hook.text = h.options[+b.dataset.hkuse].heading; E.rs.hook.seconds = E.rs.hook.seconds || 3; touch(); seek(0); renderOverlay(); E.ctx.toast("Hook heading लगी"); }));
+  $$("[data-hkcopy]", box).forEach((b) => (b.onclick = () => { navigator.clipboard?.writeText(h.options[+b.dataset.hkcopy].say); E.ctx.toast("copy हुआ — teleprompter में paste करके दोबारा record करें"); }));
 }
 function textGallery(dis) {
   const { esc } = E.ctx; const T = E.ctx.S.presets?.textfx; if (!T) return `<p class="small muted">लोड हो रहा…</p>`;
@@ -1311,6 +1334,7 @@ function renderExport() {
   m.hidden = false;
   m.innerHTML = `<div class="modal"><div class="row between"><h2>Export</h2><button class="ibtn" id="mx">✕</button></div>
     <p class="small muted">${esc(summary)} · output ${fmt(outDur())}</p>
+    ${E.montage ? "" : `<div class="box pfbox"><div class="row between"><b>✈ Platform check</b><button class="btn small quiet" id="pf-run">जाँचें</button></div><div id="pf-list" class="small">${pfHtml()}</div></div>`}
     ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए</label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
     <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>`}
     ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="small muted">${esc(job?.message || "queue में")}</p>` : ""}
@@ -1327,6 +1351,8 @@ function renderExport() {
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };
   $$("[data-pub]", m).forEach((b) => (b.onclick = () => { const a = p.assets.find((x) => x.id === b.dataset.pub); E.pubFor = { asset: a, title: "", description: "", tags: "", conn: "", privacy: "private", when: "" }; renderExport(); $("#pubform", m)?.scrollIntoView({ behavior: "smooth" }); }));
   bindPublishForm(m);
+  const pfr = $("#pf-run", m); if (pfr) pfr.onclick = async () => { await save(false); try { E.pf = await api("GET", `/projects/${E.pid}/preflight?presets=${encodeURIComponent((E.rs.presets || []).join(","))}`); $("#pf-list", m).innerHTML = pfHtml(); bindPf(m); } catch (e) { toast(e.message); } };
+  if (!E.pf && pfr) pfr.click(); else bindPf(m);
   for (const [id, now] of [["#pplan-slots", false], ["#pplan-now", true]]) { const b = $(id, m); if (b) b.onclick = async () => { try { const r = await api("POST", `/projects/${E.pid}/publish-plan/schedule`, { now }); p.meta.publish_plan = r.items; renderExport(); toast(now ? "सब तुरंत publish होंगे" : "समय भरे गए — बदल सकते हैं"); } catch (e) { toast(e.message); } }; }
   const pg = $("#pplan-go", m); if (pg) pg.onclick = async () => { const items = p.meta.publish_plan.map((it, i) => ({ ...it, selected: $(`[data-pp="${i}"]`, m).checked, title: $(`[data-ppt="${i}"]`, m).value, when: fromLocalInput($(`[data-ppw="${i}"]`, m).value), description: $(`[data-ppd="${i}"]`, m).value, tags: $(`[data-ppg="${i}"]`, m).value.split(",").map((t) => t.trim()).filter(Boolean) })); if (!confirm(`${items.filter((x) => x.selected).length} videos publish करें?`)) return;
     try { const r = await api("POST", `/projects/${E.pid}/publish-plan`, { items }); toast(`${r.queued.length} uploads queue में`); await loadPublishData(); } catch (e) { toast(e.message); } };

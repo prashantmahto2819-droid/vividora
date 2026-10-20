@@ -75,7 +75,78 @@ def heuristic(project: dict, platform: str, label: str | None) -> dict:
     return {"title": title, "description": desc.strip(), "tags": tags, "source": "heuristic"}
 
 
+HASHTAG_CAP = {"youtube": 3, "instagram": 5, "facebook": 5}
+
+
+def chapters(project: dict, min_total: float = 180, every: float = 90) -> list[tuple[float, str]]:
+    """YouTube chapters from the transcript: 00:00 first, ≥ 3 chapters, each ≥ 10 s (YouTube's rules)."""
+    from . import shorts
+    from .autocut import keep_segments
+    tr = project.get("transcript") or {}
+    edl = project.get("edl") or {}
+    dur = float((project.get("meta") or {}).get("duration") or 0)
+    keep = keep_segments({"duration": dur, **edl}) if edl.get("cuts") is not None else [(0.0, dur)]
+
+    def to_out(t: float) -> float | None:
+        o = 0.0
+        for a, b in keep or [(0.0, dur)]:
+            if a <= t < b:
+                return o + (t - a)
+            o += b - a
+        return None
+    out_dur = sum(b - a for a, b in keep or [(0.0, dur)])
+    if out_dur < min_total:
+        return []
+    sents = [s for s in shorts._sentences(tr) if to_out(float(s["start"])) is not None]
+    if not sents:
+        return []
+    n = max(3, min(12, int(out_dur // every)))
+    marks: list[tuple[float, str]] = []
+    for k in range(n):
+        lo, hi = out_dur * k / n, out_dur * (k + 1) / n
+        part = [s for s in sents if lo <= (to_out(float(s["start"])) or -1) < hi]
+        if not part:
+            continue
+        best = max(part, key=shorts._score)
+        t = 0.0 if not marks else to_out(float(part[0]["start"])) or lo
+        title = " ".join(w["w"].strip(" ,।.!?") for w in best["words"][:6])
+        if marks and t - marks[-1][0] < 10:
+            continue
+        marks.append((t, title))
+    return marks if len(marks) >= 3 else []
+
+
+def _stamp(t: float) -> str:
+    t = int(t)
+    return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60:02d}:{t % 60:02d}"
+
+
+def finalize(md: dict, project: dict, platform: str, label: str | None) -> dict:
+    """Platform rules: hashtag caps (YouTube shows 3, Instagram allows 5) and chapters on long YouTube videos."""
+    desc = md.get("description") or ""
+    cap = HASHTAG_CAP.get(platform, 5)
+    seen = 0
+
+    def keep_tag(m):
+        nonlocal seen
+        seen += 1
+        return m.group(0) if seen <= cap else ""
+    desc = re.sub(r"#[\w\u0900-\u097F]+", keep_tag, desc)
+    desc = re.sub(r"[ \t]+\n", "\n", re.sub(r"[ \t]{2,}", " ", desc)).strip()
+    if platform == "youtube" and label == "yt-long" and "00:00" not in desc:
+        ch = chapters(project)
+        if ch:
+            block = "\n".join(f"{_stamp(t)} {title}" for t, title in ch)
+            parts = desc.rsplit("\n\n", 1)
+            desc = (parts[0] + "\n\n" + block + ("\n\n" + parts[1] if len(parts) > 1 else "")).strip()
+    return {**md, "description": desc[:5000]}
+
+
 def suggest(project: dict, *, platform: str = "youtube", label: str | None = None) -> dict:
+    return finalize(_suggest(project, platform=platform, label=label), project, platform, label)
+
+
+def _suggest(project: dict, *, platform: str = "youtube", label: str | None = None) -> dict:
     base = heuristic(project, platform, label)
     if not llm.available():
         return base

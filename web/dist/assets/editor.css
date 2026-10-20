@@ -256,3 +256,9 @@ details.insp { border-top: 1px solid var(--ed-line); padding-top: .4rem; margin-
 .ed-stage:fullscreen .ed-viewport { flex: 1; }
 .clip.sel { outline: 2px solid var(--amber); outline-offset: -2px; }
 #pv { transform-origin: 50% 50%; }
+
+.hkscore { display: inline-flex; width: 42px; height: 42px; border-radius: 50%; border: 3px solid; align-items: center; justify-content: center; font-weight: 800; font-size: 1rem; }
+.hkopt { display: flex; flex-direction: column; gap: .15rem; border-top: 1px solid var(--ed-line); padding: .35rem 0; }
+.hookbox { margin-bottom: .6rem; }
+
+.pfbox { margin: .5rem 0; } .pfrow { padding: .2rem 0; border-top: 1px solid var(--ed-line); }

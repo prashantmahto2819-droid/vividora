@@ -67,7 +67,7 @@ def keyword_stickers(project: dict, library: list[dict], *, out_dur: float, ever
     tr = project.get("transcript") or {}
     edl = project.get("edl") or {}
     dur = float((project.get("meta") or {}).get("duration") or 0)
-    keep = keep_segments(edl) if edl.get("cuts") is not None else [(0.0, dur)]
+    keep = keep_segments({"duration": dur, **edl}) if edl.get("cuts") is not None else [(0.0, dur)]
     to_out = _to_out(keep or [(0.0, dur)])
     stickers = {(x.get("name") or "").lower(): x["id"] for x in library if x.get("kind") == "sticker"}
     sfx_lib = {(x.get("name") or "").lower(): x["id"] for x in library if x.get("kind") == "sfx"}
@@ -114,7 +114,7 @@ def highlight_titles(project: dict, *, out_dur: float, hook_until: float = 3.5, 
     tr = project.get("transcript") or {}
     edl = project.get("edl") or {}
     dur = float((project.get("meta") or {}).get("duration") or 0)
-    keep = keep_segments(edl) if edl.get("cuts") is not None else [(0.0, dur)]
+    keep = keep_segments({"duration": dur, **edl}) if edl.get("cuts") is not None else [(0.0, dur)]
     to_out = _to_out(keep or [(0.0, dur)])
     sents = shorts._sentences(tr)
     if count is None:

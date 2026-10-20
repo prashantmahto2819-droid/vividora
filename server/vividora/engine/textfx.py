@@ -357,7 +357,7 @@ class _Ctx:
             self.X, self.Y = float(t.get("x", .5)) * W, float(t.get("y", .5)) * H
         else:
             self.X = W / 2
-            self.Y = {"top": .14, "center": .5, "bottom": .84}.get(pos, .14) * H
+            self.Y = {"top": .18, "center": .5, "bottom": .78}.get(pos, .18) * H
         self.size = float(t.get("size", .075)) * self.base
         self.rgb = _hex(t.get("color") or "#FFFFFF")
         self.opacity = max(0.0, min(1.0, float(t.get("opacity", 1.0))))

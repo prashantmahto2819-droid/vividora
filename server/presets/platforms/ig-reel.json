@@ -9,7 +9,7 @@
   "recommended_seconds": 90,
   "burn_captions": true,
   "sidecar_srt": false,
-  "caption_margin_v": 0.25,
+  "caption_margin_v": 0.36,
   "caption_scale": 1.0,
   "safe_zone": {"width": 1010, "height": 1440},
   "video": {"crf": 20, "preset": "medium", "fps_max": 30},
