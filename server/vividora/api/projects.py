@@ -8,7 +8,7 @@ from starlette.routing import Route
 
 from .. import db, service, storage
 from ..engine import autocut
-from ..engine import catalog, textfx
+from ..engine import catalog, procatalog, textfx
 from ..engine import autopilot as autopilot_eng
 from ..engine.effects import BODY_ANIMS, BODY_BG, EXTRAS, LOOKS, STICKER_ANIMS, TEXT_ANIMS, TRANSITIONS, VOICE_PARAMS, VOICE_PRESETS, ZOOM_MODES, BLENDS
 from ..engine.presets import caption_styles, platforms
@@ -699,6 +699,7 @@ async def presets(request: Request, user: dict):
                "voice_params": VOICE_PARAMS, "voice_presets": VOICE_PRESETS, "textfx": textfx.presets_json(), "blends": BLENDS, "autopilot": {"defaults": autopilot_eng.AUTOPILOT_DEFAULTS, "labels": autopilot_eng.AUTOPILOT_LABELS},
                "catalog": catalog.catalog_json(),
                "dub": dub_eng.presets_json(),  # AI voice-over: voices / languages / modes
+               "pro": procatalog.pro_json(),  # trending / masks / blend modes / keyframes / pro tools — docs/editor-schema.md
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
 

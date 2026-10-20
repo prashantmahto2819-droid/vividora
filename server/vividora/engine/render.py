@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 
 from . import catalog
+from . import compose, protools  # pro compositing / main-video pro tools (additive)
 from . import effects as fx
 from . import ffmpeg
 from .autocut import keep_segments, map_words, remap_words, words_of
@@ -199,6 +200,9 @@ def _shift_items(e: dict, off: float) -> None:
             s, en = float(it.get("start", 0)) - off, float(it.get("end", 0)) - off
             if en <= 0.05:
                 continue
+            if s < 0 and (key == "fxclips" or compose.is_pro(it)):
+                it = compose.advance(it, -s) if key == "broll" else {
+                    **it, "kf": {k: compose._shift_pts(compose.K.normalize(v), -s) for k, v in (it.get("kf") or {}).items()}}
             out.append({**it, "start": round(max(0.0, s), 3), "end": round(en, 3)})
         e[key] = out
     sfx = []
@@ -231,7 +235,8 @@ def _fx_clips(e: dict, w: int, h: int, fps: float, dur: float, cur: str, chains:
         if c.get("kind") == "filter":
             chain = catalog.grade_filter(c.get("grade"))
         else:
-            chain = catalog.stack_filter([{"id": c.get("id"), "params": c.get("params") or {}, "enabled": True}], w, h, fps)
+            chain = catalog.stack_filter([{"id": c.get("id"), "params": c.get("params") or {}, "kf": c.get("kf"), "enabled": True}],
+                                         w, h, fps, en - s)
         if not chain:
             continue
         chain = re.sub(r"\[([A-Za-z]\w*)\]", lambda m: f"[{m.group(1)}_c{i}]", chain)
@@ -319,6 +324,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     burn = preset.get("burn_captions", True) if burn_captions is None else burn_captions
     work = out_dir / f".{name}"
     work.mkdir(exist_ok=True)
+    # pro tools that must see the uncut source (stabilise, face refine) — no-op when off
+    tap = protools.source_tap(e, video, meta, work, max(b for _, b in keep), need_from=min(a for a, _ in keep),
+                              preview=bool(clip) and float(clip.get("end", 0)) - float(clip.get("start", 0)) < 1.0)
 
     inputs: list[str] = ["-i", str(video)]
     next_in = 1
@@ -348,9 +356,11 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         if audio is not None:
             inputs += ["-i", str(audio)]
             next_in += 1
+        next_in = tap.attach(inputs, chains, next_in, len(segs))
         vlabels, alabels, mlabels = [], [], []
         for i, sg in enumerate(segs):
-            chains.append(f"[0:v]trim=start={sg['a']:.3f}:end={sg['b']:.3f},setpts=(PTS-STARTPTS)/{sg['rate']:.4f},fps={fps},settb=AVTB,format=yuv420p[sv{i}]")
+            chains.append(f"{tap.label(i)}trim=start={sg['a']:.3f}:end={sg['b']:.3f},setpts=(PTS-STARTPTS)/{sg['rate']:.4f},"
+                          f"{protools.warp_main(e, sg['rate'], fps)}fps={fps},settb=AVTB,format=yuv420p[sv{i}]")
             vlabels.append(f"[sv{i}]")
             if body:
                 chains.append(f"[{body_alpha_in}:v]extractplanes=y,scale={src_w0}:{src_h0},trim=start={sg['a']:.3f}:end={sg['b']:.3f},"
@@ -420,16 +430,21 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     if pre_tf and (tf.get("crop") or int(tf.get("rotate", 0) or 0) % 360):
         track_cmds = None  # the face track was measured on the uncropped picture
     frame = (pre_tf + "," if pre_tf else "") + _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
-    post_tf = fx.transform_post(tf, w, h)
+    pro_pre = protools.pre_grade(e, work)  # denoise + colour wheels/curves/HSL/match LUT
+    if pro_pre:
+        frame += "," + pro_pre
+    post_tf = protools.transform_kf(tf, w, h, fps, new_dur, work) or fx.transform_post(tf, w, h)
     if post_tf:
         frame += "," + post_tf
+    if not use_segments:
+        next_in = tap.attach(inputs, chains, next_in, 1)
     if body and not use_segments:
-        chains.append(f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB[vcut0]")
+        chains.append(f"{tap.label(0)}fps={fps},select='{sel}',setpts=N/({fps})/TB[vcut0]")
         chains.append(f"[{body_alpha_in}:v]extractplanes=y,scale={src_w0}:{src_h0},fps={fps},select='{sel}',setpts=N/({fps})/TB,format=gray[mcut]")
         chains.extend(_body(body, src_w0, src_h0, "[vcut0]", "[mcut]", "[vseg]", extra_in, work, e, new_dur, src_fps))
         v = f"[vseg]{frame}"
     else:
-        v = (f"[vseg]{frame}" if use_segments else f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}")
+        v = (f"[vseg]{frame}" if use_segments else f"{tap.label(0)}fps={fps},select='{sel}',setpts=N/({fps})/TB,{frame}")
     # transitions: per-cut kind (edl cut.transition) or the global default
     default_tr = e.get("transition") or ("flash" if e.get("flash") else "none")
     tr_cuts = []
@@ -465,19 +480,41 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     extras = fx.extras_filter([x for x in (e.get("extras") or []) if isinstance(x, str)])
     if extras:
         v += "," + extras
-    stack = catalog.stack_filter(e.get("stack"), w, h, fps)
+    stack = catalog.stack_filter(e.get("stack"), w, h, fps, new_dur)
     if stack:
         v += "," + stack
+    pro_post = protools.post_grade(e)  # sharpen (cas / unsharp)
+    if pro_post:
+        v += "," + pro_post
     if tr_filters:
         v += "," + tr_filters
+    mmask = protools.main_mask(e, w, h, fps, new_dur, work)
+    if mmask:
+        inputs += mmask[0]
+        v += "," + mmask[1].replace("{IN0}", str(next_in))
+        next_in += 1
     v += "[vbase]"
     chains.append(v)
-    cur = _fx_clips(e, w, h, fps, new_dur, "[vbase]", chains)
+    # morph cuts: smooth jump cuts (optical-flow frames across the cut), output timeline
+    seg_bounds = [sg["out_start"] for sg in segs[1:]] if use_segments else cuts
+    cur = protools.morph_graph(protools.morph_points(e, edl, keep, segs, use_segments, cuts), e, fps, new_dur,
+                               "[vbase]", chains, seg_bounds=seg_bounds)
+    cur = _fx_clips(e, w, h, fps, new_dur, cur, chains)
 
     # ---- B-roll / image overlays
+    pro_audio: list[tuple[str, str]] = []
     for i, item in enumerate(e.get("broll") or []):
         path = item.get("path")
         if not path or float(item.get("end", 0)) <= float(item.get("start", 0)):
+            continue
+        if compose.is_pro(item):
+            # speed / ramps / trim / per-clip colour+effects / masks / blend modes / keyframes / own audio
+            p_args, p_chains, next_in, p_audio = compose.wire(compose.build(item, i, w, h, fps, cur, work), next_in)
+            inputs += p_args
+            chains.extend(p_chains)
+            cur = f"[vo{i}]"
+            if p_audio:
+                pro_audio.append(p_audio)
             continue
         inputs += fx.overlay_input_args(item, Path(path))
         a_idx = None
@@ -565,6 +602,10 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             else:
                 cur_a = "[dubv]"
         music = e.get("music") or {}
+        if music.get("path") and music.get("fit"):
+            # remix the song to the video length, ending on a bar (engine/musicfit.py)
+            from .musicfit import fit_file
+            music = {**music, "path": str(fit_file(Path(music["path"]), new_dur, work))}
         if music.get("path"):
             inputs += ["-stream_loop", "-1", "-i", str(music["path"])]
             chain, cur_a = fx.music_chain(cur_a, next_in, volume=float(music.get("volume", 0.18)),
@@ -589,6 +630,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                           f"volume={float(s.get('volume', 0.8)):.2f},adelay={ms}|{ms}[sfx{i}]")
             sfx_labels.append(f"[sfx{i}]")
             next_in += 1
+        for a_chain, a_label in pro_audio:  # overlay clips' own sound
+            chains.append(a_chain)
+            sfx_labels.append(a_label)
         if sfx_labels:
             chains.append(f"{cur_a}{''.join(sfx_labels)}amix=inputs={1 + len(sfx_labels)}:duration=first:"
                           f"dropout_transition=0:normalize=0[asfx]")
@@ -617,6 +661,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
               "meta": {"preset": preset["id"], "width": w, "height": h, "duration": round(new_dur, 2),
                        "fps": fps, "captions": style.get("id") if (burn and style) else None,
                        "clip": clip, "face_track": track_cmds is not None, "segments": len(segs) if use_segments else None,
+                       "pro": tap.notes or None,
                        "effects": {"zoom": bool(zoom.get("enabled")), "look": e.get("look") or None,
                                    "music": bool((e.get("music") or {}).get("path")),
                                    "broll": len(e.get("broll") or []), "titles": len(titles),

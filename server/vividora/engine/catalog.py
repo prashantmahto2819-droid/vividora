@@ -226,6 +226,10 @@ EFFECTS += [
 CATEGORIES = {"glitch": "Glitch", "blur": "Blur & focus", "light": "Light & lens", "film": "Film & vintage",
               "motion": "Motion & camera", "stylized": "Stylized", "portrait": "Portrait", "background": "Background",
               "texture": "Texture"}
+# 🔥 trending pack (engine/trending.py): animated, duration-aware effects built from ffmpeg filters only
+from .trending import TRENDING  # noqa: E402
+EFFECTS += TRENDING
+CATEGORIES = {"trending": "🔥 Trending", **CATEGORIES}
 BY_ID = {e["id"]: e for e in EFFECTS}
 
 # ---------- colour grading
@@ -492,17 +496,34 @@ def _clean_params(e: dict, given: dict | None) -> dict:
     return out
 
 
-def stack_filter(stack: list[dict] | None, w: int = 1080, h: int = 1920, fps: float = 30) -> str:
-    """[{id, params, enabled}] → ffmpeg chain (export). W/H/FPS of the output frame are available to templates."""
+def _effect_chain(e: dict, params: dict, ctx: dict) -> str:
+    if e.get("build"):
+        return e["build"]({**params}, ctx)
+    return _apply(e["ffmpeg"], {**ctx, **params})
+
+
+def stack_filter(stack: list[dict] | None, w: int = 1080, h: int = 1920, fps: float = 30, dur: float | None = None) -> str:
+    """[{id, params, enabled, kf?}] → ffmpeg chain (export). W/H/FPS/DUR of the output frame / clip are
+    available to templates and builders. `kf` ({param: keyframes}) animates numeric params (stepped)."""
     parts = []
-    ctx = {"W": w, "H": h, "FPS": int(round(fps))}
+    ctx = {"W": w, "H": h, "FPS": int(round(fps)), "DUR": float(dur or 5.0)}
     for item in stack or []:
         if not isinstance(item, dict) or item.get("enabled") is False:
             continue
         e = BY_ID.get(item.get("id"))
-        if not e or not e.get("ffmpeg"):
+        if not e or not (e.get("ffmpeg") or e.get("build")):
             continue
-        f = _apply(e["ffmpeg"], {**ctx, **_clean_params(e, item.get("params"))})
+        base = _clean_params(e, item.get("params"))
+        kf = None
+        if item.get("kf"):
+            from . import keyframes as K
+            kf = {k: v for k, v in K.norm_map(item["kf"]).items() if k in base and not isinstance(base[k], str) and K.animated(v)}
+        if kf:
+            from . import keyframes as K
+            f = K.stepped("", "", ctx["DUR"], fps, lambda t, e=e, base=base, kf=kf: _effect_chain(e, _clean_params(e, K.params_at(base, kf, t)), ctx),
+                          uid=f"kfs{len(parts)}")
+        else:
+            f = _effect_chain(e, base, ctx)
         idx = len(parts)
         parts.append(re.sub(r"\[([A-Za-z]\w*)\]", lambda m: f"[{m.group(1)}_{idx}]", f))
     return ",".join(parts)
@@ -523,6 +544,6 @@ def stack_css(stack: list[dict] | None) -> str:
 
 def catalog_json() -> dict:
     return {"categories": CATEGORIES,
-            "effects": [{k: v for k, v in e.items() if k != "ffmpeg"} for e in EFFECTS],
+            "effects": [{k: v for k, v in e.items() if k not in ("ffmpeg", "build")} for e in EFFECTS],
             "grade_params": GRADE_PARAMS, "grade_cats": GRADE_CATS,
             "grade_presets": {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")} for k, v in GRADE_PRESETS.items()}}
