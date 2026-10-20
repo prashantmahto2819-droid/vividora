@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fontconfig rclone curl ca-certificates libfribidi0 \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fontconfig rclone curl ca-certificates libfribidi0 fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 # DeepFilterNet (MIT/Apache-2.0) — studio-grade noise removal for the voice track
 RUN curl -fsSL -o /usr/local/bin/deep-filter \

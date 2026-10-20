@@ -10,7 +10,10 @@ the thumbnail used for publishing, and autopilot A/B variants.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
+import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
@@ -161,13 +164,32 @@ def clean_settings(s: dict | None) -> dict:
             s.pop("t2", None)
     if not isinstance(s.get("stickers"), list):
         s["stickers"] = []
+    stickers, seen = [], set()
+    for i, st in enumerate(s["stickers"][:T.MAX_STICKERS]):
+        if not isinstance(st, dict):
+            continue
+        st = dict(st)
+        uid = re.sub(r"[^A-Za-z0-9_-]", "", str(st.get("uid") or ""))[:24] or f"i{i}"
+        while uid in seen:
+            uid += "x"
+        seen.add(uid)
+        st["uid"] = uid
+        stickers.append(st)
+    s["stickers"] = stickers
     if not isinstance(s.get("bg"), dict):
         s["bg"] = {}
+    lay = s.get("layout")
+    s["layout"] = {k: v for k, v in lay.items() if k in T.SIZES and isinstance(v, dict)} if isinstance(lay, dict) else {}
     s.setdefault("cutout", True)
     return s
 
 
 def render(project: dict, settings: dict) -> tuple[bytes, dict, list[dict]]:
+    img, info, warnings = _render(project, settings)
+    return T.to_jpeg(img), info, warnings
+
+
+def _render(project: dict, settings: dict, layers: bool = False):
     s = clean_settings(settings)
     if not s.get("t"):
         fr = best_frames(project)
@@ -185,11 +207,58 @@ def render(project: dict, settings: dict) -> tuple[bytes, dict, list[dict]]:
         frame2 = frame_image(project, t2)
     if s.get("logo") is None and brand(project).get("logo_id"):
         s["logo"] = True
-    img, info = T.render(frame, s, alpha=alpha, face=face, frame2=frame2, paths=_paths(project, s))
+    img, info = T.render(frame, s, alpha=alpha, face=face, frame2=frame2, paths=_paths(project, s), layers=layers)
     warnings = T.lint(s, info, project.get("title") or "")
     if s.get("cutout", True) and tmpl.get("person") is not None and alpha is None:
         warnings.append({"level": "info", "code": "no_cutout_model", "msg": "cutout नहीं बना (Effects → Body cutout चलाएँ या RVM model डाउनलोड होने दें) — पूरा frame इस्तेमाल हुआ"})
-    return T.to_jpeg(img), {**info, "t": s["t"]}, warnings
+    return img, {**info, "t": s["t"]}, warnings
+
+
+def _digest(img) -> str:
+    h = hashlib.blake2b(digest_size=10)
+    h.update(f"{img.mode}{img.size}".encode())
+    h.update(img.tobytes())
+    return h.hexdigest()
+
+
+def _data_url(img, fmt: str) -> str:
+    from io import BytesIO
+    buf = BytesIO()
+    if fmt == "jpeg":
+        img.save(buf, "JPEG", quality=88)
+    else:
+        img.save(buf, "WEBP", quality=90, alpha_quality=100, method=3)
+    return f"data:image/{fmt};base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def render_layers(project: dict, settings: dict, have: list | None = None) -> dict:
+    """The studio's live view: background + one sprite per layer, in canvas fractions.
+    The final render pastes exactly these pieces, so what the user drags is what gets saved.
+    `have` = sprite hashes the browser already holds (those come back without pixels)."""
+    have = set(str(h) for h in (have or [])[:400])
+    img, info, warnings = _render(project, settings, layers=True)
+    pack = info.pop("_layers")
+    W, H = info["width"], info["height"]
+    base = pack["base"]
+    bh = _digest(base)
+    out_layers = []
+    for ly in pack["layers"]:
+        im = ly["img"]
+        hh = _digest(im)
+        cx, cy, w, h, rot = ly["frame"]
+        row = {"id": ly["id"], "kind": ly["kind"], "name": ly["name"], "locked": bool(ly.get("locked")), "hash": hh,
+               "box": [ly["x"] / W, ly["y"] / H, im.width / W, im.height / H],
+               "frame": [float(cx) / W, float(cy) / H, w / W, h / H, float(rot)],
+               "anchor": [float(ly["anchor"][0]) / W, float(ly["anchor"][1]) / H], "s": float(ly.get("s", 1.0))}
+        for k in ("uid", "edit"):
+            if ly.get(k) is not None:
+                row[k] = ly[k]
+        if hh not in have:
+            row["src"] = _data_url(im, "webp")
+        out_layers.append(row)
+    return {"w": W, "h": H, "base": {"hash": bh, **({} if bh in have else {"src": _data_url(base, "jpeg")})},
+            "layers": out_layers, "hidden": pack["hidden"], "warnings": warnings,
+            "info": {k: info.get(k) for k in ("font_px", "contrast", "cutout", "t", "words", "template", "size")}}
 
 
 def asset_view(a: dict, selected: dict | None = None) -> dict:
@@ -282,7 +351,8 @@ def auto_text(project: dict) -> dict:
     return T.suggest_texts(project.get("title") or "", text, project.get("language") or "hi")
 
 
-VARIANT_ROTATION = ["face_right", "number", "gold", "question", "bold_box", "big_top", "emotional", "face_left", "red_arrow", "shock"]
+VARIANT_ROTATION = ["face_right", "mega_word", "story_cinema", "number", "ribbon", "money", "spotlight", "question", "bold_box",
+                    "neon_night", "fire", "gold", "big_top", "emotional", "face_left", "red_arrow", "shock", "headline"]
 VARIANT_ACCENTS = ["#FFD400", "#FF3B30", "#00E5FF", "#00E676", "#FF6A00", "#F2B33D"]
 
 
@@ -295,18 +365,35 @@ def variant_settings(project: dict, n: int = 3, size: str = "yt", base: dict | N
         rot.remove(base["template"])
         rot.insert(0, base["template"])
     if not any(T.leading_number(x) for x in texts):
-        rot = [r for r in rot if r != "number"]
+        rot = [r for r in rot if r not in ("number", "challenge")]
+    if not any(_mega_word(x) for x in texts):
+        rot = [r for r in rot if r != "mega_word"]
     out = []
     for i in range(max(1, min(6, n))):
         s = {**base, "size": size, "template": rot[i % len(rot)], "t": frames[i % len(frames)], "text": texts[i % len(texts)]}
         if s["template"] == "number" and not T.leading_number(s["text"]):
             s["text"] = next((x for x in texts if T.leading_number(x)), s["text"])
+        if s["template"] == "mega_word":
+            s["text"] = next((_mega_word(x) for x in [s["text"], *texts] if _mega_word(x)), s["text"])
+        if s["template"] != base.get("template"):
+            # hand placement / style overrides belong to the layout they were made on
+            for k in ("layout", "labels", *T.TEXT_KEYS):
+                s.pop(k, None)
         if i > 0:
             s.pop("accent", None)
             if i % 3 == 2:
                 s["accent"] = VARIANT_ACCENTS[i % len(VARIANT_ACCENTS)]
         out.append(s)
     return out
+
+
+def _mega_word(text: str) -> str:
+    """The one word a 'mega word' layout can show: the *highlighted* word, or the text itself if it is 1–2 short words."""
+    m = re.search(r"\*([^*]+)\*", text or "")
+    if m and len(m.group(1).split()) <= 2:
+        return m.group(1)
+    p = T.plain(text)
+    return p if 0 < len(p.split()) <= 2 and len(p) <= 12 else ""
 
 
 def make_variants(project: dict, n: int = 3, size: str = "yt", base: dict | None = None, *, user_id: str | None = None,
