@@ -181,7 +181,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             try:
                 r = pubmod.run(p["platform"], p.get("secrets") or {}, p.get("payload") or {}, video=video,
                                public_url=p.get("public_url"), thumb=thumb, dry_run=bool(p.get("dry_run")),
-                               on_progress=lambda f: prog(f, "upload हो रहा है"))
+                               on_progress=lambda f: prog(f, "upload हो रहा है"), captions_srt=p.get("captions_srt"))
             except pubmod.PublishError as e:
                 err = RuntimeError(str(e))
                 err.no_retry = not e.retry

@@ -1464,11 +1464,23 @@ function publishForm(f) {
     ${field("Title", `<input id="pub-title" maxlength="100" value="${esc(f.title)}" placeholder="वीडियो का title">`)}
     ${field("Description / caption", `<textarea id="pub-desc" rows="5" placeholder="description, hashtags…">${esc(f.description)}</textarea>`)}
     ${field("Tags (comma से अलग)", `<input id="pub-tags" value="${esc(f.tags)}">`)}
+    ${conn?.platform === "youtube" ? `${field("पहला comment (upload के बाद अपने-आप; pin खुद करना होगा)", `<textarea id="pub-fc" rows="2" placeholder="${f.fc === undefined ? "AI pack से ला रहा है…" : "खाली = कोई comment नहीं"}">${esc(f.fc || "")}</textarea>`)}
+    <div class="irow">${field("Playlist", `<input id="pub-pl" list="pub-pl-list" value="${esc(f.pl || "")}" placeholder="${f.plDefault ? "खाली = brand playlist" : "playlist ID या link (खाली = कोई नहीं)"}"><datalist id="pub-pl-list">${(f.playlists || []).map((x) => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("")}</datalist>`)}
+      <label class="small" style="align-self:end"><input type="checkbox" id="pub-synth" ${f.synth ? "checked" : ""}> AI-generated/altered content (YouTube को बताएँ)</label></div>
+    ${f.ytNote ? `<p class="small muted">⚠️ ${esc(f.ytNote)}</p>` : ""}` : ""}
     <div class="row between"><span class="small muted">${conn?.platform === "youtube" ? "YouTube quota: ~6 upload/दिन" : conn?.platform === "instagram" ? "Instagram: Reel के रूप में, caption 2200 तक" : conn ? "Facebook: Page पर" : "पहले Settings → Channels में channel जोड़ें"}</span><button class="btn primary" id="pub-go" ${conn ? "" : "disabled"}>Upload करें</button></div></div>`;
 }
 function bindPublishForm(m) {
   const f = E.pubFor; if (!f) return; const { api, toast } = E.ctx;
-  const sync = () => { f.title = $("#pub-title", m).value; f.description = $("#pub-desc", m).value; f.tags = $("#pub-tags", m).value; f.conn = $("#pub-conn", m).value; f.privacy = $("#pub-privacy", m)?.value || "private"; f.when = $("#pub-when", m).value; };
+  const sync = () => { f.title = $("#pub-title", m).value; f.description = $("#pub-desc", m).value; f.tags = $("#pub-tags", m).value; f.conn = $("#pub-conn", m).value; f.privacy = $("#pub-privacy", m)?.value || "private"; f.when = $("#pub-when", m).value;
+    if ($("#pub-fc", m) && f.fc !== undefined) f.fc = $("#pub-fc", m).value; if ($("#pub-pl", m)) { f.pl = $("#pub-pl", m).value; f.synth = $("#pub-synth", m).checked; } };
+  const yconn = (E.conns.connections || []).find((c) => c.id === f.conn);
+  if (yconn?.platform === "youtube" && f.ytFor !== yconn.id) { f.ytFor = yconn.id; // prefill: AI pack's pinned comment + channel playlists
+    Promise.all([f.fc === undefined ? api("GET", `/projects/${E.pid}/aipack`).catch(() => null) : null, api("GET", `/connections/${yconn.id}/playlists`).catch(() => null)]).then(([ap, pl]) => {
+      if (E.pubFor !== f) return; if ($("#pub-title", m)) sync();
+      if (f.fc === undefined) f.fc = $("#pub-fc", m)?.value || ap?.pack?.pinned_comment || "";
+      if (pl) { f.playlists = pl.playlists || []; f.plDefault = pl.default || ""; f.ytNote = pl.note || (yconn.meta?.needs_reauth ? "YouTube दोबारा connect करें ताकि comment/playlist/analytics चलें" : ""); }
+      renderExport(); }); }
   $("#pub-close", m).onclick = () => { E.pubFor = null; renderExport(); };
   $("#pub-conn", m).onchange = () => { sync(); renderExport(); };
   $("#pub-ai", m).onclick = async () => { sync(); const conn = (E.conns.connections || []).find((c) => c.id === f.conn); $("#pub-ai", m).disabled = true;
@@ -1477,6 +1489,7 @@ function bindPublishForm(m) {
     const conn = (E.conns.connections || []).find((c) => c.id === f.conn); const when = f.when ? new Date(f.when) : null;
     const body = { asset_id: f.asset.id, connection_id: f.conn, title: f.title.trim(), description: f.description, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean), privacy: f.privacy };
     if (when) { if (conn?.platform === "youtube") body.publish_at = when.toISOString(); else body.scheduled_at = Math.floor(when.getTime() / 1000); }
+    if (conn?.platform === "youtube") { body.ai_content = !!f.synth; body.playlist_id = (f.pl || "").trim(); if (f.fc !== undefined) body.first_comment = f.fc; }
     if (!confirm(`${PLAT[conn?.platform]} · ${conn?.name} पर upload करें?\n"${body.title}"`)) return;
     try { await api("POST", `/projects/${E.pid}/publications`, body); toast("upload queue में"); E.pubFor = null; await loadPublishData(); } catch (e) { toast(e.message); } };
 }

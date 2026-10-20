@@ -46,6 +46,8 @@ async def _scheduler():
             await run_in_threadpool(archive.sweep)
             from . import radar_job
             await run_in_threadpool(radar_job.tick)
+            from . import retention_job  # YouTube retention/CTR cache: daily for recent videos (≥ 6 h apart)
+            await run_in_threadpool(retention_job.tick)
         except Exception as e:  # noqa: BLE001
             log.warning("scheduler: %s", e)
         await asyncio.sleep(3600)

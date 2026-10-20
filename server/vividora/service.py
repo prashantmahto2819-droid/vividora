@@ -264,12 +264,26 @@ def after_job(c, job: dict, result: dict) -> None:
             db.update(c, "publications", pub_id, {"status": "done", "remote_id": result.get("remote_id"),
                                                   "url": result.get("url"), "error": result.get("warning"),
                                                   "finished_at": db.now()})
-        if result.get("secrets"):  # refreshed OAuth tokens
-            conn_id = db.get("publications", pub_id)["connection_id"] if pub_id else None
-            if conn_id:
-                db.update(c, "connections", conn_id, {"secrets": result["secrets"], "updated_at": db.now()})
+        conn_id = db.get("publications", pub_id)["connection_id"] if pub_id else None
+        if result.get("secrets") and conn_id:  # refreshed OAuth tokens
+            db.update(c, "connections", conn_id, {"secrets": result["secrets"], "updated_at": db.now()})
+        if conn_id and result.get("reauth") is not None:  # old grant without force-ssl/analytics → Settings shows "reconnect"
+            cn = db.get("connections", conn_id)
+            if cn and bool((cn.get("meta") or {}).get("needs_reauth")) != bool(result["reauth"]):
+                db.update(c, "connections", conn_id, {"meta": {**(cn.get("meta") or {}), "needs_reauth": bool(result["reauth"])}})
+        if pub_id and result.get("chain") is not None:  # what the after-upload steps did (shown in the UI)
+            pub = db.get("publications", pub_id)
+            db.update(c, "publications", pub_id, {"payload": {**(pub.get("payload") or {}), "chain": result["chain"]}})
         db.update(c, "projects", pid, {"status_note": f"{job['payload'].get('platform')} पर publish हुआ", "updated_at": db.now()})
-        notify.on_event("published", project, f"{job['payload'].get('platform')}: {result.get('url') or ''}")
+        if job["payload"].get("platform") == "youtube" and not job["payload"].get("dry_run") and result.get("url"):
+            # the API can't pin comments or add end screens → a WhatsApp checklist for the human steps
+            from .publish import youtube as _yt
+            pl = job["payload"].get("payload") or {}
+            notify.send(_yt.checklist(result["url"], title=pl.get("title") or project.get("title", ""),
+                                      chain={"done": result.get("chain") or {}}, first_comment=pl.get("first_comment"),
+                                      video_id=result.get("remote_id"), warnings=result.get("warnings")))
+        else:
+            notify.on_event("published", project, f"{job['payload'].get('platform')}: {result.get('url') or ''}")
 
     elif kind == "matte":
         for f in result.get("files", []):

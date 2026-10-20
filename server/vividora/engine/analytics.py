@@ -71,6 +71,103 @@ def fb_stats(video_id: str, page_token: str) -> dict:
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+# ---- YouTube Analytics API (retention / watch time / CTR) — needs yt-analytics.readonly
+YTA = "https://youtubeanalytics.googleapis.com/v2/reports"
+BASE_METRICS = "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained"
+CTR_METRICS = "impressions,impressionClickThroughRate"  # not always offered by the API → optional
+
+
+def _report(token: str, **params) -> list[dict]:
+    """One reports.query call → list of {columnName: value} rows."""
+    r = request("GET", YTA, params={"ids": "channel==MINE", **params}, headers={"Authorization": f"Bearer {token}"})
+    names = [h.get("name") for h in r.get("columnHeaders") or []]
+    return [dict(zip(names, row)) for row in r.get("rows") or []]
+
+
+def yt_video_analytics(token: str, video_id: str, start: str, end: str) -> dict:
+    """Per-video totals + audience retention curve. Dates YYYY-MM-DD. Scope errors propagate
+    (caller marks the connection for re-auth); a metric the API refuses is just left out."""
+    out: dict = {"metrics": {}, "retention": [], "unavailable": []}
+    rows = _report(token, startDate=start, endDate=end, metrics=BASE_METRICS, filters=f"video=={video_id}")
+    if rows:
+        out["metrics"] = {k: rows[0].get(k) for k in BASE_METRICS.split(",")}
+    try:
+        rows = _report(token, startDate=start, endDate=end, metrics=CTR_METRICS, filters=f"video=={video_id}")
+        if rows:
+            out["metrics"].update({k: rows[0].get(k) for k in CTR_METRICS.split(",")})
+    except PublishError as e:
+        if youtube.is_scope_error(e):
+            raise
+        out["unavailable"] += CTR_METRICS.split(",")
+    for metrics in ("audienceWatchRatio,relativeRetentionPerformance", "audienceWatchRatio"):
+        try:
+            rows = _report(token, startDate=start, endDate=end, dimensions="elapsedVideoTimeRatio", metrics=metrics,
+                           filters=f"video=={video_id}", sort="elapsedVideoTimeRatio")
+            out["retention"] = [[round(float(r["elapsedVideoTimeRatio"]), 4), round(float(r.get("audienceWatchRatio") or 0), 4),
+                                 (round(float(r["relativeRetentionPerformance"]), 3) if r.get("relativeRetentionPerformance") is not None else None)]
+                                for r in rows if r.get("elapsedVideoTimeRatio") is not None]
+            break
+        except PublishError as e:
+            if youtube.is_scope_error(e):
+                raise
+            if "relativeRetentionPerformance" in metrics:
+                out["unavailable"].append("relativeRetentionPerformance")
+                continue
+            out["unavailable"].append("audienceWatchRatio")
+    return out
+
+
+def _mmss(sec: float) -> str:
+    sec = max(0, int(round(sec)))
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def biggest_drop(curve: list, duration: float | None = None) -> dict | None:
+    """Where the most viewers leave. curve: [[ratio 0..1, audienceWatchRatio, rel?], ...].
+    Looks at the fall over a ~5 % window (single-point noise ignored) and skips the last 5 %
+    (everyone leaves at the end screen). Returns {at, sec, pct, hint} or None."""
+    pts = sorted((float(p[0]), float(p[1])) for p in curve or [] if p and p[1] is not None)
+    if len(pts) < 5:
+        return None
+    w = max(1, len(pts) // 20)
+    best = None
+    for i in range(w, len(pts)):
+        x0, y0 = pts[i - w]
+        x1, y1 = pts[i]
+        if x1 > 0.95:
+            break
+        d = y0 - y1
+        if best is None or d > best[0]:
+            best = (d, x0, x1, y0)
+    if not best or best[0] <= 0.01:
+        return None
+    d, x0, x1, y0 = best
+    pct = round(d * 100)
+    at = round((x0 + x1) / 2, 3)
+    out = {"at": at, "from": x0, "to": x1, "pct": pct, "start": x0 < 0.12}
+    where = f"{_mmss(at * duration)} के आसपास" if duration else f"{round(at * 100)}% पर"
+    out["sec"] = round(at * duration, 1) if duration else None
+    out["hint"] = f"{where} {pct}% लोग चले गए — इस हिस्से को छोटा करें" + (" (शुरुआत: hook तेज़ करें)" if out["start"] else "")
+    return out
+
+
+def retention_notes(rows: list[dict]) -> list[str]:
+    """Learning notes from the retention cache: rows [{title, yta: {metrics, drop}}]."""
+    with_drop = [r for r in rows if (r.get("yta") or {}).get("drop")]
+    notes = []
+    if with_drop:
+        early = [r for r in with_drop if r["yta"]["drop"].get("start")]
+        if len(with_drop) >= 2 and len(early) * 2 >= len(with_drop):
+            notes.append(f"{len(early)}/{len(with_drop)} videos में सबसे बड़ी गिरावट शुरुआत (पहले ~10%) में है — hook छोटा और तेज़ रखें, intro हटाएँ")
+        worst = max(with_drop, key=lambda r: r["yta"]["drop"]["pct"])
+        notes.append(f"“{(worst.get('title') or '')[:60]}”: {worst['yta']['drop']['hint']}")
+    avp = [float(r["yta"]["metrics"]["averageViewPercentage"]) for r in rows
+           if ((r.get("yta") or {}).get("metrics") or {}).get("averageViewPercentage") is not None]
+    if len(avp) >= 2:
+        notes.append(f"औसतन लोग वीडियो का {sum(avp) / len(avp):.0f}% देखते हैं")
+    return notes
+
+
 # ---- learning
 DIMENSIONS = {
     "caption_style": "caption style", "hook": "hook card", "zoom": "auto zoom", "look": "color look",

@@ -34,7 +34,24 @@ def _rows(workspace_id: str, channel_id: str | None = None) -> list[dict]:
                     "platform": p["platform"], "url": p["url"], "label": p["asset_label"], "published_at": published_at,
                     "views": (st or {}).get("views", 0), "likes": (st or {}).get("likes", 0), "comments": (st or {}).get("comments", 0),
                     "fetched_at": (st or {}).get("fetched_at"), "features": analytics.features(meta, rs, published_at)})
+    # YouTube Analytics cache (retention curve, avg % viewed, CTR) — see retention_job
+    from ..retention_job import cached
+    yta = cached([r["id"] for r in out if r["platform"] == "youtube"])
+    for r in out:
+        y = yta.get(r["id"])
+        if y:
+            m = y.get("metrics") or {}
+            r["yta"] = {"metrics": {k: v for k, v in m.items() if not k.startswith("_")}, "unavailable": m.get("_unavailable") or [],
+                        "retention": y.get("retention") or [], "drop": y.get("dropinfo"), "error": y.get("error"),
+                        "fetched_at": y.get("fetched_at")}
     return out
+
+
+def _learn(rows: list[dict]) -> dict:
+    """What-works learning + retention notes (biggest drop, hook) as plain-language lessons."""
+    L = analytics.learn(rows)
+    L["notes"] = analytics.retention_notes(rows)
+    return L
 
 
 @require("viewer")
@@ -42,7 +59,7 @@ async def overview(request: Request, user: dict):
     from .channels import get_channel
     ch = get_channel(user["workspace_id"], request.query_params.get("channel"))
     rows = _rows(user["workspace_id"], ch["id"] if ch else None)
-    return ok({"videos": rows, "learn": analytics.learn(rows), "channel": ch["id"] if ch else None,
+    return ok({"videos": rows, "learn": _learn(rows), "channel": ch["id"] if ch else None,
                "defaults": ((ch or {}).get("settings") or {}).get("render_defaults", {})})
 
 
@@ -80,6 +97,13 @@ async def refresh(request: Request, user: dict):
                                        "extra": {k: v for k, v in st.items() if k not in ("views", "likes", "comments")}})
                 n += 1
             service.log(c, user["workspace_id"], "analytics.refresh", user_id=user["id"], detail={"count": n})
+        # retention / watch time / CTR (YouTube Analytics API) — cached, at most every 6 h per video
+        from .. import retention_job
+        try:
+            rr = retention_job.refresh(user["workspace_id"])
+            errors += rr["errors"][:5]
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"retention: {e}")
         return n, errors
 
     n, errors = await run_in_threadpool(work)
