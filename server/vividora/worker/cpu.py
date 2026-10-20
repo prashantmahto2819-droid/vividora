@@ -12,6 +12,7 @@ import logging
 import os
 import socket
 import tempfile
+import urllib.error
 from pathlib import Path
 
 from ..engine import autocut, ffmpeg, montage, prepare, render, shorts
@@ -51,18 +52,39 @@ def _is_image(p: Path) -> bool:
             or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
 
 
+def _font(client: ApiClient, fid: str, tmp: Path) -> Path | None:
+    try:
+        return client.download_library(fid, tmp / "fonts" / f"{fid}.ttf")
+    except urllib.error.HTTPError as err:
+        if err.code not in (404, 410):
+            raise
+        log.warning("font %s नहीं मिला", fid)
+        return None
+
+
 def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets: list[dict] | None = None) -> dict:
     """Download library items the render refers to; replace ids with local paths."""
     e = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
          for k, v in (effects or {}).items()}
     cache: dict[str, Path] = {}
 
+    missing: list[str] = []
+
     def fetch(item_id: str) -> Path | None:
         if not item_id:
             return None
         if item_id not in cache:
-            cache[item_id] = client.download_library(item_id, tmp / "lib" / item_id)
+            try:
+                cache[item_id] = client.download_library(item_id, tmp / "lib" / item_id)
+            except urllib.error.HTTPError as err:
+                if err.code not in (404, 410):
+                    raise
+                # a library file that was deleted must not stop the whole render — skip that item
+                log.warning("library item %s नहीं मिला — उसके बिना render", item_id)
+                cache[item_id] = None
+                missing.append(item_id)
         return cache[item_id]
+    e["_missing"] = missing
 
     look = e.get("look") or "none"
     if isinstance(look, str) and look.startswith("lut:"):
@@ -192,7 +214,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
                 effects={**effects,
-                         "font_paths": [str(client.download_library(fid, tmp / "fonts" / f"{fid}.ttf")) for fid in (p.get("fonts") or [])]},
+                         "font_paths": [str(fp) for fp in (_font(client, fid, tmp) for fid in (p.get("fonts") or [])) if fp]},
                 encoder_preset=os.getenv("X264_PRESET") or None,
                 on_progress=_progress(client, job["id"]),
             )
@@ -202,7 +224,8 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 up = client.upload(job["id"], f["path"], f["kind"], label)
                 files.append({**f, "label": label, "path": up["path"],
                               "meta": {**f.get("meta", {}), "title": p.get("title")}})
-            return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn}
+            miss = [f"library की {len(effects['_missing'])} file नहीं मिली — वह item छोड़कर render हुआ"] if effects.get("_missing") else []
+            return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn + miss}
 
         if kind == "dub":
             from ..engine import tts

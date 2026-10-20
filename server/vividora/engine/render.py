@@ -10,7 +10,8 @@ video for one platform.
   titles    [{start, end, text, pos, size, color, bg}]
   watermark {path, opacity, size, pos}
   sfx       [{path, at, volume}]
-  voice_track       "original" | dub asset id; the worker adds voice_track_path / _words
+  fxclips   [{kind: effect|filter, id | grade, params, start, end, track}]  effect/filter only for that range
+  voice_track      "original" | dub asset id; the worker adds voice_track_path / _words
   voice_track_mode  "replace" (AI voice only) | "both" (original quieter under it, voice_track_under 0..1)
 Times are on the output (post-cut) timeline.
 """
@@ -18,6 +19,7 @@ Times are on the output (post-cut) timeline.
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 from . import catalog
@@ -184,6 +186,62 @@ def out_timeline(edl: dict, fps: float, effects: dict | None = None):
     return to_out, sum(b - a for a, b in keep)
 
 
+def _shift_items(e: dict, off: float) -> None:
+    """Move timed items `off` seconds earlier (dropping what ends before 0)."""
+    if off <= 1e-3:
+        return
+    for key in ("titles", "broll", "fxclips"):
+        out = []
+        for it in e.get(key) or []:
+            if not isinstance(it, dict):
+                continue
+            s, en = float(it.get("start", 0)) - off, float(it.get("end", 0)) - off
+            if en <= 0.05:
+                continue
+            out.append({**it, "start": round(max(0.0, s), 3), "end": round(en, 3)})
+        e[key] = out
+    sfx = []
+    for s in e.get("sfx") or []:
+        if not isinstance(s, dict):
+            continue
+        at = float(s.get("at", 0)) - off
+        it = {**s, "at": round(max(0.0, at), 3)}
+        if at < 0:
+            dur = float(s.get("dur", 0) or 0)
+            if dur and dur + at <= 0.05:
+                continue
+            it["trim"] = round(float(s.get("trim", 0) or 0) - at, 3)
+            if dur:
+                it["dur"] = round(dur + at, 3)
+        sfx.append(it)
+    e["sfx"] = sfx
+
+
+def _fx_clips(e: dict, w: int, h: int, fps: float, dur: float, cur: str, chains: list[str]) -> str:
+    """Effect / filter clips from the timeline's FX tracks: the effect is computed only for its own
+    time range and laid over the picture there (other frames pass through untouched)."""
+    hidden = set(e.get("hidden_tracks") or [])
+    for i, c in enumerate(e.get("fxclips") or []):
+        if not isinstance(c, dict) or c.get("enabled") is False or f"fx:{int(c.get('track', 0) or 0)}" in hidden:
+            continue
+        s, en = max(0.0, float(c.get("start", 0))), min(dur, float(c.get("end", 0)))
+        if en - s < 1.0 / fps:
+            continue
+        if c.get("kind") == "filter":
+            chain = catalog.grade_filter(c.get("grade"))
+        else:
+            chain = catalog.stack_filter([{"id": c.get("id"), "params": c.get("params") or {}, "enabled": True}], w, h, fps)
+        if not chain:
+            continue
+        chain = re.sub(r"\[([A-Za-z]\w*)\]", lambda m: f"[{m.group(1)}_c{i}]", chain)
+        chains.append(f"{cur}split[fxm{i}][fxs{i}];"
+                      f"[fxs{i}]trim=start={s:.3f}:end={en:.3f},setpts=PTS-STARTPTS,{chain},"
+                      f"scale={w}:{h},setsar=1,format=yuv420p,setpts=PTS+{s:.3f}/TB[fxe{i}];"
+                      f"[fxm{i}][fxe{i}]overlay=0:0:eof_action=pass:enable='between(t\\,{s:.3f}\\,{en:.3f})'[fxo{i}]")
+        cur = f"[fxo{i}]"
+    return cur
+
+
 def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript: dict | None,
            preset: dict, style: dict | None, out_dir: Path, name: str, hook: dict | None = None,
            focus_x: float = 0.5, focus_y: float = 0.5, burn_captions: bool | None = None,
@@ -223,6 +281,11 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     keep = [(a, b) for a, b in keep if b - a >= 1 / fps]
     if not keep:
         raise ValueError("कट के बाद कुछ नहीं बचा — कुछ कट बंद करें")
+    if clip:
+        # text / overlays / sfx / effect clips are timed on the FULL video's output timeline;
+        # a Short (or a preview frame) starts somewhere inside it → move them to the Short's own clock
+        full_out, _ = out_timeline(edl, fps, effects)
+        _shift_items(e, full_out(keep[0][0]) or 0.0)
     e_tr_default = (effects or {}).get("transition") or "none"
     segs = _segment_timeline(_plan_segments(keep, edl, e_tr_default, (effects or {}).get("speed") or edl.get("speed")))
     use_segments = any(fx.is_xfade(sg["tr"]) or sg["rate"] != 1.0 for sg in segs)
@@ -408,7 +471,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         v += "," + tr_filters
     v += "[vbase]"
     chains.append(v)
-    cur = "[vbase]"
+    cur = _fx_clips(e, w, h, fps, new_dur, "[vbase]", chains)
 
     # ---- B-roll / image overlays
     for i, item in enumerate(e.get("broll") or []):
