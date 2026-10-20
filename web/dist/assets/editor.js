@@ -538,7 +538,7 @@ function renderInspector() {
   } else if (type === "hook") {
     h = `<h3>Heading / Hook</h3><p class="small muted">शुरू के कुछ सेकंड वीडियो पर बड़ा दिखता है।</p>${field("लिखें ( | से नई लाइन )", `<textarea data-k="text" rows="2" ${dis}>${esc(it.text || "")}</textarea>`)}
       <div class="irow">${field("कितने सेकंड", num("seconds", it.seconds || 3, 0.5, 1, 15))}${field("जगह", `<select data-k="position" ${dis}>${["top", "center", "bottom"].map((p) => `<option value="${p}" ${(it.position || "top") === p ? "selected" : ""}>${{ top: "ऊपर", center: "बीच", bottom: "नीचे" }[p]}</option>`).join("")}</select>`)}</div>
-      <div class="irow">${field("आकार", `<input type="range" data-k="size_scale" min="0.5" max="1.8" step="0.05" value="${it.size_scale || 1}" ${dis}>`)}${field("font", `<select data-k="font" ${dis}><option value="">style जैसा</option>${(E.ctx.S.presets?.fonts || []).map((f) => `<option ${it.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
+      <div class="irow">${field("आकार", `<input type="range" data-k="size_scale" min="0.5" max="1.8" step="0.05" value="${it.size_scale || 1}" ${dis}>`)}${field("font", `<select data-k="font" ${dis}><option value="">style जैसा</option>${fontList().map((f) => `<option ${it.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
       <div class="irow">${field("अक्षर रंग", `<input type="color" data-k="color" value="${it.color || "#111111"}" ${dis}>`)}${field("पीछे का रंग", `<input type="color" data-k="bg" value="${it.bg || "#FFD400"}" ${dis}>`)}<label class="chk small"><input type="checkbox" data-k="italic" ${it.italic ? "checked" : ""} ${dis}> <i>italic</i></label></div>
       <div class="irow"><button class="btn small" data-act="seek0">शुरू पर जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "video") {
@@ -676,7 +676,7 @@ function renderPanel() {
       <div class="styles">${(S.presets?.caption_styles || []).map((cs) => stylePreview(cs, E.rs.caption_style === cs.id)).join("")}</div>
       <h4>अपने हिसाब से</h4>
       <div class="irow">${field("आकार", `<input type="range" id="cap-size" min="0.6" max="1.8" step="0.05" value="${ov.size_scale ?? 1}" ${dis}>`)}${field("जगह", `<select id="cap-pos" ${dis}><option value="">style जैसी</option>${["bottom", "center", "top"].map((p) => `<option value="${p}" ${ov.position === p ? "selected" : ""}>${{ bottom: "नीचे", center: "बीच", top: "ऊपर" }[p]}</option>`).join("")}</select>`)}</div>
-      <div class="irow">${field("font", `<select id="cap-font" ${dis}><option value="">style जैसा</option>${(S.presets?.fonts || []).map((f) => `<option ${ov.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
+      <div class="irow">${field("font", `<select id="cap-font" ${dis}><option value="">style जैसा</option>${fontList().map((f) => `<option ${ov.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
       <div class="irow">${field("अक्षर", `<input type="color" id="cap-primary" value="${ov.primary || "#ffffff"}" ${dis}>`)}${field("highlight", `<input type="color" id="cap-highlight" value="${ov.highlight || "#ffd400"}" ${dis}>`)}${field("outline", `<input type="color" id="cap-outline-color" value="${ov.outline_color || "#000000"}" ${dis}>`)}${field("", `<label class="chk small"><input type="checkbox" id="cap-usecolors" ${ov.primary ? "checked" : ""} ${dis}> रंग लागू</label>`)}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" id="cap-italic" ${ov.italic === true ? "checked" : ""} ${dis}> <i>तिरछा (italic)</i></label><label class="chk small"><input type="checkbox" id="cap-upper" ${ov.uppercase === true ? "checked" : ""} ${dis}> ABC uppercase</label><label class="chk small"><input type="checkbox" id="cap-bold" ${ov.bold === false ? "" : "checked"} ${dis}> <b>bold</b></label></div>
       <div class="irow">${field("अक्षरों के बीच जगह", `<input type="range" id="cap-spacing" min="-0.005" max="0.02" step="0.001" value="${ov.letter_spacing === "" || ov.letter_spacing == null ? 0 : ov.letter_spacing}" ${dis}>`)}${field("outline मोटाई", `<input type="range" id="cap-outline" min="0" max="3" step="0.1" value="${ov.outline_scale === "" || ov.outline_scale == null ? 1 : ov.outline_scale}" ${dis}>`)}${field("shadow", `<input type="range" id="cap-shadow" min="0" max="3" step="0.1" value="${ov.shadow_scale === "" || ov.shadow_scale == null ? 1 : ov.shadow_scale}" ${dis}>`)}</div>
@@ -689,6 +689,8 @@ function renderPanel() {
     h = `<div class="ph"><h3>Text</h3><span class="small muted">playhead पर जुड़ेगा</span></div>
       <div class="irow" style="margin-bottom:.6rem"><button class="btn small" id="hook-edit" ${dis}>🪝 Heading / Hook ${E.rs.hook.text ? "बदलें" : "जोड़ें"}</button>${E.rs.hook.text ? `<span class="small muted grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(E.rs.hook.text)}</span>` : ""}</div>
       ${textGallery(dis)}
+      <div class="box"><b>अपने fonts</b><p class="small muted">Google Fonts या किसी free site से .ttf/.otf font upload करें — text, captions और heading सब में चुन सकेंगे। ${(E.lib || []).filter((x) => x.kind === "font").map((x) => `<span class="pill small" style="font-family:'${esc(x.meta?.family || x.name)}'">${esc(x.meta?.family || x.name)}</span>`).join(" ")}</p>
+        <label class="btn small">⬆ Font upload<input type="file" id="font-up" accept=".ttf,.otf" multiple hidden ${dis}></label><div id="lib-progress"></div></div>
       <h4>Timeline पर</h4><ul class="plist">${fx.titles.map((ti) => `<li class="${E.sel?.type === "title" && E.sel.id === ti._id ? "sel" : ""}" data-title-id="${ti._id}"><span class="grow small">${esc(ti.text)}</span><span class="small muted">${fmt(ti.start)}</span></li>`).join("") || `<li class="muted small">अभी कोई text नहीं</li>`}</ul>`;
   } else if (t === "transitions") {
     const nCuts = E.cuts.filter((c) => c.enabled !== false).length;
@@ -738,7 +740,7 @@ function renderPanel() {
       <div class="irow" style="flex-wrap:wrap">${clips.filter((x) => !mo.clips.some((c) => c.id === x.id)).map((x) => `<button class="btn small quiet" data-moadd="${x.id}" ${dis}>+ ${esc(x.name.slice(0, 18))}</button>`).join("") || `<span class="small muted">library में कोई clip/image नहीं — Media tab में upload करें</span>`}</div>
       <h4>Music</h4>${field("", `<select id="mo-music" ${dis}><option value="">— चुनें —</option>${musics.map((m) => `<option value="${m.id}" ${mo.music === m.id ? "selected" : ""}>${esc(m.name)}${m.meta?.duration ? ` (${fmt(m.meta.duration)})` : ""}</option>`).join("")}</select>`)}
       <h4>Text lines (एक line = एक message, | से line break)</h4>${field("", `<textarea id="mo-texts" rows="4" ${dis}>${esc(mo.texts)}</textarea>`)}
-      <div class="irow">${field("font", `<select id="mo-font" ${dis}>${(S.presets?.fonts || []).map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field("आकार", `<input type="range" id="mo-size" min="0.04" max="0.12" step="0.005" value="${mo.text_size}" ${dis}>`)}</div>
+      <div class="irow">${field("font", `<select id="mo-font" ${dis}>${fontList().map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field("आकार", `<input type="range" id="mo-size" min="0.04" max="0.12" step="0.005" value="${mo.text_size}" ${dis}>`)}</div>
       <h4>Cut</h4><div class="irow">${field("हर कितने beat पर", `<select id="mo-every" ${dis}>${[1, 2, 4, 8].map((n) => `<option value="${n}" ${mo.every == n ? "selected" : ""}>${n} beat</option>`).join("")}</select>`)}${field("लंबाई", `<select id="mo-max" ${dis}>${[15, 20, 30, 45, 60, 90].map((n) => `<option value="${n}" ${mo.max_seconds == n ? "selected" : ""}>${n}s</option>`).join("")}</select>`)}
         ${field("format", `<select id="mo-preset" ${dis}>${vert.map((pl) => `<option value="${pl.id}" ${mo.preset === pl.id ? "selected" : ""}>${esc(pl.label)}</option>`).join("")}</select>`)}</div>
       <div class="irow">${field("look", `<select id="mo-look" ${dis}>${looks.map((l) => `<option value="${l.id}" ${mo.look === l.id ? "selected" : ""}>${esc(l.label)}</option>`).join("")}</select>`)}<label class="chk small"><input type="checkbox" id="mo-flash" ${mo.flash ? "checked" : ""} ${dis}> beat flash</label>
@@ -859,6 +861,7 @@ function bindPanel() {
   $$("[data-tcat]", panel).forEach((b) => (b.onclick = () => { E.tCat = b.dataset.tcat; renderPanel(); }));
   $$("[data-tlang]", panel).forEach((b) => (b.onclick = () => { E.tLang = b.dataset.tlang; renderPanel(); }));
   on("#t-blank", "onclick", () => addTemplate(null));
+  on("#font-up", "onchange", async (e) => { for (const f of e.target.files) await libUpload("font", f); });
   on("#t-q", "oninput", (e) => { E.tQ = e.target.value; clearTimeout(E.tqT); E.tqT = setTimeout(() => { renderPanel(); const q = $("#t-q", panel); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 250); });
   $$("[data-title-id]", panel).forEach((li) => (li.onclick = () => { const ti = fx.titles.find((x) => x._id === li.dataset.titleId); select({ type: "title", id: ti._id }); seek(srcOf(ti.start)); }));
   // project clips
@@ -982,14 +985,20 @@ async function uploadClip(file, onProgress, startAfter) {
 }
 function libItem(id) { return (E.lib || []).find((x) => x.id === id); }
 async function loadRefs() { try { E.refs = await E.ctx.api("GET", `/refs?project_id=${E.pid}`); } catch { E.refs = []; } if (E && E.tab === "refs") renderPanel(); }
-async function loadLib() { try { E.lib = await E.ctx.api("GET", "/library"); } catch { E.lib = []; } if (E && ["media", "audio", "overlay", "montage"].includes(E.tab)) renderPanel(); else renderOverlay(); }
+function fontList() { return [...new Set([...(E.ctx.S.presets?.fonts || []), ...(E.lib || []).filter((x) => x.kind === "font").map((x) => x.meta?.family || x.name)])]; }
+function injectFonts() {
+  const fonts = (E.lib || []).filter((x) => x.kind === "font"); let st = document.getElementById("vivid-user-fonts");
+  if (!st) { st = document.createElement("style"); st.id = "vivid-user-fonts"; document.head.appendChild(st); }
+  st.textContent = fonts.map((f) => `@font-face{font-family:"${(f.meta?.family || f.name).replace(/"/g, "")}";src:url("${f.url}");}`).join("\n");
+}
+async function loadLib() { try { E.lib = await E.ctx.api("GET", "/library"); } catch { E.lib = []; } injectFonts(); if (E && ["media", "audio", "overlay", "montage"].includes(E.tab)) renderPanel(); else renderOverlay(); }
 async function libUpload(kind, file) {
   const { toast } = E.ctx; const prog = $("#lib-progress", E.root) || document.createElement("div");
   prog.innerHTML = `<p class="small muted">${file.name} upload हो रहा…</p><div class="progress"><i style="width:30%"></i></div>`;
   try {
     const r = await fetch(`/api/library?kind=${kind}&filename=${encodeURIComponent(file.name)}`, { method: "PUT", headers: { authorization: "Bearer " + E.ctx.S.token, "content-type": "application/octet-stream" }, body: file });
     const data = await r.json(); if (!r.ok) throw new Error(data.error || r.statusText);
-    E.lib = E.lib || []; E.lib.unshift(data); toast(`${file.name} जुड़ा`); prog.innerHTML = ""; return data;
+    E.lib = E.lib || []; E.lib.unshift(data); toast(`${file.name} जुड़ा`); prog.innerHTML = ""; if (kind === "font") { injectFonts(); renderPanel(); } return data;
   } catch (err) { toast(err.message); }
   prog.innerHTML = "";
 }

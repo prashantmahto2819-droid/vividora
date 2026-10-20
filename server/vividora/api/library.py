@@ -34,7 +34,13 @@ MAX_SIZE = 2 * 1024 ** 3
 
 
 def _probe_meta(path: Path, kind: str) -> dict:
-    if kind in ("lut", "font"):
+    if kind == "font":
+        try:  # family name as libass / CSS will know it
+            fam = subprocess.run(["fc-scan", "--format", "%{family[0]}", str(path)], capture_output=True, text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            fam = ""
+        return {"family": fam or path.stem}
+    if kind == "lut":
         return {}
     try:
         out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format",

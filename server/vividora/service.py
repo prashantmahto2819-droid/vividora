@@ -332,7 +332,8 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
     c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? "
               "AND kind='render' AND status='queued'", (db.now(), pid))
     set_status(c, pid, "rendering", f"{len(opts['presets'])} वीडियो render हो रहे हैं")
-    return [queue.enqueue(c, pid, "render", {"preset": p, **{k: v for k, v in opts.items() if k != 'presets'}})
+    fonts = [r[0] for r in c.execute("SELECT id FROM library WHERE workspace_id = ? AND kind = 'font'", (project["workspace_id"],))]
+    return [queue.enqueue(c, pid, "render", {"preset": p, "fonts": fonts, **{k: v for k, v in opts.items() if k != 'presets'}})
             for p in opts["presets"]]
 
 

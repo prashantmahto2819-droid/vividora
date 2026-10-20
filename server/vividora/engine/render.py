@@ -28,6 +28,23 @@ from .ffmpeg import ProgressFn
 FONTS_DIR = Path(__file__).resolve().parent.parent.parent / "fonts"
 
 
+def fonts_with(extra: list[Path] | None, work: Path) -> Path:
+    """Bundled fonts + the creator's uploaded fonts in one folder (libass reads a single fontsdir)."""
+    if not extra:
+        return FONTS_DIR
+    d = work / "fonts"
+    d.mkdir(parents=True, exist_ok=True)
+    for f in [*FONTS_DIR.glob("*.[ot]tf"), *extra]:
+        dst = d / f.name
+        if not dst.exists():
+            try:
+                dst.symlink_to(f.resolve())
+            except OSError:
+                import shutil
+                shutil.copy2(f, dst)
+    return d
+
+
 def _snap(t: float, fps: float) -> float:
     return round(t * fps) / fps
 
@@ -397,8 +414,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         )
         # ass + complex shaping: HarfBuzz places Devanagari matras (ि, र्) correctly
         sub = f"ass=filename='{ffmpeg.escape_filter_path(ass)}':shaping=complex"
-        if FONTS_DIR.exists():
-            sub += f":fontsdir='{ffmpeg.escape_filter_path(FONTS_DIR)}'"
+        fdir = fonts_with([Path(x) for x in (e.get("font_paths") or [])], work)
+        if fdir.exists():
+            sub += f":fontsdir='{ffmpeg.escape_filter_path(fdir)}'"
         tail += f"{sub},"
     chains.append(f"{cur}{tail}format=yuv420p[v]")
     maps = ["-map", "[v]"]
@@ -489,7 +507,6 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     rec = preset.get("recommended_seconds")
     if rec and new_dur > rec and not (max_s and new_dur > max_s):
         warnings.append(f"{preset.get('label')}: {rec}s से छोटा रखने पर reach अच्छी रहती है")
-    for f in work.iterdir():
-        f.unlink()
-    work.rmdir()
+    import shutil as _sh
+    _sh.rmtree(work, ignore_errors=True)
     return {"files": files, "duration": round(new_dur, 2), "warnings": warnings}

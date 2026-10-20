@@ -153,7 +153,8 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 focus_x=float(p.get("focus_x", 0.5)), focus_y=float(p.get("focus_y", 0.5)),
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
-                effects=_resolve_effects(client, p.get("effects"), tmp, assets),
+                effects={**_resolve_effects(client, p.get("effects"), tmp, assets),
+                         "font_paths": [str(client.download_library(fid, tmp / "fonts" / f"{fid}.ttf")) for fid in (p.get("fonts") or [])]},
                 encoder_preset=os.getenv("X264_PRESET") or None,
                 on_progress=_progress(client, job["id"]),
             )
