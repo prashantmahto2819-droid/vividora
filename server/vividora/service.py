@@ -279,6 +279,10 @@ def after_job(c, job: dict, result: dict) -> None:
                 db.update(c, "projects", pid, {"meta": {**project["meta"], "publish_plan": pp,
                                                         "autopilot": {**project["meta"]["autopilot"], "stage": "review"}}})
                 set_status(c, pid, "review_output", f"autopilot पूरा: {len(outs)} वीडियो तैयार — देखें, मंज़ूरी दें, publish")
+                # --- thumbnail studio: 3 A/B thumbnails, made in a background thread after this commit
+                from .thumbs import autopilot_thumbnails
+                autopilot_thumbnails(pid)
+                # ---
             else:
                 set_status(c, pid, "review_output", " · ".join(warns) if warns else "render तैयार — देखें और मंज़ूरी दें")
             notify.on_event("review_output", project, " · ".join(warns))

@@ -12,11 +12,12 @@ from __future__ import annotations
 import secrets as pysecrets
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, RedirectResponse
 from starlette.routing import Route
 
-from .. import db, queue, service, storage
+from .. import db, queue, service, storage, thumbs
 from ..config import settings
 from ..engine import metadata
 from ..publish import meta as metaapi
@@ -195,13 +196,15 @@ async def create_publication(request: Request, user: dict):
            "connection_id": conn["id"], "platform": conn["platform"], "status": "queued", "payload": payload,
            "remote_id": None, "url": None, "error": None, "created_by": user["id"], "created_at": db.now(),
            "finished_at": None}
+    # thumbnail studio: the selected 1280×720 thumbnail (auto-made if none) — never the 360p preview still
+    thumb_id = await run_in_threadpool(thumbs.publish_thumb_asset_id, p) if conn["platform"] == "youtube" else None
     with db.tx() as c:
         db.insert(c, "publications", pub)
         job = queue.enqueue(c, p["id"], "publish", {
             "publication_id": pub["id"], "platform": conn["platform"], "asset_id": asset["id"],
             "secrets": conn["secrets"], "payload": payload,
             "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=48)}" if settings.public_url else None,
-            "thumb_asset_id": (service.asset_of(p["id"], "thumb") or {}).get("id"),
+            "thumb_asset_id": thumb_id,
             "dry_run": settings.publish_dry_run})
         service.log(c, user["workspace_id"], "publish.queue", user_id=user["id"], project_id=p["id"],
                     detail={"platform": conn["platform"], "title": payload["title"]})
@@ -217,6 +220,8 @@ async def publish_plan_run(request: Request, user: dict):
     data = await body(request)
     items = data.get("items") or (p.get("meta") or {}).get("publish_plan") or []
     queued = []
+    yt = any((db.get("connections", it.get("connection_id") or "") or {}).get("platform") == "youtube" for it in items if it.get("selected", True))
+    thumb_id = await run_in_threadpool(thumbs.publish_thumb_asset_id, p) if yt else None
     with db.tx() as c:
         for it in items:
             if not it.get("selected", True):
@@ -236,7 +241,7 @@ async def publish_plan_run(request: Request, user: dict):
             queue.enqueue(c, p["id"], "publish", {
                 "publication_id": pub["id"], "platform": conn["platform"], "asset_id": asset["id"], "secrets": conn["secrets"],
                 "payload": payload, "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=48)}" if settings.public_url else None,
-                "thumb_asset_id": (service.asset_of(p["id"], "thumb") or {}).get("id"), "dry_run": settings.publish_dry_run})
+                "thumb_asset_id": thumb_id if conn["platform"] == "youtube" else None, "dry_run": settings.publish_dry_run})
             queued.append(pub["id"])
         service.log(c, user["workspace_id"], "publish.plan", user_id=user["id"], project_id=p["id"], detail={"count": len(queued)})
     return ok({"queued": queued})

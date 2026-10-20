@@ -1,19 +1,55 @@
 // Vividora dashboard — plain JS, no build step. Served by the API from web/dist.
 import * as ED from "./editor.js";
 import * as REC from "./record.js";
+import * as TH from "./thumbs.js";
 
 const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null, channels: [], channel: localStorage.getItem("vividora_channel") || "",
-            route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null };
+            route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null,
+            sel: new Set(), pview: lsGet("vividora_pview") || "grid", pq: "", pch: "", overview: null, pubs: null, calOff: 0, pubTab: "queue" };
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (t) => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = (t % 60); return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`; };
+const fmtDur = (t) => { t = Math.round(t || 0); const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60; return `${h ? h + ":" + String(m).padStart(2, "0") : m}:${String(s).padStart(2, "0")}`; };
 const gb = (b) => b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(1) + " GB" : (b / 1024 ** 2).toFixed(0) + " MB";
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+function relTime(iso) {
+  if (!iso) return ""; const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60) return "अभी"; if (d < 3600) return `${Math.floor(d / 60)} मिनट पहले`; if (d < 86400) return `${Math.floor(d / 3600)} घंटे पहले`;
+  if (d < 86400 * 7) return `${Math.floor(d / 86400)} दिन पहले`; return new Date(iso).toLocaleDateString("hi-IN", { day: "numeric", month: "short" });
+}
 const STATUS = {
   uploading: ["upload बाकी", ""], preparing: ["जाँच हो रही है", "working"], transcribing: ["transcript बन रहा है", "working"],
   cutting: ["कट ढूँढे जा रहे हैं", "working"], review_cuts: ["कट जाँचें", "review"], rendering: ["render हो रहा है", "working"],
   review_output: ["मंज़ूरी बाकी", "review"], approved: ["मंज़ूर", "approved"], failed: ["रुक गया", "failed"],
 };
+const WORKING = ["preparing", "transcribing", "cutting", "rendering"];
+const JOBK = { prepare: "जाँच + preview", transcribe: "transcript", autocut: "कट", render: "render", shorts_plan: "Shorts ढूँढना", publish: "publish", montage: "montage", matte: "cutout" };
+
+// ---------- icons (stroke, 24 grid) ----------
+const IC = {
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  rec: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
+  upload: '<path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
+  bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
+  trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  send: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="m10 15 2 2 3-4"/>',
+  lib: '<path d="M4 5a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/>',
+  tv: '<rect x="2" y="6" width="20" height="14" rx="2"/><path d="m8 2 4 4 4-4"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/>',
+  film: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', plus: '<path d="M12 5v14M5 12h14"/>', out: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/>',
+  dots: '<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>', search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+};
+const ic = (n, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ""}</svg>`;
 
 // ---------- api ----------
 async function api(method, path, body, raw) {
@@ -30,116 +66,313 @@ function logout() { S.token = null; S.user = null; localStorage.removeItem("vivi
 function toast(msg, ms = 2600) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
 
 // ---------- routing ----------
-function parseRoute() { const p = location.hash.replace(/^#/, "") || "/"; const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library)?\/?([^/]*)/) || []; return { kind: kind || "home", id }; }
+function parseRoute() {
+  const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account)?\/?([^/]*)/) || [];
+  return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
+}
 function go(path) { location.hash = path; }
-window.addEventListener("hashchange", () => { S.route = parseRoute(); load().then(render); });
+window.addEventListener("hashchange", () => { S.route = parseRoute(); document.body.classList.remove("nav-open"); closeMenu(); load().then(render); });
 
 // ---------- data ----------
 async function load() {
   if (!S.token) return;
+  const r = S.route;
   if (!S.presets) S.presets = await api("GET", "/presets").catch(() => null);
   S.channels = await api("GET", "/channels").catch(() => []);
   if (!S.channels.find((c) => c.id === S.channel)) S.channel = S.channels[0]?.id || "";
-  S.projects = await api("GET", "/projects" + (S.channel && S.channels.length > 1 ? `?channel=${S.channel}` : ""));
-  if (S.route.kind === "home") { const [t, i, a] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [] })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [] }))]); S.homeTrends = t.trends || []; S.ideas = i; S.analytics = a; }
-  if (S.route.kind === "projects" && S.route.id) {
-    S.project = await api("GET", "/projects/" + S.route.id).catch(() => null);
+  const allCh = r.kind === "projects" && !r.id && S.pch === "all";
+  const chQ = S.channel && S.channels.length > 1 && !allCh ? `?channel=${S.pch && S.pch !== "all" && r.kind === "projects" ? S.pch : S.channel}` : "";
+  S.projects = await api("GET", "/projects" + chQ);
+  const ovQ = S.channels.length > 1 ? `?channel=${S.channel}` : "";
+  if (r.kind === "home") { const [t, i, a, o] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [] })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [] })), api("GET", "/overview" + ovQ).catch(() => null)]); S.homeTrends = t.trends || []; S.ideas = i; S.analytics = a; S.overview = o; }
+  if (r.kind === "projects" && r.id) {
+    S.project = await api("GET", "/projects/" + r.id).catch(() => null);
   } else S.project = null;
-  if (S.route.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
-  if (S.route.kind === "users") S.users = await api("GET", "/users").catch(() => []);
-  if (S.route.kind === "plan") { const [t, i, n, r] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = r; }
-  if (S.route.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
-  if (S.route.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
-  if (S.route.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); }
+  if (r.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
+  if (r.kind === "users" || (r.kind === "account" && S.user?.role === "admin")) S.users = await api("GET", "/users").catch(() => []);
+  if (r.kind === "plan") { const [t, i, n, rf] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = rf; }
+  if (r.kind === "trends") S.trends = await api("GET", "/trends").catch(() => ({ trends: [], setup: {} }));
+  if (r.kind === "publish") { const [o, p] = await Promise.all([api("GET", "/overview" + ovQ).catch(() => null), api("GET", "/publications" + ovQ).catch(() => [])]); S.overview = o; S.pubs = p; }
+  if (r.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
+  if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
+  if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); }
+  const ids = new Set(S.projects.map((p) => p.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   schedulePoll();
 }
 function schedulePoll() {
   clearTimeout(S.poll);
-  const busy = S.project && (["preparing", "transcribing", "cutting", "rendering"].includes(S.project.status) || (S.project.jobs || []).some((j) => ["queued", "running"].includes(j.status)));
-  const anyBusy = S.projects.some((p) => ["preparing", "transcribing", "cutting", "rendering"].includes(p.status));
+  const busy = S.project && (WORKING.includes(S.project.status) || (S.project.jobs || []).some((j) => ["queued", "running"].includes(j.status)));
+  const anyBusy = S.projects.some((p) => WORKING.includes(p.status)) || (S.route.kind === "home" && (S.overview?.jobs || []).length);
   if (busy || anyBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy ? 2500 : 6000);
 }
-function renderSoft() { if (document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) { schedulePoll(); return; } render(); }
+function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || S.route.kind === "thumbs") { schedulePoll(); return; } render(); }
+
+// ---------- shell: left nav, mobile top bar + tab bar ----------
+const NAV = [
+  [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"]]],
+  ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan · ideas"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["publish", "#/publish", "send", "Publish · Calendar"]]],
+  ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
+];
+function navActive(id) {
+  const k = S.route.kind; const mont = /type=montage/.test(location.hash);
+  if (id === "montage") return k === "new" && mont; if (id === "new") return k === "new" && !mont;
+  if (id === "account") return k === "account" || k === "users"; return k === id;
+}
+function shellHTML(main, wide = false) {
+  const canEdit = S.user.role !== "viewer";
+  const review = S.projects.filter((p) => p.status === "review_cuts" || p.status === "review_output").length;
+  const badges = { projects: review || "", publish: (S.overview?.upcoming || []).length || "" };
+  const chn = S.channels.find((c) => c.id === S.channel);
+  const initials = (S.user.name || "?").split(/\s+/).map((x) => x[0]).slice(0, 2).join("").toUpperCase();
+  return `<div class="app2">
+    <aside class="nav" id="nav" aria-label="मुख्य menu">
+      <div class="nav-head"><a class="brand" href="#/"><i></i>Vividora</a></div>
+      ${canEdit ? `<a class="btn primary nav-new" href="#/new">${ic("plus")} नया वीडियो</a>` : ""}
+      ${S.channels.length ? `<div class="chsw"><span class="chdot" style="background:${esc(chn?.color || "#F2B33D")}"></span><select id="ch-switch" title="channel">${S.channels.map((c) => `<option value="${c.id}" ${c.id === S.channel ? "selected" : ""}>${esc(c.name)}${c.handle ? " · " + esc(c.handle) : ""}</option>`).join("")}</select></div>` : ""}
+      <nav class="nav-list">${NAV.map(([sec, items]) => `${sec ? `<div class="nav-sec">${sec}</div>` : ""}${items.filter((it) => !it[4] || canEdit).map(([id, href, icon, label]) => `<a class="nav-item ${navActive(id) ? "on" : ""}" href="${href}">${ic(icon)}<span>${label}</span>${badges[id] ? `<em>${badges[id]}</em>` : ""}</a>`).join("")}`).join("")}
+        ${S.user.role === "admin" ? `<a class="nav-item ${S.route.kind === "users" ? "on" : ""}" href="#/users">${ic("tv")}<span>Users</span></a>` : ""}</nav>
+      <div class="nav-foot"><span class="avatar">${esc(initials)}</span><span class="nav-user"><b>${esc(S.user.name)}</b><span class="small muted">${S.user.role}</span></span><button class="ibtn" id="logout" title="बाहर">${ic("out")}</button></div>
+    </aside>
+    <div class="nav-scrim" id="nav-scrim"></div>
+    <header class="topbar"><button class="ibtn" id="nav-open" aria-label="menu">${ic("menu")}</button><a class="brand" href="#/"><i></i>Vividora</a>${canEdit ? `<a class="btn primary small" href="#/new">${ic("plus")} नया</a>` : "<span></span>"}</header>
+    <main class="main ${wide ? "wide" : ""}">${main}</main>
+    <nav class="tabbar">${[["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"], ["record", "#/record", "rec", "Record"], ["thumbs", "#/thumbs", "image", "Thumbs"], ["more", "", "menu", "More"]].map(([id, href, icon, label]) => id === "more" ? `<button class="tab" id="tab-more">${ic(icon)}<span>${label}</span></button>` : `<a class="tab ${navActive(id) ? "on" : ""} ${id === "record" ? "tab-rec" : ""}" href="${href}">${ic(icon)}<span>${label}</span></a>`).join("")}</nav>
+  </div>`;
+}
+function bindShell() {
+  $("#logout").onclick = logout;
+  const chs = $("#ch-switch"); if (chs) chs.onchange = () => { S.channel = chs.value; lsSet("vividora_channel", S.channel); load().then(render); };
+  const open = () => document.body.classList.add("nav-open"); const close = () => document.body.classList.remove("nav-open");
+  $("#nav-open").onclick = open; $("#tab-more").onclick = open; $("#nav-scrim").onclick = close;
+}
 
 // ---------- views ----------
 const EDITOR_STATUS = ["review_cuts", "rendering", "review_output", "approved"];
 function render() {
   const app = $("#app");
-  if (!S.token) { ED.unmount(); app.innerHTML = loginView(); bindLogin(); return; }
+  closeMenu();
+  if (!S.token) { ED.unmount(); TH.unmount(); app.dataset.mode = ""; app.innerHTML = loginView(); bindLogin(); return; }
   const r = S.route;
   const detail = r.kind === "projects" && r.id;
   if (r.kind === "record") {
-    if (app.dataset.mode !== "record") { ED.unmount(); app.dataset.mode = "record"; app.innerHTML = `<div id="recroot"></div>`; REC.mount($("#recroot"), { S, api, esc, toast, go, uploadFile }); }
+    if (app.dataset.mode !== "record") { ED.unmount(); TH.unmount(); app.dataset.mode = "record"; app.innerHTML = `<div id="recroot"></div>`; REC.mount($("#recroot"), { S, api, esc, toast, go, uploadFile }); }
     return;
   }
   if (app.dataset.mode === "record") REC.unmount();
+  if (r.kind === "thumbs" && r.id) {
+    const key = "thumbs:" + r.id;
+    if (app.dataset.mode === key) return; // the studio keeps its own state; polling must not wipe it
+    ED.unmount(); app.dataset.mode = key; app.innerHTML = shellHTML(`<div id="throot"></div>`, true); bindShell();
+    TH.mount($("#throot"), r.id, { S, api, esc, toast, go });
+    return;
+  }
+  if ((app.dataset.mode || "").startsWith("thumbs:")) TH.unmount();
   if (detail && S.project && EDITOR_STATUS.includes(S.project.status) && S.presets) {
     const key = "editor:" + S.project.id;
     if (app.dataset.mode !== key) { app.dataset.mode = key; app.innerHTML = `<div id="edroot"></div>`; }
     ED.mount($("#edroot"), S.project, { S, api, esc, fmt, toast, load, render, go, stylePreview });
+    const top = $(".ed-top-right");
+    if (top && !$("#ed-thumb")) top.insertAdjacentHTML("afterbegin", `<a class="btn small ed-thumb" id="ed-thumb" href="#/thumbs/${S.project.id}" title="Thumbnail studio — YouTube thumbnail / Shorts cover">🖼<span> Thumbnail</span></a>`);
     return;
   }
   app.dataset.mode = "shell"; ED.unmount();
-  app.innerHTML = `<div class="shell">
-    <aside class="rail ${detail || r.kind !== "home" ? "hidden-mobile" : ""}">
-      <div class="rail-head"><a class="brand" href="#/"><i></i>Vividora</a>
-        ${S.user.role !== "viewer" ? `<span class="row" style="gap:.3rem"><a class="btn quiet" href="#/record" title="camera + teleprompter">⏺</a><a class="btn primary" href="#/new">+ नया</a></span>` : ""}</div>
-      ${S.channels.length ? `<div class="chsw"><select id="ch-switch" title="channel">${S.channels.map((c) => `<option value="${c.id}" ${c.id === S.channel ? "selected" : ""}>${esc(c.name)}${c.handle ? " · " + esc(c.handle) : ""}</option>`).join("")}</select>${S.user.role === "admin" ? `<a class="ibtn" href="#/settings" title="channels manage">⚙</a>` : ""}</div>` : ""}
-      <div class="rail-list">${S.projects.length ? S.projects.map(projRow).join("") : `<p class="muted" style="padding:1rem">अभी कोई project नहीं। "+ नया" से पहली recording डालें।</p>`}</div>
-      <div class="rail-foot"><span>${esc(S.user.name)} <span class="muted">· ${S.user.role}</span></span>
-        <span class="row" style="gap:.1rem"><a class="btn quiet small" href="#/library">library</a><a class="btn quiet small" href="#/plan">plan</a><a class="btn quiet small" href="#/analytics">analytics</a><a class="btn quiet small" href="#/status">status</a><a class="btn quiet small" href="#/settings">channels</a>${S.user.role === "admin" ? `<a class="btn quiet small" href="#/users">users</a>` : ""}<button class="btn quiet small" id="logout">बाहर</button></span></div>
-    </aside>
-    <main class="main ${r.kind === "home" ? "wide" : ""}">${r.kind === "new" ? newView() : r.kind === "users" ? usersView() : r.kind === "status" ? statusView() : r.kind === "settings" ? settingsView() : r.kind === "plan" ? planView() : r.kind === "analytics" ? analyticsView() : r.kind === "library" ? libraryView() : detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : homeView()}</main>
-  </div>`;
-  $("#logout").onclick = logout;
-  const chs = $("#ch-switch"); if (chs) chs.onchange = () => { S.channel = chs.value; localStorage.setItem("vividora_channel", S.channel); load().then(render); };
-  if (r.kind === "new") bindNew(); if (r.kind === "users") bindUsers(); if (r.kind === "settings") bindSettings(); if (r.kind === "plan") bindPlan(); if (r.kind === "analytics") bindAnalytics(); if (r.kind === "home" || (!r.kind)) bindHome(); if (r.kind === "library") bindLibrary();
-  if (detail && S.project) bindProject(S.project);
+  const views = { new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
+                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView };
+  const main = detail ? (S.project ? projectView(S.project) : `<p>project नहीं मिला।</p>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
+  app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends"].includes(r.kind) && !detail);
+  bindShell();
+  const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, library: bindLibrary, home: bindHome,
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards };
+  if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
-function projRow(p) {
+// ---------- project cards, ⋯ menu, bulk actions ----------
+function pcard(p, opts = {}) {
   const [label, cls] = STATUS[p.status] || [p.status, ""];
-  return `<a class="proj ${S.project && S.project.id === p.id ? "active" : ""}" href="#/projects/${p.id}">
-    ${p.thumb_url ? `<img src="${p.thumb_url}" alt="">` : `<div class="ph"></div>`}
-    <div><b>${esc(p.title)}</b><span class="status ${cls}">${label}</span></div></a>`;
+  const canEdit = S.user.role !== "viewer" && opts.select !== false;
+  const ch = S.channels.length > 1 ? S.channels.find((c) => c.id === p.channel_id) : null;
+  const href = opts.href ? opts.href(p) : `#/projects/${p.id}`;
+  return `<div class="pc ${S.sel.has(p.id) ? "picked" : ""}" data-pid="${p.id}">
+    <div class="pc-thumb"><a class="pc-link" href="${href}" aria-label="${esc(p.title)}"></a>
+      ${p.thumb_url ? `<img src="${p.thumb_url}" alt="" loading="lazy">` : `<div class="ph">${ic(p.kind === "montage" ? "music" : "film")}</div>`}
+      <span class="pc-status ${cls}">${label}</span>${p.meta?.duration ? `<span class="pc-dur">${fmtDur(p.meta.duration)}</span>` : ""}${p.settings?.autopilot ? `<span class="pc-ap">✈ autopilot</span>` : ""}
+      ${WORKING.includes(p.status) ? `<div class="pc-prog"><i class="indet"></i></div>` : ""}
+      ${canEdit ? `<label class="pc-check" title="चुनें"><input type="checkbox" data-sel="${p.id}" ${S.sel.has(p.id) ? "checked" : ""}></label>` : ""}
+      ${opts.hover !== false ? `<div class="pc-hover"><a class="btn small" href="#/projects/${p.id}">खोलें</a>${S.user.role !== "viewer" ? `<a class="btn small quiet" href="#/thumbs/${p.id}">🖼 Thumbnail</a>` : ""}</div>` : ""}</div>
+    <div class="pc-body"><div class="pc-title"><a href="${href}" title="${esc(p.title)}">${esc(p.title)}</a>${opts.menu !== false ? `<button class="ibtn pc-more" data-menu="${p.id}" aria-label="और actions">${ic("dots")}</button>` : ""}</div>
+      <span class="small muted">${ch ? `<i class="dot" style="background:${esc(ch.color || "#F2B33D")}"></i>${esc(ch.name)} · ` : ""}${relTime(p.updated_at)}</span></div></div>`;
+}
+function prow(p) {
+  const [label, cls] = STATUS[p.status] || [p.status, ""]; const canEdit = S.user.role !== "viewer";
+  const ch = S.channels.find((c) => c.id === p.channel_id);
+  return `<tr data-pid="${p.id}" class="${S.sel.has(p.id) ? "picked" : ""}">${canEdit ? `<td class="cbx"><input type="checkbox" data-sel="${p.id}" ${S.sel.has(p.id) ? "checked" : ""} aria-label="चुनें"></td>` : ""}
+    <td class="th"><a href="#/projects/${p.id}">${p.thumb_url ? `<img src="${p.thumb_url}" alt="" loading="lazy">` : `<span class="ph">${ic("film")}</span>`}</a></td>
+    <td class="tt"><a href="#/projects/${p.id}">${esc(p.title)}</a>${p.settings?.autopilot ? ` <span class="pill">✈</span>` : ""}<div class="small muted mob">${label} · ${relTime(p.updated_at)}</div></td>
+    <td class="hide-m"><span class="status ${cls}">${label}</span></td><td class="hide-m small muted">${esc(ch?.name || "")}</td>
+    <td class="hide-m small">${p.meta?.duration ? fmtDur(p.meta.duration) : "—"}</td><td class="hide-m small muted">${relTime(p.updated_at)}</td>
+    <td><button class="ibtn pc-more" data-menu="${p.id}" aria-label="और actions">${ic("dots")}</button></td></tr>`;
+}
+function closeMenu() { const m = document.getElementById("pmenu"); if (m) m.remove(); document.removeEventListener("click", menuOutside, true); }
+function menuOutside(e) { if (!e.target.closest("#pmenu") && !e.target.closest("[data-menu]")) closeMenu(); }
+function openMenu(id, btn) {
+  const was = $("#pmenu")?.dataset.pid; closeMenu(); if (was === id) return;
+  const p = S.projects.find((x) => x.id === id) || (S.project?.id === id ? S.project : null); if (!p) return;
+  const canEdit = S.user.role !== "viewer";
+  const items = [["open", "↗", "खोलें"], ...(canEdit ? [["rename", "✎", "नाम बदलें"], ["dup", "⧉", "Duplicate (copy)"], ["thumb", "🖼", "Thumbnail"]] : []),
+    ["dl", "⬇", "Final video download"], ...(canEdit ? [["archive", "🗄", "Archive (Drive)"], ["-"], ["del", "🗑", "हटाएँ", "danger"]] : [])];
+  const m = document.createElement("div"); m.className = "pmenu"; m.id = "pmenu"; m.dataset.pid = id; m.setAttribute("role", "menu");
+  m.innerHTML = items.map(([a, i, l, c]) => a === "-" ? `<hr>` : `<button role="menuitem" data-act="${a}" class="${c || ""}"><i>${i}</i>${l}</button>`).join("");
+  document.body.appendChild(m);
+  const r = btn.getBoundingClientRect(); const mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(r.right - mw, innerWidth - mw - 8)) + "px";
+  m.style.top = (r.bottom + mh + 8 > innerHeight ? Math.max(8, r.top - mh - 4) : r.bottom + 4) + "px";
+  m.onclick = (e) => { const b = e.target.closest("[data-act]"); if (!b) return; closeMenu(); projAction(b.dataset.act, p); };
+  setTimeout(() => document.addEventListener("click", menuOutside, true));
+}
+async function deleteProject(p, after) {
+  if (!confirm(`"${p.title}" और उसकी सारी फ़ाइलें server से हटाएँ? (recording, cutout, renders, thumbnails — सब। वापस नहीं आएगा)`)) return false;
+  const arc = p.meta?.archived_at ? confirm("Google Drive / archive में रखी copy भी हटाएँ?\n\nOK = हाँ, वह भी हटाएँ · Cancel = Drive वाली copy रहने दें") : false;
+  try { await api("DELETE", `/projects/${p.id}${arc ? "?archive=1" : ""}`); } catch (e) { toast(e.message); return false; }
+  S.sel.delete(p.id); toast("project और उसकी फ़ाइलें हट गईं"); if (after) after(); return true;
+}
+async function downloadFinal(p) {
+  try {
+    const full = await api("GET", `/projects/${p.id}`);
+    const outs = full.assets.filter((a) => a.kind === "render");
+    if (!outs.length) return toast("अभी कोई final video नहीं — पहले render करें");
+    const a = outs.find((x) => x.label === "yt-long") || outs.find((x) => !String(x.label || "").startsWith("short-")) || outs[0];
+    const l = document.createElement("a"); l.href = a.url + "&download=1"; l.download = ""; document.body.appendChild(l); l.click(); l.remove();
+    if (outs.length > 1) toast(`${outs.length} videos हैं — बाकी project खोलकर download करें`);
+  } catch (e) { toast(e.message); }
+}
+async function projAction(act, p) {
+  if (act === "open") return go(`/projects/${p.id}`);
+  if (act === "thumb") return go(`/thumbs/${p.id}`);
+  if (act === "dl") return downloadFinal(p);
+  if (act === "rename") { const t = prompt("नया नाम", p.title); if (!t || t.trim() === p.title) return; try { await api("PATCH", `/projects/${p.id}`, { title: t.trim() }); toast("नाम बदला"); } catch (e) { toast(e.message); } return load().then(render); }
+  if (act === "dup") { toast("copy बन रही है… (फ़ाइलें copy हो रही हैं)"); try { const n = await api("POST", `/projects/${p.id}/duplicate`, {}); toast(`“${n.title}” बना`); } catch (e) { toast(e.message); } return load().then(render); }
+  if (act === "archive") {
+    if (p.status !== "approved") return toast("सिर्फ़ मंज़ूर projects archive होते हैं — पहले मंज़ूरी दें");
+    if (!confirm("raw recording और भारी फ़ाइलें archive (Google Drive) में भेजें? final videos यहीं रहेंगी।")) return;
+    try { const r = await api("POST", `/projects/${p.id}/archive`, {}); toast(`archive हुआ ${r.moved != null ? "· " + r.moved + " फ़ाइलें" : ""}`); } catch (e) { toast(e.message); } return load().then(render);
+  }
+  if (act === "del") return deleteProject(p, () => { if (S.route.id === p.id) go("/projects"); else load().then(render); });
+}
+function bindCards(root = document) {
+  $$("[data-menu]", root).forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openMenu(b.dataset.menu, b); }));
+  $$("[data-sel]", root).forEach((cb) => (cb.onchange = () => { cb.checked ? S.sel.add(cb.dataset.sel) : S.sel.delete(cb.dataset.sel); cb.closest("[data-pid]")?.classList.toggle("picked", cb.checked); updateBulk(); }));
+}
+function updateBulk() {
+  const bar = $("#bulk"); if (!bar) return; const n = S.sel.size;
+  bar.hidden = !n; $("#bulk-n").textContent = n;
+  const all = $("#sel-all"); if (all) { const vis = filteredProjects().map((p) => p.id); all.checked = vis.length > 0 && vis.every((id) => S.sel.has(id)); }
+}
+async function bulk(act) {
+  const list = S.projects.filter((p) => S.sel.has(p.id)); if (!list.length) return;
+  if (act === "del") {
+    if (!confirm(`${list.length} projects और उनकी सारी फ़ाइलें हमेशा के लिए हटाएँ?`)) return;
+    const anyArc = list.some((p) => p.meta?.archived_at);
+    const arc = anyArc ? confirm("जिनकी Google Drive / archive copy है, वह copy भी हटाएँ?\n\nOK = हाँ · Cancel = Drive copy रहने दें") : false;
+    let ok = 0, fail = 0;
+    for (const p of list) { try { await api("DELETE", `/projects/${p.id}${arc && p.meta?.archived_at ? "?archive=1" : ""}`); ok++; S.sel.delete(p.id); } catch { fail++; } }
+    toast(`${ok} हटे${fail ? ` · ${fail} नहीं हटे (approved सिर्फ़ admin हटा सकता है)` : ""}`);
+  } else if (act === "archive") {
+    let ok = 0, skip = 0;
+    for (const p of list) { if (p.status !== "approved") { skip++; continue; } try { await api("POST", `/projects/${p.id}/archive`, {}); ok++; } catch { skip++; } }
+    toast(`${ok} archive हुए${skip ? ` · ${skip} छोड़े (सिर्फ़ मंज़ूर projects)` : ""}`); S.sel.clear();
+  }
+  load().then(render);
 }
 
+// ---------- projects page ----------
+const PFILTERS = [["all", "सब", () => true], ["review", "जाँच बाकी", (p) => ["review_cuts", "review_output"].includes(p.status)], ["working", "चल रहे", (p) => WORKING.includes(p.status)],
+  ["approved", "मंज़ूर", (p) => p.status === "approved"], ["failed", "रुके", (p) => p.status === "failed"], ["draft", "upload बाकी", (p) => p.status === "uploading"]];
+function filteredProjects() {
+  const f = PFILTERS.find((x) => x[0] === (S.route.q.get("status") || "all")) || PFILTERS[0]; const q = (S.pq || "").toLowerCase().trim();
+  return S.projects.filter((p) => f[2](p) && (!q || p.title.toLowerCase().includes(q)));
+}
+function projectsView() {
+  const cur = S.route.q.get("status") || "all"; const list = filteredProjects(); const canEdit = S.user.role !== "viewer";
+  const counts = Object.fromEntries(PFILTERS.map(([k, , fn]) => [k, S.projects.filter(fn).length]));
+  return `<div class="pghead"><div><h1>Projects</h1><p class="muted small">${S.projects.length} projects${S.channels.length > 1 ? ` · ${S.pch === "all" ? "सभी channels" : esc(S.channels.find((c) => c.id === (S.pch || S.channel))?.name || "")}` : ""}</p></div>
+      ${canEdit ? `<span class="row"><a class="btn" href="#/record">${ic("rec")} Record</a><a class="btn primary" href="#/new">${ic("upload")} Upload</a></span>` : ""}</div>
+    <div class="ptools">
+      <label class="search">${ic("search")}<input id="p-q" placeholder="नाम से खोजें…" value="${esc(S.pq)}"></label>
+      ${S.channels.length > 1 ? `<select id="p-ch"><option value="" ${!S.pch ? "selected" : ""}>यह channel</option><option value="all" ${S.pch === "all" ? "selected" : ""}>सभी channels</option>${S.channels.map((c) => `<option value="${c.id}" ${S.pch === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>` : ""}
+      <div class="seg" role="tablist" aria-label="view"><button data-pv="grid" class="${S.pview === "grid" ? "on" : ""}" title="grid">${ic("grid")}</button><button data-pv="list" class="${S.pview === "list" ? "on" : ""}" title="list">${ic("list")}</button></div>
+    </div>
+    <div class="fchips">${PFILTERS.map(([k, l]) => `<a class="fchip ${cur === k ? "on" : ""}" href="#/projects${k === "all" ? "" : "?status=" + k}">${l}<i>${counts[k]}</i></a>`).join("")}</div>
+    ${canEdit ? `<div class="bulk" id="bulk" ${S.sel.size ? "" : "hidden"}><label class="chk"><input type="checkbox" id="sel-all"> सब</label><b><span id="bulk-n">${S.sel.size}</span> चुने</b><span class="grow"></span><button class="btn small" data-bulk="archive">🗄 Archive</button><button class="btn small danger" data-bulk="del">🗑 हटाएँ</button><button class="btn quiet small" id="bulk-x">✕</button></div>` : ""}
+    <div id="plist">${projList(list)}</div>`;
+}
+function projList(list) {
+  if (!list.length) return `<div class="empty">${S.projects.length ? `<p>इस filter में कुछ नहीं।</p>` : `<p>अभी कोई project नहीं।</p><a class="btn primary" href="#/record">पहली recording करें</a>`}</div>`;
+  if (S.pview === "list") return `<div class="tablewrap"><table class="ptable"><thead><tr>${S.user.role !== "viewer" ? "<th></th>" : ""}<th></th><th>नाम</th><th class="hide-m">status</th><th class="hide-m">channel</th><th class="hide-m">लंबाई</th><th class="hide-m">बदला</th><th></th></tr></thead><tbody>${list.map(prow).join("")}</tbody></table></div>`;
+  return `<div class="pgrid2">${list.map((p) => pcard(p)).join("")}</div>`;
+}
+function bindProjects() {
+  const redraw = () => { $("#plist").innerHTML = projList(filteredProjects()); bindCards($("#plist")); updateBulk(); };
+  const q = $("#p-q"); q.oninput = () => { S.pq = q.value; redraw(); };
+  const ch = $("#p-ch"); if (ch) ch.onchange = () => { S.pch = ch.value; S.sel.clear(); load().then(render); };
+  $$("[data-pv]").forEach((b) => (b.onclick = () => { S.pview = b.dataset.pv; lsSet("vividora_pview", S.pview); $$("[data-pv]").forEach((x) => x.classList.toggle("on", x === b)); redraw(); }));
+  $$("[data-bulk]").forEach((b) => (b.onclick = () => bulk(b.dataset.bulk)));
+  const x = $("#bulk-x"); if (x) x.onclick = () => { S.sel.clear(); redraw(); };
+  const all = $("#sel-all"); if (all) all.onchange = () => { for (const p of filteredProjects()) all.checked ? S.sel.add(p.id) : S.sel.delete(p.id); redraw(); };
+  bindCards($("#plist")); updateBulk();
+}
+
+// ---------- home ----------
+const TIPS = [
+  "Thumbnail पर 2–4 शब्द काफ़ी हैं — title दोहराएँ नहीं, उत्सुकता जगाएँ।",
+  "पहले 3 सेकंड में hook बोलें — Shorts में यही तय करता है कि लोग रुकेंगे या नहीं।",
+  "2–3 thumbnail variants बनाकर YouTube Studio के “Test & compare” में डालें।",
+  "Autopilot चालू रखें: cuts, captions, zoom, music और 3 thumbnails अपने-आप बनते हैं।",
+  "Brand kit (Channels & Brand) में logo और रंग एक बार सेट करें — हर वीडियो और thumbnail में लगेगा।",
+  "Recorder में teleprompter है — script Plan से सीधे आती है।",
+];
 function homeView() {
   const review = S.projects.filter((p) => p.status === "review_cuts" || p.status === "review_output");
-  const working = S.projects.filter((p) => ["preparing", "transcribing", "cutting", "rendering"].includes(p.status));
+  const working = S.projects.filter((p) => WORKING.includes(p.status));
   const approved = S.projects.filter((p) => p.status === "approved");
   const canEdit = S.user.role !== "viewer";
   const vids = (S.analytics?.videos || []); const views = vids.reduce((a, v) => a + (v.views || 0), 0);
-  const ideas = (S.ideas || []).filter((i) => i.status === "approved").slice(0, 4);
+  const ideas = (S.ideas || []).filter((i) => i.status === "approved").slice(0, 5);
   const trends = (S.homeTrends || []).slice(0, 6);
+  const jobs = S.overview?.jobs || []; const upcoming = S.overview?.upcoming || [];
   const hour = new Date().getHours(); const greet = hour < 12 ? "सुप्रभात" : hour < 17 ? "नमस्ते" : "शुभ संध्या";
-  const card = (p) => { const [label, cls] = STATUS[p.status] || [p.status, ""]; return `<a class="pcard" href="#/projects/${p.id}">
-      <div class="pthumb">${p.thumb_url ? `<img src="${p.thumb_url}" alt="">` : `<div class="ph">${p.kind === "montage" ? "🎵" : "🎬"}</div>`}<span class="status ${cls}">${label}</span>${p.settings?.autopilot ? `<span class="ap">✈ autopilot</span>` : ""}</div>
-      <div class="pbody"><b>${esc(p.title)}</b><span class="small muted">${p.meta?.duration ? fmt(p.meta.duration) + " · " : ""}${new Date(p.updated_at).toLocaleDateString("hi-IN")}</span>${["preparing", "transcribing", "cutting", "rendering"].includes(p.status) ? `<div class="progress"><i class="indet"></i></div>` : ""}</div></a>`; };
   const HS = homeSections();
-  const sec = (id, html) => (HS.find((x) => x.id === id)?.on ? { id, html } : null);
+  const sec = (title, link, body, cls = "") => `<section class="card ${cls}"><div class="card-h"><h2>${title}</h2>${link || ""}</div>${body}</section>`;
   const blocks = {
-    review: review.length ? `<div class="hsec"><div class="row between"><h2>जाँच के लिए</h2></div><div class="pgrid">${review.map(card).join("")}</div></div>` : "",
-    working: working.length ? `<div class="hsec"><h2>चल रहा है</h2><div class="pgrid">${working.map(card).join("")}</div></div>` : "",
-    recent: `<div class="hsec"><div class="row between"><h2>हाल के projects</h2><a class="small muted" href="#/new">+ नया</a></div>${S.projects.length ? `<div class="pgrid">${S.projects.slice(0, 8).map(card).join("")}</div>` : `<div class="empty"><p>अभी कोई project नहीं।</p><a class="btn primary" href="#/record">पहली recording करें</a></div>`}</div>`,
-    ideas: `<div class="hsec"><div class="row between"><h2>Record करने के लिए</h2><a class="small muted" href="#/plan">सब</a></div>${ideas.length ? `<ul class="hlist">${ideas.map((i) => `<li><a href="#/record"><b>${esc(i.title)}</b>${i.script ? `<span class="tag manual">script ✓</span>` : ""}</a></li>`).join("")}</ul>` : `<p class="small muted">Plan में ideas बनाएँ → "बनाना है" में रखें, यहाँ दिखेंगे।</p>`}</div>`,
-    trends: `<div class="hsec"><div class="row between"><h2>आज trending</h2><a class="small muted" href="#/plan">radar</a></div>${trends.length ? `<ul class="hlist">${trends.map((r) => `<li>${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.traffic ? r.meta.traffic + "+" : r.meta?.channel ? esc(r.meta.channel) : ""}</span></li>`).join("")}</ul>` : `<p class="small muted">Plan → "ताज़ा करें"</p>`}</div>`,
-    published: vids.length ? `<div class="hsec"><h2>हाल में published</h2><ul class="hlist">${vids.slice(0, 5).map((v) => `<li><a href="${v.url}" target="_blank" rel="noopener">${esc(v.title)}</a><span class="small muted">${v.platform} · ${(v.views || 0).toLocaleString("en-IN")} views</span></li>`).join("")}</ul></div>` : "",
-    library: `<div class="hsec"><div class="row between"><h2>Library</h2><a class="small muted" href="#/library">खोलें</a></div><div class="hlibq"><a href="#/library" class="hbtn"><i>🎵</i><b>Music & SFX</b></a><a href="#/library" class="hbtn"><i>📣</i><b>Popups</b></a><a href="#/library" class="hbtn"><i>😀</i><b>Stickers</b></a><a href="#/library" class="hbtn"><i>🖼</i><b>Frames</b></a></div></div>`,
+    review: review.length ? sec(`मंज़ूरी बाकी <em class="cnt">${review.length}</em>`, `<a class="small muted" href="#/projects?status=review">सब देखें →</a>`, `<div class="pgrid2 compact">${review.slice(0, 6).map((p) => pcard(p, { select: false })).join("")}</div>`, "wide") : "",
+    working: sec("चल रहे काम", `<a class="small muted" href="#/status">status →</a>`, jobs.length || working.length ? `<ul class="jobs">${jobs.length ? jobs.map((j) => `<li><a href="#/projects/${j.project_id}"><b>${esc(j.project_title)}</b><span class="small muted">${JOBK[j.kind] || j.kind} · ${j.status === "queued" ? "line में" : esc(j.message || "चल रहा")}</span></a><div class="progress"><i ${j.status === "queued" ? 'class="indet"' : `style="width:${j.progress || 0}%"`}></i></div><span class="small">${j.status === "running" ? (j.progress || 0) + "%" : ""}</span></li>`).join("")
+        : working.map((p) => `<li><a href="#/projects/${p.id}"><b>${esc(p.title)}</b><span class="small muted">${(STATUS[p.status] || [])[0]}</span></a><div class="progress"><i class="indet"></i></div><span></span></li>`).join("")}</ul>` : `<p class="small muted">अभी कुछ नहीं चल रहा।</p>`),
+    upcoming: sec("आने वाले posts", `<a class="small muted" href="#/publish">calendar →</a>`, upcoming.length ? `<ul class="hlist">${upcoming.slice(0, 5).map((u) => `<li><span><span class="plat ${u.platform}">${PLAT[u.platform] || u.platform}</span> ${esc(u.title)}</span><span class="small muted">${u.when ? new Date(u.when).toLocaleString("hi-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : u.status === "running" ? "upload हो रहा" : "line में"}</span></li>`).join("")}</ul>` : `<p class="small muted">कोई post scheduled नहीं। मंज़ूर वीडियो खोलकर Publish करें।</p>`),
+    recent: sec("हाल के projects", `<a class="small muted" href="#/projects">सब projects →</a>`, S.projects.length ? `<div class="pgrid2">${S.projects.slice(0, 8).map((p) => pcard(p)).join("")}</div>` : `<div class="empty"><p>अभी कोई project नहीं।</p><a class="btn primary" href="#/record">पहली recording करें</a></div>`, "wide"),
+    published: vids.length ? sec("हाल में published", `<a class="small muted" href="#/analytics">analytics →</a>`, `<ul class="hlist">${vids.slice(0, 5).map((v) => `<li><a href="${v.url}" target="_blank" rel="noopener">${esc(v.title)}</a><span class="small muted">${v.platform} · ${(v.views || 0).toLocaleString("en-IN")} views</span></li>`).join("")}</ul>`) : "",
+    storage: S.user.role === "admin" ? sec("Storage", `<a class="small muted" href="#/account">साफ़ करें →</a>`, `<div id="home-storage"><p class="small muted">जाँच रहे…</p></div>`) : "",
+    ideas: sec("Record करने के लिए", `<a class="small muted" href="#/plan">Plan →</a>`, ideas.length ? `<ul class="hlist">${ideas.map((i) => `<li><a href="#/record"><b>${esc(i.title)}</b></a>${i.script ? `<span class="pill">script ✓</span>` : ""}</li>`).join("")}</ul>` : `<p class="small muted">Plan में ideas बनाएँ → "बनाना है" में रखें, यहाँ दिखेंगे।</p>`),
+    trends: sec("आज trending", `<a class="small muted" href="#/trends">radar →</a>`, trends.length ? `<ul class="hlist">${trends.map((r) => `<li>${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.traffic ? r.meta.traffic + "+" : r.meta?.channel ? esc(r.meta.channel) : ""}</span></li>`).join("")}</ul>` : `<p class="small muted">Trends → "ताज़ा करें"</p>`),
+    tips: sec("आज की tip", "", `<p class="tip">💡 ${TIPS[new Date().getDate() % TIPS.length]}</p><a class="small muted" href="#/help">और tips · Help →</a>`),
+    library: sec("Library", `<a class="small muted" href="#/library">खोलें →</a>`, `<div class="hlibq"><a href="#/library" class="qtile"><i>🎵</i><b>Music & SFX</b></a><a href="#/library" class="qtile"><i>📣</i><b>Popups</b></a><a href="#/library" class="qtile"><i>😀</i><b>Stickers</b></a><a href="#/library" class="qtile"><i>🖼</i><b>Frames</b></a></div>`),
   };
+  const SIDE = ["working", "upcoming", "storage", "ideas", "trends", "tips", "library"];
   const order = HS.filter((x) => x.on).map((x) => x.id);
-  const main = order.filter((id) => !["ideas", "trends", "library"].includes(id)).map((id) => blocks[id]).join("");
-  const side = order.filter((id) => ["ideas", "trends", "library"].includes(id)).map((id) => blocks[id]).join("");
-  return `<div class="home">
-    <div class="row between" style="margin-bottom:.5rem"><span></span><button class="btn small quiet" id="home-custom">⚙ dashboard customize</button></div>
-    <div id="home-cust" hidden class="box hcust"><b>Sections</b> <span class="small muted">— दिखाएँ/छुपाएँ, ↑↓ से क्रम</span><ul>${HS.map((x, i) => `<li><label class="chk"><input type="checkbox" data-hs="${x.id}" ${x.on ? "checked" : ""}> ${x.label}</label><span><button class="btn small quiet" data-hsu="${i}">↑</button><button class="btn small quiet" data-hsd="${i}">↓</button></span></li>`).join("")}</ul></div>
-    ${HS.find((x) => x.id === "hero")?.on ? `<div class="hhero"><div><p class="kicker">${greet}, ${esc(S.user.name.split(" ")[0])}</p><h1>${review.length ? `${review.length} वीडियो आपकी मंज़ूरी का इंतज़ार कर रहे हैं` : working.length ? `${working.length} वीडियो पर काम चल रहा है` : "आज क्या बनाएँ?"}</h1>
-      <p class="muted">Record करें या upload — Vividora cuts, captions, zoom, music, Shorts और titles तैयार कर देगा। आप सिर्फ़ approve करें।</p></div>
-      ${canEdit ? `<div class="hactions"><a class="hbtn" href="#/record"><i>⏺</i><b>Record</b><span>camera + teleprompter</span></a><a class="hbtn" href="#/new"><i>⬆</i><b>Upload</b><span>recording / clips</span></a><a class="hbtn" href="#/new?type=montage"><i>🎵</i><b>Montage</b><span>music + clips</span></a><a class="hbtn" href="#/plan"><i>✨</i><b>Plan</b><span>trends · ideas · script</span></a></div>` : ""}</div>` : ""}
-    ${HS.find((x) => x.id === "stats")?.on ? `<div class="hstats"><div><b>${review.length}</b><span>मंज़ूरी बाकी</span></div><div><b>${working.length}</b><span>चल रहे</span></div><div><b>${approved.length}</b><span>मंज़ूर</span></div><div><b>${vids.length}</b><span>published</span></div><div><b>${views.toLocaleString("en-IN")}</b><span>views</span></div></div>` : ""}
-    <div class="hcols"><div>${main}</div><div class="hside">${side}</div></div></div>`;
+  const main = order.filter((id) => blocks[id] !== undefined && !SIDE.includes(id)).map((id) => blocks[id]).join("");
+  const side = order.filter((id) => SIDE.includes(id)).map((id) => blocks[id]).join("");
+  const counters = [["review", review.length, "मंज़ूरी बाकी", "#/projects?status=review"], ["working", working.length, "चल रहे", "#/projects?status=working"], ["approved", approved.length, "मंज़ूर", "#/projects?status=approved"],
+    ["pub", vids.length, "published", "#/publish"], ["views", views.toLocaleString("en-IN"), "views", "#/analytics"]];
+  return `<div class="home2">
+    ${HS.find((x) => x.id === "hero")?.on ? `<div class="hero2"><div class="hero2-t"><p class="kicker">${greet}, ${esc(S.user.name.split(" ")[0])}</p><h1>${review.length ? `${review.length} वीडियो आपकी मंज़ूरी का इंतज़ार कर रहे हैं` : working.length ? `${working.length} वीडियो पर काम चल रहा है` : "आज क्या बनाएँ?"}</h1>
+      <p class="muted">Record करें या upload — Vividora cuts, captions, zoom, music, Shorts, titles और thumbnails तैयार कर देगा। आप सिर्फ़ approve करें।</p></div>
+      <button class="btn small quiet hcust-btn" id="home-custom" title="sections दिखाएँ / छुपाएँ">⚙ customize</button>
+      ${canEdit ? `<div class="qacts">${[["#/record", "rec", "Record", "camera + teleprompter", "c1"], ["#/new", "upload", "Upload", "recording / clips", "c2"], ["#/new?type=montage", "music", "Montage", "music + clips", "c3"], ["#/plan", "bulb", "Plan", "trends · ideas · script", "c4"], ["#/thumbs", "image", "Thumbnail", "CTR वाले thumbnails", "c5"]].map(([h, i, b, s, c]) => `<a class="qact ${c}" href="${h}"><span class="qi">${ic(i)}</span><b>${b}</b><span>${s}</span></a>`).join("")}</div>` : ""}</div>` : `<div class="row between"><span></span><button class="btn small quiet" id="home-custom">⚙ customize</button></div>`}
+    <div id="home-cust" hidden class="box hcust"><b>Sections</b> <span class="small muted">— दिखाएँ/छुपाएँ, ↑↓ से क्रम (इसी browser में याद रहेगा)</span><ul>${HS.map((x, i) => `<li><label class="chk"><input type="checkbox" data-hs="${x.id}" ${x.on ? "checked" : ""}> ${x.label}</label><span><button class="btn small quiet" data-hsu="${i}">↑</button><button class="btn small quiet" data-hsd="${i}">↓</button></span></li>`).join("")}</ul></div>
+    ${HS.find((x) => x.id === "stats")?.on ? `<div class="stats2">${counters.map(([k, n, l, h]) => `<a class="stat ${k}" href="${h}"><b>${n}</b><span>${l}</span></a>`).join("")}</div>` : ""}
+    <div class="hcols2"><div class="hmain">${main}</div><div class="hside2">${side}</div></div></div>`;
 }
-const HOME_DEFAULT = [["hero", "Welcome + quick actions"], ["stats", "Stats"], ["review", "जाँच के लिए"], ["working", "चल रहा है"], ["recent", "हाल के projects"], ["published", "हाल में published"], ["ideas", "Record करने के लिए"], ["trends", "आज trending"], ["library", "Library shortcuts"]];
+const HOME_DEFAULT = [["hero", "Welcome + quick actions"], ["stats", "Counters"], ["review", "मंज़ूरी बाकी"], ["working", "चल रहे काम"], ["recent", "हाल के projects"], ["upcoming", "आने वाले posts"], ["published", "हाल में published"], ["storage", "Storage (admin)"], ["ideas", "Record करने के लिए"], ["trends", "आज trending"], ["tips", "आज की tip"], ["library", "Library shortcuts"]];
 function homeSections() {
   let saved = []; try { saved = JSON.parse(localStorage.getItem("vividora_home") || "[]"); } catch {}
   const known = new Map(HOME_DEFAULT.map(([id, label]) => [id, label]));
@@ -153,6 +386,13 @@ function bindHome() {
   document.querySelectorAll("[data-hs]").forEach((cb) => (cb.onchange = () => { const l = homeSections(); l.find((x) => x.id === cb.dataset.hs).on = cb.checked; save(l); }));
   document.querySelectorAll("[data-hsu]").forEach((x) => (x.onclick = () => { const l = homeSections(); const i = +x.dataset.hsu; if (i > 0) { [l[i - 1], l[i]] = [l[i], l[i - 1]]; save(l); } }));
   document.querySelectorAll("[data-hsd]").forEach((x) => (x.onclick = () => { const l = homeSections(); const i = +x.dataset.hsd; if (i < l.length - 1) { [l[i + 1], l[i]] = [l[i], l[i + 1]]; save(l); } }));
+  bindCards();
+  const hs = $("#home-storage");
+  if (hs) {
+    const paint = (d) => { const m = d.disk.media; const pct = Math.round(m.used / m.total * 100); hs.innerHTML = `<div class="stbar"><i style="width:${pct}%;background:${pct > 85 ? "#e5484d" : pct > 70 ? "#f2b33d" : "#46a758"}"></i></div><p class="small"><b>${fmtBytes(m.free)} खाली</b> · ${fmtBytes(m.used)} / ${fmtBytes(m.total)} (${pct}%)</p>${d.groups ? `<p class="small muted">recordings ${fmtBytes(d.groups.source || 0)} · videos ${fmtBytes(d.groups.render || 0)} · cache ${fmtBytes(d.groups.cache || 0)}</p>` : ""}`; };
+    if (S.storageCache && Date.now() - S.storageCache.at < 120000) paint(S.storageCache.d);
+    else api("GET", "/storage").then((d) => { S.storageCache = { at: Date.now(), d }; if (document.body.contains(hs)) paint(d); }).catch((e) => { hs.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; });
+  }
 }
 function loginView() {
   return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका video studio</p>
@@ -257,9 +497,9 @@ function projectView(p) {
   else if (["preparing", "transcribing", "cutting"].includes(p.status)) body = workingView(p, job);
   else if (p.status === "failed") body = `<div class="note err"><b>रुक गया:</b> ${esc(p.status_note)}</div>${canEdit ? `<button class="btn" id="retry-cuts">कट दोबारा ढूँढें</button>` : ""}`;
   else body = reviewView(p, proxy, canEdit) + renderSection(p, canEdit) + outputsSection(p, canEdit);
-  return `<div class="row between"><div><a class="btn quiet" href="#/" style="padding-left:0">← सभी</a><h1 id="title" ${canEdit ? 'contenteditable="true" spellcheck="false"' : ""}>${esc(p.title)}</h1>
+  return `<div class="row between"><div><a class="btn quiet" href="#/projects" style="padding-left:0">← सभी projects</a><h1 id="title" ${canEdit ? 'contenteditable="true" spellcheck="false"' : ""}>${esc(p.title)}</h1>
       <span class="status ${cls}">${label}</span> <span class="muted small">${esc(p.status_note || "")}</span></div>
-      ${canEdit ? `<button class="btn danger quiet" id="del">हटाएँ</button>` : ""}</div>
+      ${canEdit ? `<span class="row"><a class="btn" href="#/thumbs/${p.id}">🖼 Thumbnail</a><button class="btn danger quiet" id="del">हटाएँ</button></span>` : ""}</div>
     ${p.meta.duration ? `<p class="muted small">${fmt(p.meta.duration)} · ${p.meta.width}×${p.meta.height} · ${p.meta.fps} fps · भाषा ${{hi:"हिंदी",en:"English",auto:"पहचान बाकी"}[p.language] || p.language} · आवाज़ ${p.meta.denoise === "deepfilternet" ? "DeepFilterNet से साफ़" : p.meta.denoise === "ffmpeg" ? "साफ़ की गई" : "जैसी थी"}</p>` : ""}
     ${body}`;
 }
@@ -329,7 +569,7 @@ function outputsSection(p, canEdit) {
 function bindProject(p) {
   const title = $("#title");
   if (title && title.isContentEditable) title.onblur = async () => { const t = title.textContent.trim(); if (t && t !== p.title) { await api("PATCH", `/projects/${p.id}`, { title: t }); toast("नाम बदला"); load().then(render); } };
-  const del = $("#del"); if (del) del.onclick = async () => { if (confirm(`"${p.title}" और उसकी सारी फ़ाइलें server से हटाएँ? (recording, cutout, renders — सब। वापस नहीं आएगा)`)) { const arc = p.meta?.archived_at ? confirm("Google Drive / archive में रखी copy भी हटाएँ?") : false; await api("DELETE", `/projects/${p.id}${arc ? "?archive=1" : ""}`); toast("project और उसकी फ़ाइलें हट गईं"); go("/"); } };
+  const del = $("#del"); if (del) del.onclick = () => deleteProject(p, () => go("/projects"));
   const retry = $("#retry-cuts"); if (retry) retry.onclick = () => api("POST", `/projects/${p.id}/recut`, {}).then(() => load().then(render));
   const video = $("#preview"), track = $("#track"), play = $("#play");
   const dur = p.edl?.duration || p.meta.duration || 1;
@@ -398,7 +638,7 @@ const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" 
 function settingsView() {
   const c = S.conns || { connections: [], setup: {} }; const st = c.setup || {}; const admin = S.user.role === "admin";
   const chn = S.channels.find((c) => c.id === S.channel);
-  return `<h1>Channels</h1>
+  return `<div class="pghead"><div><h1>Channels & Brand</h1><p class="muted small">channels, brand kit और YouTube / Instagram / Facebook connections</p></div></div>
     <div class="section" style="margin-top:0;border:0;padding-top:0"><div class="row between"><h2>आपके channels · ${S.channels.length}</h2>${admin ? `<button class="btn small" id="ch-add">+ नया channel</button>` : ""}</div>
       <div class="chgrid">${S.channels.map((c) => `<div class="chcard ${c.id === S.channel ? "on" : ""}" data-ch="${c.id}" style="--c:${esc(c.color || "#F2B33D")}"><b>${esc(c.name)}</b><span class="small muted">${esc(c.handle || "")} · ${esc(c.niche || "niche नहीं")} · ${c.projects} projects · ${(c.platforms || []).join(", ") || "कोई connection नहीं"}</span></div>`).join("")}</div>
       ${chn && admin ? `<form id="ch-edit" class="row" style="align-items:flex-end;margin-top:.75rem"><input type="hidden" name="id" value="${chn.id}">
@@ -413,8 +653,7 @@ function settingsView() {
     ${!st.public_url ? `<div class="note err">.env में <b>PUBLIC_URL</b> नहीं है (जैसे https://studio.yourdomain.com — Cloudflare Tunnel का पता)। बिना इसके Google/Meta login वापस नहीं आ सकता और Instagram/Facebook वीडियो नहीं ले पाएँगे।</div>` : ""}
     <div class="section"><div class="row between"><h2>जुड़े हुए</h2>${admin ? `<span class="row"><button class="btn" id="c-yt" ${st.youtube ? "" : "disabled"} title="${st.youtube ? "" : ".env में YT_CLIENT_ID/YT_CLIENT_SECRET चाहिए"}">+ YouTube</button><button class="btn" id="c-meta" ${st.meta ? "" : "disabled"} title="${st.meta ? "" : ".env में META_APP_ID/META_APP_SECRET चाहिए"}">+ Instagram / Facebook</button></span>` : ""}</div>
       ${c.connections.length ? `<table><tr><th>platform</th><th>नाम</th><th>channel</th><th>जुड़ा</th><th></th></tr>${c.connections.map((x) => `<tr><td>${PLAT[x.platform] || x.platform}</td><td>${esc(x.name)}${x.meta?.subscribers ? ` <span class="muted small">· ${x.meta.subscribers} subs</span>` : ""}${x.meta?.page ? ` <span class="muted small">· page: ${esc(x.meta.page)}</span>` : ""}</td><td>${admin ? `<select class="c-move small" data-id="${x.id}">${S.channels.map((ch) => `<option value="${ch.id}" ${x.channel_id === ch.id ? "selected" : ""}>${esc(ch.name)}</option>`).join("")}</select>` : esc(S.channels.find((ch) => ch.id === x.channel_id)?.name || "")}</td><td class="small muted">${new Date(x.created_at).toLocaleDateString("hi-IN")}</td><td>${admin ? `<button class="btn quiet small danger c-del" data-id="${x.id}">हटाएँ</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">अभी कोई channel नहीं जुड़ा।</p>`}</div>
-    ${S.user.role === "admin" ? `<div class="section" id="storage"><div class="row between"><h2>Storage / जगह</h2><button class="btn small" id="st-load">जाँचें</button></div>
-      <p class="muted small">server की disk कितनी भरी है, किस project ने कितनी जगह ली — और सुरक्षित तरीके से साफ़ करें। project हटाने पर उसकी सारी फ़ाइलें अपने-आप हट जाती हैं।</p><div id="st-body"></div></div>` : ""}
+    ${S.user.role === "admin" ? `<p class="small muted">Storage / disk साफ़ करना अब <a href="#/account">Settings</a> में है।</p>` : ""}
     <div class="section"><h2>Brand kit</h2><p class="muted small">हर नए project और autopilot में यही default लगेगा।</p>
       <form id="brand" class="row" style="align-items:flex-end">
         <div class="field"><label>channel का नाम</label><input name="name" value="${esc(S.brand?.name || "")}" placeholder="@theprashantmahto"></div>
@@ -581,6 +820,102 @@ function analyticsView() {
 function bindAnalytics() {
   const r = $("#an-refresh"); if (r) r.onclick = async () => { r.disabled = true; r.textContent = "ला रहा है…"; try { const x = await api("POST", "/analytics/refresh"); toast(`${x.updated} videos · ${(x.errors || []).join("; ") || "ok"}`); } catch (e) { toast(e.message); } load().then(render); };
   const ap = $("#an-apply"); if (ap) ap.onclick = async () => { const x = await api("POST", `/analytics/apply?channel=${S.channel}`); toast("default बदले"); load().then(render); };
+}
+
+// ---------- thumbnails: pick a project ----------
+function thumbsPickView() {
+  const list = S.projects.filter((p) => p.status !== "uploading");
+  return `<div class="pghead"><div><h1>Thumbnails</h1><p class="muted small">किस वीडियो का thumbnail बनाएँ? — best frame, cutout, बड़ा text, 13 layouts, A/B variants। Publish पर ★ चुना हुआ thumbnail जाता है।</p></div></div>
+    <div class="thfeat">${[["🎯", "Best frame", "sharp, चेहरा, आँखें खुली — 20 frames में से"], ["✂", "Person cutout", "background हटाकर border / glow"], ["अ", "हिंदी text", "सही shaping, *शब्द* highlight"], ["🅰🅱", "A/B variants", "एक click में 3 अलग thumbnails"]].map(([i, b, s]) => `<div><i>${i}</i><b>${b}</b><span class="small muted">${s}</span></div>`).join("")}</div>
+    ${list.length ? `<div class="pgrid2">${list.map((p) => pcard(p, { href: (x) => `#/thumbs/${x.id}`, select: false, hover: false })).join("")}</div>` : `<div class="empty"><p>पहले कोई वीडियो upload करें।</p><a class="btn primary" href="#/new">Upload</a></div>`}`;
+}
+
+// ---------- publish queue + calendar ----------
+function publishView() {
+  const pubs = S.pubs || []; const now = new Date().toISOString();
+  const upcoming = pubs.filter((p) => ["queued", "running"].includes(p.status) || (p.when && p.when > now));
+  const done = pubs.filter((p) => p.status === "done" && !(p.when && p.when > now)); const failed = pubs.filter((p) => p.status === "failed");
+  const approved = S.projects.filter((p) => p.status === "approved");
+  const tab = S.pubTab;
+  const row = (u) => `<li class="pubi"><span class="plat ${u.platform}">${PLAT[u.platform] || u.platform}</span><span class="grow"><a href="#/projects/${u.project_id}"><b>${esc(u.title)}</b></a><span class="small muted">${esc(u.connection_name || "")}${u.privacy ? " · " + esc(u.privacy) : ""}${u.error && u.status === "failed" ? " · " + esc(u.error.slice(0, 120)) : ""}</span></span>
+    <span class="small ${u.status === "failed" ? "err" : "muted"}">${u.when ? "⏰ " + new Date(u.when).toLocaleString("hi-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : u.status === "done" ? "✓ " + relTime(u.finished_at) : u.status === "failed" ? "✕ असफल" : u.status === "running" ? "upload हो रहा…" : "line में"}</span>${u.url ? `<a class="btn quiet small" href="${esc(u.url)}" target="_blank" rel="noopener">↗</a>` : ""}</li>`;
+  return `<div class="pghead"><div><h1>Publish · Calendar</h1><p class="muted small">हर upload आपकी मंज़ूरी के बाद ही जाता है। YouTube पर ★ चुना हुआ thumbnail अपने-आप लगता है।</p></div></div>
+    <div class="stats2 small4"><div class="stat"><b>${upcoming.length}</b><span>scheduled / line में</span></div><div class="stat"><b>${done.length}</b><span>published</span></div><div class="stat"><b>${failed.length}</b><span>असफल</span></div><a class="stat" href="#/projects?status=approved"><b>${approved.length}</b><span>मंज़ूर, publish बाकी</span></a></div>
+    <div class="libtabs">${[["queue", `Queue · ${upcoming.length}`], ["done", `Published · ${done.length}`], ["failed", `असफल · ${failed.length}`], ["cal", "📅 Calendar"]].map(([k, l]) => `<button data-ptab="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    ${tab === "cal" ? calendarView(pubs) : `<ul class="publist">${(tab === "queue" ? upcoming : tab === "done" ? done : failed).map(row).join("") || `<li class="muted small">कुछ नहीं।${tab === "queue" && approved.length ? " नीचे मंज़ूर वीडियो खोलकर Publish करें।" : ""}</li>`}</ul>`}
+    ${approved.length ? `<section class="card" style="margin-top:1rem"><div class="card-h"><h2>मंज़ूर — publish के लिए तैयार</h2></div><div class="pgrid2 compact">${approved.slice(0, 8).map((p) => pcard(p, { select: false })).join("")}</div></section>` : ""}`;
+}
+function calendarView(pubs) {
+  const base = new Date(); base.setDate(1); base.setMonth(base.getMonth() + S.calOff);
+  const y = base.getFullYear(), m = base.getMonth(); const first = (new Date(y, m, 1).getDay() + 6) % 7; const days = new Date(y, m + 1, 0).getDate();
+  const byDay = {};
+  for (const p of pubs) { const d = new Date(p.when || p.finished_at || p.created_at); if (d.getFullYear() === y && d.getMonth() === m) (byDay[d.getDate()] = byDay[d.getDate()] || []).push(p); }
+  const today = new Date(); const cells = [];
+  for (let i = 0; i < first; i++) cells.push(`<div class="cal-c off"></div>`);
+  for (let d = 1; d <= days; d++) {
+    const isT = today.getFullYear() === y && today.getMonth() === m && today.getDate() === d;
+    cells.push(`<div class="cal-c ${isT ? "today" : ""}"><span class="cal-d">${d}</span>${(byDay[d] || []).slice(0, 3).map((p) => `<a class="cal-e ${p.platform} ${p.status}" href="#/projects/${p.project_id}" title="${esc(p.title)}">${esc(p.title)}</a>`).join("")}${(byDay[d] || []).length > 3 ? `<span class="small muted">+${byDay[d].length - 3}</span>` : ""}</div>`);
+  }
+  return `<div class="cal"><div class="row between"><button class="btn small quiet" data-cal="-1">‹</button><b>${base.toLocaleDateString("hi-IN", { month: "long", year: "numeric" })}</b><button class="btn small quiet" data-cal="1">›</button></div>
+    <div class="cal-g">${["सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि", "रवि"].map((d) => `<div class="cal-h">${d}</div>`).join("")}${cells.join("")}</div>
+    <p class="small muted"><span class="plat youtube">YouTube</span> <span class="plat instagram">Instagram</span> <span class="plat facebook">Facebook</span> — scheduled समय या publish का दिन</p></div>`;
+}
+function bindPublish() {
+  $$("[data-ptab]").forEach((b) => (b.onclick = () => { S.pubTab = b.dataset.ptab; render(); }));
+  $$("[data-cal]").forEach((b) => (b.onclick = () => { S.calOff += +b.dataset.cal; render(); }));
+  bindCards();
+}
+
+// ---------- trends ----------
+function trendsView() {
+  const t = S.trends || { trends: [], setup: {} }; const st = t.setup || {}; const canEdit = S.user.role !== "viewer";
+  const src = { google_trends: "Google Trends", yt_popular: "YouTube Top", yt_channel: "आपके देखे channels" };
+  const bySrc = {}; for (const r of t.trends) (bySrc[r.source] = bySrc[r.source] || []).push(r);
+  return `<div class="pghead"><div><h1>Trends</h1><p class="muted small">${t.fetched_at ? `आख़िरी: ${new Date(t.fetched_at).toLocaleString("hi-IN")}` : "अभी कुछ नहीं लिया"} · किसी trend पर “+ idea” से Plan में idea बनता है।</p></div>${canEdit ? `<button class="btn primary" id="tr-refresh">⟳ ताज़ा करें</button>` : ""}</div>
+    ${!st.yt_api_key ? `<div class="note small">YouTube Top के लिए .env में YT_API_KEY डालें · WATCH_CHANNELS=UC… से पसंदीदा channels देखें</div>` : ""}
+    <div class="trcols">${Object.keys(bySrc).length ? Object.entries(bySrc).map(([k, rows]) => `<section class="card"><div class="card-h"><h2>${src[k] || esc(k)}</h2><span class="small muted">${rows.length}</span></div><ul class="trlist2">${rows.slice(0, 25).map((r) => `<li><span class="grow">${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.traffic ? r.meta.traffic + "+ searches" : r.meta?.views_per_day ? r.meta.views_per_day.toLocaleString("en-IN") + "/day" : r.meta?.views ? r.meta.views.toLocaleString("en-IN") + " views" : ""}${r.meta?.channel ? " · " + esc(r.meta.channel) : ""}</span></span>${canEdit ? `<button class="btn quiet small" data-tidea="${esc(r.title)}">+ idea</button>` : ""}</li>`).join("")}</ul></section>`).join("") : `<div class="empty"><p>“ताज़ा करें” दबाएँ — Google Trends बिना key के आता है।</p></div>`}</div>`;
+}
+function bindTrends() {
+  const rf = $("#tr-refresh"); if (rf) rf.onclick = async () => { rf.disabled = true; rf.textContent = "ला रहा है…"; try { const r = await api("POST", "/trends/refresh"); toast(`${r.count} trends`); } catch (e) { toast(e.message); } load().then(render); };
+  $$("[data-tidea]").forEach((b) => (b.onclick = async () => { b.disabled = true; try { await api("POST", "/ideas", { title: b.dataset.tidea, format: "short", source: "trend", channel_id: S.channel }); b.textContent = "✓ Plan में"; toast("idea जुड़ा — Plan में script लिखें"); } catch (e) { toast(e.message); b.disabled = false; } }));
+}
+
+// ---------- help ----------
+function helpView() {
+  const mods = [["rec", "Record", "#/record", "camera + teleprompter से सीधे browser में record करें; upload अपने-आप।"], ["upload", "Upload", "#/new", "एक या कई clips डालें — टूटे upload वहीं से आगे चलते हैं।"],
+    ["music", "Montage", "#/new?type=montage", "बिना आवाज़ के clips + music → beat पर cut वाला reel।"], ["image", "Thumbnails", "#/thumbs", "best frame + cutout + बड़ा हिंदी text, 13 layouts, A/B variants, linter।"],
+    ["film", "Editor", "#/projects", "कट, captions, text, B-roll, music, effects, Shorts — CapCut जैसा।"], ["bulb", "Plan", "#/plan", "trends → ideas → script → record।"],
+    ["trend", "Trends", "#/trends", "Google Trends, YouTube Top, पसंदीदा channels।"], ["send", "Publish", "#/publish", "YouTube / Instagram / Facebook — मंज़ूरी के बाद, schedule के साथ।"],
+    ["chart", "Analytics", "#/analytics", "क्या चल रहा है — style, hook, लंबाई से सीख।"], ["lib", "Library", "#/library", "music, SFX, stickers, frames, LUTs — licence-safe।"],
+    ["tv", "Channels & Brand", "#/settings", "कई channels, brand kit, connections।"], ["gear", "Settings", "#/account", "password, users, storage साफ़ करना।"]];
+  return `<div class="pghead"><div><h1>Help</h1><p class="muted small">Vividora के सारे modules — एक नज़र में।</p></div></div>
+    <div class="helpgrid">${mods.map(([i, t, h, d]) => `<a class="hcard" href="${h}">${ic(i)}<b>${t}</b><span class="small muted">${d}</span></a>`).join("")}</div>
+    <div class="hcols2"><section class="card"><div class="card-h"><h2>वीडियो कैसे बनता है</h2></div><ol class="steps"><li><b>Record / Upload</b> — Autopilot चालू रखें</li><li><b>जाँच</b> — preview, आवाज़ साफ़, चेहरा tracking</li><li><b>Transcript</b> — हिंदी शब्द-दर-शब्द timing</li><li><b>कट</b> — चुप्पी, अं-आं, दोबारा बोला हुआ</li><li><b>Render</b> — captions, zoom, music, Shorts + 3 thumbnails</li><li><b>मंज़ूरी</b> → <b>Publish</b> (★ thumbnail के साथ)</li></ol></section>
+      <section class="card"><div class="card-h"><h2>Tips</h2></div><ul class="hlist">${TIPS.map((t) => `<li>💡 ${t}</li>`).join("")}</ul>
+        <h3 class="small" style="margin-top:1rem">Editor shortcuts</h3><p class="small muted"><kbd>Space</kbd> play · <kbd>I</kbd>/<kbd>O</kbd> हिस्सा चुनें · <kbd>X</kbd> काटें · <kbd>Ctrl+Z</kbd> undo</p>
+        <p class="small muted">Setup guides: <code>docs/first-video.md</code>, <code>docs/cloudflare-tunnel.md</code>, <code>docs/google-drive.md</code></p></section></div>`;
+}
+
+// ---------- settings (account, users, storage) ----------
+function accountView() {
+  const admin = S.user.role === "admin";
+  return `<div class="pghead"><div><h1>Settings</h1><p class="muted small">आपका account, team और server की जगह।</p></div></div>
+    <div class="setgrid">
+      <section class="card"><div class="card-h"><h2>आपका account</h2></div><p><b>${esc(S.user.name)}</b> <span class="pill">${S.user.role}</span><br><span class="small muted">${esc(S.user.email || "")}</span></p>
+        <form id="pw" class="row" style="align-items:flex-end"><div class="field"><label>मौजूदा password</label><input name="current" type="password" required autocomplete="current-password"></div><div class="field"><label>नया password</label><input name="new" type="password" minlength="8" required autocomplete="new-password"></div><button class="btn">बदलें</button></form>
+        <button class="btn quiet danger" id="logout2">${ic("out")} बाहर निकलें</button></section>
+      <section class="card"><div class="card-h"><h2>Workspace</h2></div><ul class="hlist">
+        <li><a href="#/settings">Channels & Brand kit, YouTube / Instagram connections</a></li>${admin ? `<li><a href="#/users">Users · roles (${(S.users || []).length})</a></li>` : ""}<li><a href="#/status">Workers, queue, archive status</a></li>
+        <li><span>Home dashboard sections</span><button class="btn small quiet" id="home-reset">↺ default</button></li></ul></section>
+    </div>
+    ${admin ? `<section class="card" id="storage"><div class="card-h"><h2>Storage / जगह</h2><button class="btn small" id="st-load">जाँचें</button></div>
+      <p class="muted small">server की disk कितनी भरी है, किस project ने कितनी जगह ली — और सुरक्षित तरीके से साफ़ करें। project हटाने पर उसकी सारी फ़ाइलें अपने-आप हट जाती हैं।</p><div id="st-body"></div></section>` : ""}`;
+}
+function bindAccount() {
+  $("#pw").onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/auth/password", { current: f.current.value, new: f.new.value }); toast("password बदला"); f.reset(); } catch (err) { toast(err.message); } };
+  $("#logout2").onclick = logout;
+  $("#home-reset").onclick = () => { try { localStorage.removeItem("vividora_home"); } catch {} toast("Home sections default हुए"); };
+  const stl = $("#st-load"); if (stl) { stl.onclick = () => loadStorage(); loadStorage(); }
 }
 
 // ---------- boot ----------

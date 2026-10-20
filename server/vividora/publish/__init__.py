@@ -10,6 +10,20 @@ from .http import PublishError
 __all__ = ["run", "PublishError"]
 
 
+def _thumb_ok(path: Path) -> bool:
+    """Only a real custom thumbnail (≥ 1280 wide, ≤ 2 MB) — never a small preview still."""
+    if path.stat().st_size > 2 * 1024 * 1024:
+        return False
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.width >= 1280 and im.height >= 720
+    except ImportError:
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def run(platform: str, secrets: dict, payload: dict, *, video: Path | None, public_url: str | None,
         thumb: Path | None = None, dry_run: bool = False, on_progress=None) -> dict:
     """Returns {remote_id, url, secrets (maybe refreshed)}."""
@@ -28,7 +42,7 @@ def run(platform: str, secrets: dict, payload: dict, *, video: Path | None, publ
                                  privacy=payload.get("privacy", "private"), publish_at=payload.get("publish_at"),
                                  category=youtube.CATEGORIES.get(payload.get("category", "people"), "22"),
                                  language=payload.get("language"), on_progress=on_progress)
-        if thumb and thumb.exists():
+        if thumb and thumb.exists() and _thumb_ok(thumb):
             try:
                 youtube.set_thumbnail(token, r["remote_id"], thumb)
             except PublishError as e:  # a missing custom thumbnail is not a failed upload
