@@ -131,6 +131,34 @@ def transcribe_payload(project: dict) -> dict:
             "polish": st.get("llm_polish", True)}
 
 
+def booked_times(workspace_id: str, channel_id: str | None) -> dict:
+    """Times already taken by scheduled posts of this channel, per schedule lane."""
+    from datetime import datetime, timezone
+    from .engine import schedule as sch
+    out: dict = {}
+    rows = db.rows(db.conn().execute(
+        "SELECT p.platform, p.payload, a.label FROM publications p LEFT JOIN connections cn ON cn.id = p.connection_id "
+        "LEFT JOIN assets a ON a.id = p.asset_id WHERE p.workspace_id = ? AND (cn.channel_id = ? OR ? IS NULL) "
+        "AND p.status IN ('queued','running','scheduled','done')", (workspace_id, channel_id, channel_id)))
+    now = datetime.now(timezone.utc)
+    for r in rows:
+        pl = r.get("payload") or {}
+        t = sch._parse(pl.get("when") or pl.get("publish_at") or pl.get("scheduled_at"))
+        if t and t > now:
+            out.setdefault(sch.lane(r["platform"], r.get("label") or ""), []).append(t)
+    return out
+
+
+def schedule_plan(project: dict, items: list[dict]) -> list[dict]:
+    """Give every publish-plan item a posting time from the channel's slots (if auto scheduling is on)."""
+    from .engine import schedule as sch
+    ch = project_channel(project)
+    s = sch.settings_of(ch.get("settings") or {})
+    if not s.get("auto") or not items:
+        return items
+    return sch.assign(items, s, booked=booked_times(project["workspace_id"], ch.get("id")))
+
+
 def autopilot_plan(project: dict, c=None) -> dict:
     """Autopilot's render settings for this project, using its channel's brand kit and library."""
     c = c or db.conn()
@@ -280,6 +308,7 @@ def after_job(c, job: dict, result: dict) -> None:
                 seen = set(); conns = [cn for cn in conns if not (cn["platform"] in seen or seen.add(cn["platform"]))]
                 try:
                     pp = autopilot.publish_plan(project, outs, conns)
+                    pp = schedule_plan(project, pp)
                 except Exception:  # noqa: BLE001 — metadata is a nicety
                     pp = []
                 db.update(c, "projects", pid, {"meta": {**project["meta"], "publish_plan": pp,

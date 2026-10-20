@@ -159,6 +159,27 @@ async def meta_callback(request: Request):
 
 
 # ---- publications
+def _timing(platform: str, when: str | None, payload: dict) -> tuple[dict, str | None, int]:
+    """Scheduled time → platform fields. YouTube: publishAt (native). Facebook: scheduled_publish_time (native).
+    Instagram: no API scheduling → the job waits in our queue (run_after). Returns (payload, run_after, link_hours)."""
+    from datetime import datetime, timezone
+    from ..engine.schedule import _parse
+    t = _parse(when)
+    if not t or t <= datetime.now(timezone.utc):
+        return payload, None, 48
+    hours = int((t - datetime.now(timezone.utc)).total_seconds() // 3600) + 48
+    iso = t.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    payload = {**payload, "when": iso}
+    if platform == "youtube":
+        payload["publish_at"] = iso
+        payload["privacy"] = "private"
+        return payload, None, hours
+    if platform == "facebook" and (t - datetime.now(timezone.utc)).total_seconds() > 700:
+        payload["scheduled_at"] = int(t.timestamp())
+        return payload, None, hours
+    return payload, iso, hours
+
+
 def pub_view(p: dict) -> dict:
     return {k: p.get(k) for k in ("id", "project_id", "asset_id", "connection_id", "platform", "status", "payload",
                                   "remote_id", "url", "error", "created_at", "finished_at")}
@@ -191,6 +212,7 @@ async def create_publication(request: Request, user: dict):
                "scheduled_at": data.get("scheduled_at") or None, "category": data.get("category", "people"),
                "language": p.get("language") if p.get("language") in ("hi", "en") else None,
                "kind": "video" if asset["meta"].get("width", 0) > asset["meta"].get("height", 0) else "reel"}
+    payload, run_after, link_h = _timing(conn["platform"], data.get("when") or data.get("publish_at"), payload)
     pub = {"id": db.new_id(), "workspace_id": user["workspace_id"], "project_id": p["id"], "asset_id": asset["id"],
            "connection_id": conn["id"], "platform": conn["platform"], "status": "queued", "payload": payload,
            "remote_id": None, "url": None, "error": None, "created_by": user["id"], "created_at": db.now(),
@@ -200,7 +222,7 @@ async def create_publication(request: Request, user: dict):
         job = queue.enqueue(c, p["id"], "publish", {
             "publication_id": pub["id"], "platform": conn["platform"], "asset_id": asset["id"],
             "secrets": conn["secrets"], "payload": payload,
-            "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=48)}" if settings.public_url else None,
+            "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=link_h)}" if settings.public_url else None,
             "thumb_asset_id": (service.asset_of(p["id"], "thumb") or {}).get("id"),
             "dry_run": settings.publish_dry_run})
         service.log(c, user["workspace_id"], "publish.queue", user_id=user["id"], project_id=p["id"],
@@ -232,11 +254,14 @@ async def publish_plan_run(request: Request, user: dict):
             pub = {"id": db.new_id(), "workspace_id": user["workspace_id"], "project_id": p["id"], "asset_id": asset["id"],
                    "connection_id": conn["id"], "platform": conn["platform"], "status": "queued", "payload": payload,
                    "remote_id": None, "url": None, "error": None, "created_by": user["id"], "created_at": db.now(), "finished_at": None}
+            payload, run_after, link_h = _timing(conn["platform"], it.get("when") or it.get("publish_at"), payload)
+            pub["payload"] = payload
             db.insert(c, "publications", pub)
             queue.enqueue(c, p["id"], "publish", {
                 "publication_id": pub["id"], "platform": conn["platform"], "asset_id": asset["id"], "secrets": conn["secrets"],
-                "payload": payload, "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=48)}" if settings.public_url else None,
-                "thumb_asset_id": (service.asset_of(p["id"], "thumb") or {}).get("id"), "dry_run": settings.publish_dry_run})
+                "payload": payload, "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=link_h)}" if settings.public_url else None,
+                "thumb_asset_id": (service.asset_of(p["id"], "thumb") or {}).get("id"), "dry_run": settings.publish_dry_run},
+                run_after=run_after)
             queued.append(pub["id"])
         service.log(c, user["workspace_id"], "publish.plan", user_id=user["id"], project_id=p["id"], detail={"count": len(queued)})
     return ok({"queued": queued})

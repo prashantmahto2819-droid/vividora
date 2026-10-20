@@ -14,9 +14,12 @@ from . import db
 from .config import settings
 
 
-def enqueue(c, project_id: str, kind: str, payload: dict | None = None) -> dict:
+def enqueue(c, project_id: str, kind: str, payload: dict | None = None, run_after: str | None = None) -> dict:
+    """run_after (UTC ISO): the job waits in the queue until then (scheduled Instagram posts)."""
     job = {"id": db.new_id(), "project_id": project_id, "kind": kind, "status": "queued",
            "payload": payload or {}, "created_at": db.now()}
+    if run_after:
+        job["run_after"] = run_after
     db.insert(c, "jobs", job)
     return job
 
@@ -53,7 +56,7 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
     marks = ", ".join("?" for _ in kinds)
     job = db.row(c.execute(
         f"SELECT * FROM jobs WHERE status = 'queued' AND kind IN ({marks}) "
-        "ORDER BY created_at LIMIT 1", kinds).fetchone())
+        "AND (run_after IS NULL OR run_after <= ?) ORDER BY created_at LIMIT 1", [*kinds, db.now()]).fetchone())
     if job is None:
         return None
     n = c.execute(

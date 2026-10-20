@@ -150,6 +150,7 @@ MIGRATIONS = [
     ("library", "tags", "TEXT NOT NULL DEFAULT ''"),
     ("library", "source", "TEXT"),
     ("library", "license", "TEXT"),
+    ("jobs", "run_after", "TEXT"),
 ]
 
 
