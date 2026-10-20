@@ -55,13 +55,21 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
     """Download library items the render refers to; replace ids with local paths."""
     e = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
          for k, v in (effects or {}).items()}
-    cache: dict[str, Path] = {}
+    cache: dict[str, Path | None] = {}
+    missing = e.setdefault("_missing", [])
 
     def fetch(item_id: str) -> Path | None:
+        """A library item deleted / not installed on this server: render without it (and say so)
+        instead of failing the whole render on a 404."""
         if not item_id:
             return None
         if item_id not in cache:
-            cache[item_id] = client.download_library(item_id, tmp / "lib" / item_id)
+            try:
+                cache[item_id] = client.download_library(item_id, tmp / "lib" / item_id)
+            except Exception as ex:  # noqa: BLE001 — HTTP 404 "file missing", network
+                log.warning("library item %s नहीं मिला: %s", item_id, ex)
+                cache[item_id] = None
+                missing.append(item_id)
         return cache[item_id]
 
     look = e.get("look") or "none"
@@ -86,6 +94,8 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
         if isinstance(d, dict) and d.get("id"):
             p = fetch(d["id"])
             e[key] = {**d, "path": str(p) if p else None}
+    if e.get("lut_path") is None and "lut_path" in e:
+        e.pop("lut_path")
     for key in ("broll", "sfx"):
         out = []
         for item in e.get(key) or []:
@@ -126,6 +136,26 @@ def _montage_voice(client: ApiClient, p: dict, assets: list[dict], out: dict, tm
             warns += dub_eng.mix_voice_over(src, voice, mixed, duck=bool(v.get("duck", True)))
             mixed.replace(src)
     return warns
+
+
+def _qa(project: dict, p: dict, preset: dict, vid: dict, out: dict) -> dict:
+    """engine/qa.check for one finished render: the words its captions should show, the platform's
+    loudness target, whether there should be sound at all."""
+    from ..engine import qa
+    meta = project.get("meta") or {}
+    clip = p.get("clip") or {}
+    words = [w for s in ((project.get("transcript") or {}).get("segments") or []) for w in (s.get("words") or [])]
+    if clip:
+        words = [w for w in words if float(clip.get("start", 0)) <= float(w["start"]) < float(clip.get("end", 0))]
+    burn = preset.get("burn_captions", True) if p.get("burn_captions") is None else bool(p.get("burn_captions"))
+    music = bool(((p.get("effects") or {}).get("music") or {}).get("id"))
+    return qa.check(Path(vid["path"]), target_lufs=float((preset.get("audio") or {}).get("loudness", -14)),
+                    expect_audio=bool(meta.get("has_audio")) or music,
+                    expect_captions=burn and bool(meta.get("has_audio")) and bool(project.get("transcript")),
+                    caption_words=len(words), duration=float(out.get("duration") or 0),
+                    # a sidecar SRT is timed on the untrimmed video — then only report the black start
+                    fix=not any(f.get("kind") == "subtitle" for f in out.get("files") or []),
+                    encoder_preset=os.getenv("X264_PRESET") or None)
 
 
 def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> dict:
@@ -177,6 +207,14 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             preset = platform(p["preset"])
             effects = _resolve_effects(client, p.get("effects"), tmp, assets)
             dub_warn = []
+            if effects.pop("_missing", None):
+                dub_warn.append("library की कुछ फ़ाइलें (music/sticker/sfx) नहीं मिलीं — उनके बिना render हुआ")
+            font_paths = []
+            for fid in p.get("fonts") or []:
+                try:
+                    font_paths.append(str(client.download_library(fid, tmp / "fonts" / f"{fid}.ttf")))
+                except Exception as ex:  # noqa: BLE001 — a missing font falls back to the bundled ones
+                    log.warning("font %s नहीं मिला: %s", fid, ex)
             if effects.get("voice_track_path") and effects.get("voice_track_sig"):
                 from ..engine import dub
                 edl0 = {"duration": float(project["meta"].get("duration") or 0), "cuts": [], **(project.get("edl") or {})}
@@ -191,18 +229,29 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 focus_x=float(p.get("focus_x", 0.5)), focus_y=float(p.get("focus_y", 0.5)),
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
-                effects={**effects,
-                         "font_paths": [str(client.download_library(fid, tmp / "fonts" / f"{fid}.ttf")) for fid in (p.get("fonts") or [])]},
+                effects={**effects, "font_paths": font_paths},
                 encoder_preset=os.getenv("X264_PRESET") or None,
-                on_progress=_progress(client, job["id"]),
+                on_progress=lambda f, m, _cb=_progress(client, job["id"]): _cb(f * 0.92, m),
             )
+            # output QA before anyone is asked to approve: black start (cut off), loudness, captions
+            qa_warn: list[str] = []
+            qa_info: dict = {}
+            vid = next((f for f in out["files"] if f.get("kind") == "render"), None)
+            if vid is not None and os.getenv("RENDER_QA", "1") != "0":
+                _progress(client, job["id"])(0.94, "quality check (काले frames, loudness, captions)")
+                try:
+                    qa_info = _qa(project, p, preset, vid, out)
+                    qa_warn = [f"{preset.get('label')}: {w}" for w in qa_info.get("warnings", [])]
+                except Exception as ex:  # noqa: BLE001 — QA must never lose a finished render
+                    log.warning("render QA failed: %s", ex)
             files = []
             for f in out["files"]:
                 label = p.get("label") or f.get("label")
                 up = client.upload(job["id"], f["path"], f["kind"], label)
                 files.append({**f, "label": label, "path": up["path"],
-                              "meta": {**f.get("meta", {}), "title": p.get("title")}})
-            return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn}
+                              "meta": {**f.get("meta", {}), "title": p.get("title"),
+                                       **({"qa": qa_info} if qa_info and f is vid else {})}})
+            return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn + qa_warn}
 
         if kind == "dub":
             from ..engine import tts

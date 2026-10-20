@@ -54,9 +54,13 @@ def touch_worker(c, name: str, kinds: list[str], info: dict | None = None) -> No
 def claim(c, kinds: list[str], worker: str) -> dict | None:
     requeue_stale(c)
     marks = ", ".join("?" for _ in kinds)
+    # quick pipeline steps (prepare, autocut, Shorts plan, publish…) first: a new upload should not
+    # wait behind a queue of long renders before its transcript / cuts / plan are made
     job = db.row(c.execute(
         f"SELECT * FROM jobs WHERE status = 'queued' AND kind IN ({marks}) "
-        "AND (run_after IS NULL OR run_after <= ?) ORDER BY created_at LIMIT 1", [*kinds, db.now()]).fetchone())
+        "AND (run_after IS NULL OR run_after <= ?) "
+        "ORDER BY CASE WHEN kind IN ('render','montage','matte','dub') THEN 1 ELSE 0 END, created_at LIMIT 1",
+        [*kinds, db.now()]).fetchone())
     if job is None:
         return None
     n = c.execute(

@@ -86,7 +86,8 @@ def plan(transcript: dict, duration: float, edl: dict | None, *, count: int = 5,
                 n = j - i + 1
                 sc = total / math.sqrt(n) + scores[i] * 0.8  # a strong first sentence = a hook
                 sc += 0.5 if sents[j]["text"].rstrip().endswith(STRONG_END) else 0
-                cands.append({"start": round(max(0.0, s["start"] - 0.25), 2), "end": round(sents[j]["end"] + 0.35, 2),
+                cands.append({"start": round(max(0.0, s["start"] - 0.25), 2),
+                              "end": round(min(duration, sents[j]["end"] + 0.35) if duration > 0 else sents[j]["end"] + 0.35, 2),
                               "score": round(sc, 3), "first": s["text"], "text": " ".join(x["text"] for x in sents[i:j + 1])})
             j += 1
     cands.sort(key=lambda c: -c["score"])
@@ -100,8 +101,9 @@ def plan(transcript: dict, duration: float, edl: dict | None, *, count: int = 5,
     picked.sort(key=lambda c: c["start"])
     out = []
     for i, c in enumerate(picked, start=1):
+        head = c["first"] if len(c["first"].split()) >= 4 else c["text"]  # a one-word first "sentence" is no title
         out.append({"id": f"s{i}", "start": c["start"], "end": c["end"], "score": c["score"],
-                    "title": _title(c["first"]), "hook": _hook(c["first"]), "text": c["text"][:600], "selected": True})
+                    "title": _title(head), "hook": _hook(head), "text": c["text"][:600], "selected": True})
     return _refine_with_llm(out, language) or out
 
 

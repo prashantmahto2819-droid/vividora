@@ -109,6 +109,10 @@ def start_pipeline(c, project: dict, merge: bool = False) -> dict:
               (db.now(), project["id"]))
     db.update(c, "projects", project["id"], {"transcript": None, "edl": None})
     set_status(c, project["id"], "preparing", "clips जोड़े जा रहे हैं" if merge else "फ़ाइल जाँची जा रही है")
+    if (project.get("settings") or {}).get("autopilot"):
+        from . import autopilot_flow
+        autopilot_flow.begin(c, db.get("projects", project["id"]) or project)
+        autopilot_flow.enter(c, project["id"], "prepare", "clips जोड़े जा रहे हैं" if merge else "")
     return queue.enqueue(c, project["id"], "prepare", {"merge": merge})
 
 
@@ -163,14 +167,10 @@ def schedule_plan(project: dict, items: list[dict]) -> list[dict]:
 
 
 def autopilot_plan(project: dict, c=None) -> dict:
-    """Autopilot's render settings for this project, using its channel's brand kit and library."""
-    c = c or db.conn()
-    ch = db.get("channels", project.get("channel_id") or "") or db.row(c.execute(
-        "SELECT * FROM channels WHERE workspace_id = ? ORDER BY created_at LIMIT 1", (project["workspace_id"],)).fetchone())
-    ch_settings = {**((ch or {}).get("settings") or (db.get("workspaces", project["workspace_id"]) or {}).get("settings") or {}),
-                   "niche": (ch or {}).get("niche") or ""}
-    lib = db.rows(c.execute("SELECT id, kind, name, tags FROM library WHERE workspace_id = ? AND (channel_id IS NULL OR channel_id = ?)",
-                            (project["workspace_id"], (ch or {}).get("id"))))
+    """Autopilot's render settings for this project, using its channel's brand kit and library
+    (only library files that really exist — a missing music/sticker file is skipped, not a crash)."""
+    from .autopilot_flow import channel_and_library
+    ch_settings, lib = channel_and_library(project, c)
     return autopilot.plan(project, ch_settings, lib)
 
 
@@ -181,6 +181,8 @@ def after_job(c, job: dict, result: dict) -> None:
     if project is None:
         return
     kind = job["kind"]
+    from . import autopilot_flow as apf
+    ap_on = apf.active(project)
 
     if kind == "prepare":
         meta = {**project.get("meta", {}), **result.get("meta", {})}
@@ -192,13 +194,18 @@ def after_job(c, job: dict, result: dict) -> None:
             add_asset(c, pid, f["kind"], f["path"], mime=f.get("mime"), meta=f.get("meta"))
         if meta.get("has_audio"):
             set_status(c, pid, "transcribing", "transcript बन रहा है (GPU worker)")
+            if ap_on:
+                apf.enter(c, pid, "transcribe", f"{round(float(meta.get('duration') or 0) / 60, 1)} मिनट की recording")
             queue.enqueue(c, pid, "transcribe", transcribe_payload(project))
         else:
-            # no speech → nothing to cut or caption; go straight to review
+            # no speech → nothing to cut or caption; go straight to review (autopilot: straight to the edit)
             db.update(c, "projects", pid, {"transcript": {"segments": [], "text": ""},
-                                           "edl": autocut.build_edl({"segments": []}, meta["duration"]),
+                                           "edl": autocut.build_edl({"segments": []}, float(meta.get("duration") or 0)),
                                            "updated_at": db.now()})
-            set_status(c, pid, "review_cuts", "कोई आवाज़ नहीं मिली — सीधे render करें")
+            if ap_on:
+                apf.no_speech(c, db.get("projects", pid))
+            else:
+                set_status(c, pid, "review_cuts", "कोई आवाज़ नहीं मिली — सीधे render करें")
 
     elif kind == "transcribe":
         tr = result.get("transcript") or {}
@@ -207,25 +214,16 @@ def after_job(c, job: dict, result: dict) -> None:
             changes["language"] = tr["language"]  # detected when the project was set to auto
         db.update(c, "projects", pid, changes)
         set_status(c, pid, "cutting", "कट ढूँढे जा रहे हैं")
+        if ap_on:
+            nw = sum(len(s_.get("words") or []) for s_ in tr.get("segments") or [])
+            apf.enter(c, pid, "autocut", f"{nw} शब्द मिले" if nw else "कोई बोला हुआ शब्द नहीं मिला")
         queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {})})
 
     elif kind == "autocut":
         db.update(c, "projects", pid, {"edl": result.get("edl"), "updated_at": db.now()})
-        st = result.get("edl", {}).get("stats", {})
-        if project.get("settings", {}).get("autopilot"):
-            project = db.get("projects", pid)
-            opts = autopilot_plan(project, c)
-            ap = opts.pop("autopilot")
-            try:
-                request_render(c, project, opts)
-            except ValueError:
-                set_status(c, pid, "review_cuts", "autopilot render नहीं चला — settings जाँचें")
-                return
-            meta = {**project.get("meta", {}), "autopilot": {**ap, "stage": "render", "shorts_pending": ap["shorts"] > 0}}
-            db.update(c, "projects", pid, {"meta": meta})
-            if ap["shorts"]:
-                queue.enqueue(c, pid, "shorts_plan", {"options": {"count": ap["shorts"]}})
-            set_status(c, pid, "rendering", f"autopilot: {st.get('cuts', 0)} कट, captions, zoom, music… render हो रहा")
+        st = (result.get("edl") or {}).get("stats", {})
+        if ap_on:
+            apf.plan_and_render(c, db.get("projects", pid))
         else:
             set_status(c, pid, "review_cuts",
                        f"{st.get('cuts', 0)} कट सुझाए, {st.get('removed_seconds', 0)}s हटेंगे — जाँचें")
@@ -233,22 +231,9 @@ def after_job(c, job: dict, result: dict) -> None:
 
     elif kind == "shorts_plan":
         meta = {**project.get("meta", {}), "shorts": result.get("clips") or []}
-        ap = meta.get("autopilot") or {}
-        if ap.get("shorts_pending"):
-            meta["autopilot"] = {**ap, "shorts_pending": False}
+        if ap_on and (job.get("payload") or {}).get("autopilot"):
             db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now()})
-            clips = [{k: sc.get(k) for k in ("id", "start", "end", "title", "hook")} for sc in meta["shorts"] if sc.get("selected", True)]
-            if clips:
-                project = db.get("projects", pid)
-                try:
-                    for cl in clips:
-                        payload = {k: v for k, v in {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})}.items()
-                                   if k not in ("presets", "shorts_preset")}
-                        payload.update(preset="yt-short", label=f"short-{cl['id']}", clip={"start": float(cl["start"]), "end": float(cl["end"])},
-                                       hook={"text": cl.get("hook") or "", "seconds": 3}, title=cl.get("title"))
-                        queue.enqueue(c, pid, "render", payload)
-                except (ValueError, TypeError):
-                    pass
+            apf.on_shorts_plan(c, pid, meta["shorts"])
             return
         n_auto = int(meta.pop("shorts_render_after_plan", 0) or 0)
         db.update(c, "projects", pid, {"meta": meta, "updated_at": db.now(),
@@ -340,6 +325,10 @@ def after_job(c, job: dict, result: dict) -> None:
             replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
             add_asset(c, pid, f["kind"], f["path"], label=f.get("label"), mime=f.get("mime"),
                       meta=f.get("meta"))
+        # autopilot: the sequence moves on (shorts → thumbnails → metadata → publish plan) only
+        # when every render of the current step is finished
+        if apf.on_render_finished(c, pid, result.get("warnings") or []):
+            return
         # when every render job of this round is finished, ask for review
         pending = c.execute(
             "SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind IN ('render','shorts_plan') "
@@ -347,25 +336,9 @@ def after_job(c, job: dict, result: dict) -> None:
         if pending == 0:
             warns = result.get("warnings") or []
             project = db.get("projects", pid)
-            if (project.get("meta") or {}).get("autopilot"):
-                outs = db.rows(c.execute("SELECT * FROM assets WHERE project_id = ? AND kind = 'render'", (pid,)))
-                conns = db.rows(c.execute("SELECT id, platform FROM connections WHERE workspace_id = ? AND (channel_id = ? OR channel_id IS NULL) "
-                                          "ORDER BY CASE WHEN channel_id = ? THEN 0 ELSE 1 END", (project["workspace_id"], project.get("channel_id"), project.get("channel_id"))))
-                seen = set(); conns = [cn for cn in conns if not (cn["platform"] in seen or seen.add(cn["platform"]))]
-                try:
-                    pp = autopilot.publish_plan(project, outs, conns)
-                    pp = schedule_plan(project, pp)
-                except Exception:  # noqa: BLE001 — metadata is a nicety
-                    pp = []
-                db.update(c, "projects", pid, {"meta": {**project["meta"], "publish_plan": pp,
-                                                        "autopilot": {**project["meta"]["autopilot"], "stage": "review"}}})
-                set_status(c, pid, "review_output", f"autopilot पूरा: {len(outs)} वीडियो तैयार — देखें, मंज़ूरी दें, publish")
-                # --- thumbnail studio: 3 A/B thumbnails, made in a background thread after this commit
-                from .thumbs import autopilot_thumbnails
-                autopilot_thumbnails(pid)
-                # ---
-            else:
-                set_status(c, pid, "review_output", " · ".join(warns) if warns else "render तैयार — देखें और मंज़ूरी दें")
+            if apf.state(project).get("stage") == autopilot.READY:
+                apf.refresh_plan_assets(c, pid)  # a re-render after autopilot: keep the publish plan pointing at it
+            set_status(c, pid, "review_output", " · ".join(warns) if warns else "render तैयार — देखें और मंज़ूरी दें")
             notify.on_event("review_output", project, " · ".join(warns))
 
 
@@ -373,6 +346,9 @@ def fail_job(c, job: dict, error: str) -> None:
     pid = job["project_id"]
     db.update(c, "jobs", job["id"], {"status": "failed", "error": error[:4000],
                                      "finished_at": db.now()})
+    from . import autopilot_flow
+    if autopilot_flow.on_job_failed(c, job, error):
+        return
     if job["kind"] in ("publish", "shorts_plan", "dub"):
         # side jobs never take the project out of its editing state
         if job["kind"] == "publish" and job["payload"].get("publication_id"):
