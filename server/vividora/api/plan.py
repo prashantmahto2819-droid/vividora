@@ -176,7 +176,7 @@ def _flatten_inbound(data: dict) -> dict:
     if isinstance(d.get("text"), dict):
         d["text"] = d["text"].get("body") or ""
     d["text"] = d.get("text") or d.get("body") or (msg if isinstance(msg, str) else "") or ""
-    d["from"] = d.get("from") or d.get("sender") or d.get("phone") or d.get("remoteJid") or ((d.get("key") or {}).get("remoteJid") if isinstance(d.get("key"), dict) else "") or ""
+    d["from"] = d.get("from_phone") or d.get("chat_phone") or d.get("from") or d.get("sender") or d.get("phone") or d.get("remoteJid") or ((d.get("key") or {}).get("remoteJid") if isinstance(d.get("key"), dict) else "") or ""
     d["from_me"] = bool(d.get("fromMe") or d.get("from_me") or ((d.get("key") or {}).get("fromMe") if isinstance(d.get("key"), dict) else False))
     return d
 
@@ -196,6 +196,14 @@ async def inbound(request: Request):
     data = _flatten_inbound(await body(request))
     if data.get("from_me"):
         return ok({"matched": False, "ignored": "own message"})
+    # Vivid Relay sends every event to the webhook; only real chat messages matter here
+    if data.get("event") not in (None, "", "message") or data.get("chat_type") in ("group", "channel"):
+        return ok({"matched": False, "ignored": "event"})
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    has_audio = bool(data.get("audio_base64") or data.get("audio_url") or media.get("url") or media.get("base64"))
+    if data.get("type") in ("voice", "audio") and not has_audio:
+        notify.send("🎤 voice note अभी gateway से audio के साथ नहीं आता — कृपया लिखकर भेजें (जैसे “status बताओ”)।")
+        return ok({"matched": False, "voice": "no audio"})
     text = str(data.get("text") or data.get("message") or "").strip()
     m = re.search(r"\b(ok|okay|approve|हाँ|ha|yes)\s+([0-9a-f]{4})\b", text, re.I)
     if not m:
