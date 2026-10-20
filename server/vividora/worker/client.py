@@ -99,6 +99,16 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
             continue
         job = claimed["job"]
         log.info("job %s %s (project %s)", job["id"], job["kind"], job["project_id"])
+        import threading
+        stop = threading.Event()
+
+        def _keepalive():  # long steps (Whisper, TTS, big renders) may not report progress for minutes
+            while not stop.wait(45):
+                try:
+                    client.heartbeat(job["id"])
+                except Exception:  # noqa: BLE001
+                    pass
+        threading.Thread(target=_keepalive, daemon=True).start()
         try:
             result = handler(client, job, claimed["project"], claimed["assets"])
             client.done(job["id"], result)
@@ -111,5 +121,6 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
                 client.failed(job["id"], err, retry=not isinstance(e, ValueError) and not getattr(e, "no_retry", False))
             except Exception as e2:
                 log.error("could not report failure: %s", e2)
+        stop.set()
         if once:
             return

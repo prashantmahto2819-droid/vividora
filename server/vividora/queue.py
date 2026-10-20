@@ -75,3 +75,7 @@ def heartbeat(c, job_id: str, progress: int | None, message: str | None) -> None
     if message:
         data["message"] = message[:250]
     db.update(c, "jobs", job_id, data)
+    # a busy worker is alive: keep it "online" on the status page while it works
+    row = c.execute("SELECT worker FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row and row[0]:
+        c.execute("UPDATE workers SET last_seen_at = ? WHERE name = ?", (db.now(), row[0]))
