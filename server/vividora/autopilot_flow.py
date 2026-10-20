@@ -146,7 +146,7 @@ def plan_and_render(c, project: dict) -> None:
         opts = ap_eng.plan(project, ch_settings, lib)
         missing = [k for k in ("music", "sticker", "sfx") if not any(x["kind"] == k for x in lib)]
         if missing:
-            warn(c, pid, f"library में {', '.join(missing)} नहीं — उनके बिना edit (Library → starter pack लगाएँ)")
+            warn(c, pid, f"library में {', '.join(missing)} की फ़ाइलें नहीं मिलीं — उनके बिना edit (Library tab देखें)")
         enter(c, pid, "preflight")
         opts, fixes = ap_eng.preflight_fix(project, opts, hooks.options(project, 3, ai=False))
     except Exception as e:  # noqa: BLE001 — a planning bug must not leave the project hanging
