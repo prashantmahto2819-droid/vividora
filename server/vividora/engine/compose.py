@@ -21,6 +21,9 @@ Item fields (all optional; times in seconds):
   kf                       {x, y, scale, rotation, opacity} keyframes, t relative to the clip start.
                            x/y = centre (fraction of frame), scale = multiplier of the base size,
                            rotation = degrees, opacity 0…1.
+  cutout + alpha_path      "सिर्फ़ इंसान": the clip's cached person matte (worker-resolved) becomes its
+                           alpha — trimmed / sped / framed exactly like the picture, then edge_shrink /
+                           edge_feather, multiplied with the mask / crop.
 """
 
 from __future__ import annotations
@@ -193,7 +196,7 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
     """Filter graph for one pro overlay clip.
     → {"inputs": [[args…] per input], "chains": [...], "out": label, "audio": (chains, label) | None}
     Input indexes inside the returned chains are placeholders {IN0}, {IN1}… — render.py fills them."""
-    from .effects import _key
+    from .effects import ALPHA_RANGE, _key, edge_filter
     from .ffmpeg import probe
     s, e = float(item["start"]), float(item["end"])
     dur = max(1.0 / fps, e - s)
@@ -234,7 +237,10 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
     if not is_img:
         v += warp_filter(item.get("speed_warp"), min_speed, fps)
     v += f"fps={fps:.3f},trim=duration={dur:.3f},setpts=PTS-STARTPTS"
-    v += _key(item)
+    ap = item.get("alpha_path")
+    cut = bool(item.get("cutout") and ap and not is_img and Path(ap).exists())
+    if not cut:
+        v += _key(item)  # the person matte replaces colour keying (as on the legacy path)
     # --- look: colour LUT, grade, effects (on the colour planes; alpha kept aside)
     looks = []
     lut = colorpro.lut_filter(item.get("color"), work, f"clip{idx}")
@@ -251,10 +257,22 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
     mspec = masks.build([masks.clean(item.get("mask")), masks.crop_spec(item.get("crop"))], bw, bh, dur, fps, work, f"mask{idx}")
     if mspec:
         inputs.append(mspec[0])
-    if looks or mspec:
-        ch.append(v + f",format=rgba,split[{L}c][{L}a]")
-        ch.append(f"[{L}a]alphaextract[{L}al0]")
-        alpha = f"[{L}al0]"
+    if cut:
+        # same source window as the picture (seek / trim / speed / fit / warp) → frame-exact person alpha
+        ai = len(inputs)
+        inputs.append(["-ss", f"{seek:.3f}", "-t", f"{trim_in - seek + span + 0.3:.3f}", "-i", str(ap)])
+        edge = edge_filter(item.get("edge_shrink", 0), item.get("edge_feather", 0), H)
+        ch.append(f"[{{IN{ai}}}:v]{pre_v}{setpts_for(pieces)},scale={src_w}:{src_h},{fit_f},setsar=1,"
+                  f"{warp_filter(item.get('speed_warp'), min_speed, fps)}fps={fps:.3f},trim=duration={dur:.3f},"
+                  f"setpts=PTS-STARTPTS,format=yuv420p,extractplanes=y,{ALPHA_RANGE}{',' + edge if edge else ''}[{L}ct]")
+    if looks or mspec or cut:
+        if cut:
+            ch.append(v + f",format=rgba[{L}c]")
+            alpha = f"[{L}ct]"
+        else:
+            ch.append(v + f",format=rgba,split[{L}c][{L}a]")
+            ch.append(f"[{L}a]alphaextract[{L}al0]")
+            alpha = f"[{L}al0]"
         if mspec:
             ch.append(f"[{{IN1}}:v]{mspec[1]},trim=duration={dur:.3f}[{L}mk];{alpha}[{L}mk]blend=all_mode=multiply:shortest=1[{L}al1]")
             alpha = f"[{L}al1]"

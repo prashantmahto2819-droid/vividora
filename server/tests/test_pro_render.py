@@ -625,6 +625,48 @@ def t_markers_chapters(c: Checks):
 
 
 @test
+def t_overlay_cutout_pro(c: Checks):
+    """"सिर्फ़ इंसान" (cutout + alpha_path) on a pro overlay clip: the person matte follows trim / speed /
+    fit, is multiplied with a mask, and the clip's own background never shows."""
+    d = OUT / "media"
+    src, matte = d / "cut_src.mp4", d / "cut_matte.mp4"
+    def moving_box(bg: str, fg: str, out: Path, scale: str = "") -> None:  # an 80 px "person" moving 60 px/s
+        ff("-f", "lavfi", "-i", f"color=c={bg}:s=640x360:r=30:d=8", "-f", "lavfi", "-i", f"color=c={fg}:s=80x80:r=30:d=8",
+           "-filter_complex", f"[0:v][1:v]overlay=x='40+60*t':y=140{scale},format=yuv420p[v]", "-map", "[v]",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "8", str(out))
+    if not src.exists():
+        moving_box("0xFF0000", "0x00FF00", src)
+    if not matte.exists():  # the matte is stored smaller (like engine/matting.py's 512p/720p mattes)
+        moving_box("black", "white", matte, ",scale=320:180")
+    base = {"path": str(src), "type": "video", "fit": "cover", "fade": False, "start": 0.0, "end": 3.0, "trim_in": 1.0, "speed": 2.0,
+            "cutout": True, "alpha_path": str(matte), "color": {"wheels": {"gain": {"y": 0.0, "g": 0.05}}}}
+    c.check("cutout item is routed to the pro compositor", compose.is_pro(base), True)
+    out, dt, _ = do_render("overlay_cutout_pro", M["gray"], {"broll": [base]}, pre=preset(640, 360))
+    shots = []
+    red = lambda f: (f[..., 0] > 170) & (f[..., 1] < 80) & (f[..., 2] < 80)  # noqa: E731
+    grn = lambda f: (f[..., 1] > 170) & (f[..., 0] < 90) & (f[..., 2] < 90)  # noqa: E731
+    for t in (0.5, 1.0, 1.25):
+        f = frame(out, t)
+        src_t = 1.0 + 2.0 * t
+        exp_x = (40 + 60 * src_t + 40) / 640
+        cen = centroid(f, grn(f))
+        c.check(f"t={t}: person (green box) at source {src_t:.1f}s → x≈{exp_x:.3f}", cen is not None and abs(cen[0] - exp_x) < 0.02,
+                cen and round(cen[0], 4))
+        c.check(f"t={t}: the clip's own background (red) is cut away", int(red(f).sum()) < 60, int(red(f).sum()))
+        shots.append((f, f"t={t} src {src_t:.1f}s"))
+    # + a linear (wipe) mask that hides the right half of the frame: person visible only while inside it
+    masked = {**base, "mask": {"shape": "linear", "x": 0.5, "y": 0.5, "rotation": 0, "feather": 0}}
+    out2, dt2, _ = do_render("overlay_cutout_mask", M["gray"], {"broll": [masked]}, pre=preset(640, 360))
+    f1, f2 = frame(out2, 0.25), frame(out2, 1.5)   # source 1.5 s (box x 130–210) / 4 s (box x 280–360, half past 320)
+    g1, g2 = int(grn(f1).sum()), int(grn(f2).sum())
+    c.check("mask × cutout: left of the wipe the person shows", g1 > 4000, g1)
+    c.check("mask × cutout: right of the wipe the person is hidden", g2 < g1 * 0.75 and int(red(f2).sum()) < 60, [g2, int(red(f2).sum())])
+    shots += [(f1, "mask: left, visible"), (f2, "mask: crossing the edge")]
+    sheet("overlay_cutout_pro", shots, cols=5)
+    return {"render_s": round(dt + dt2, 2), "file": str(out)}
+
+
+@test
 def t_legacy_unchanged(c: Checks):
     it = {"path": str(M["ov"]), "type": "video", "fit": "pip", "pos": "tr", "start": 1, "end": 4}
     c.check("legacy overlay is not routed to the pro compositor", not compose.is_pro(it), False)
