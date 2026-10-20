@@ -7,5 +7,8 @@ python-multipart>=0.0.9
 # PyAV version faster-whisper pulls in does not matter.
 faster-whisper>=1.1.0
 numpy>=1.24
-opencv-python-headless>=4.9
+# <5: OpenCV 5 removed the Haar face cascades used by facetrack / thumbnails
+opencv-python-headless>=4.9,<5
 onnxruntime>=1.17
+# thumbnails (engine/thumbnail.py); wheels ship libraqm for Devanagari shaping (needs libfribidi0 in the image)
+Pillow>=10.0

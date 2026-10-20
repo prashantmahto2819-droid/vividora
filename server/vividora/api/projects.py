@@ -574,7 +574,58 @@ async def presets(request: Request, user: dict):
                "render_defaults": service.DEFAULT_RENDER, "autocut_defaults": autocut.DEFAULTS})
 
 
+@require("editor")
+async def duplicate(request: Request, user: dict):
+    """Copy a project: settings, cuts, transcript, meta and every file (real copies on disk)."""
+    import shutil
+    from starlette.concurrency import run_in_threadpool
+    p = own_project(request, user)
+    if p["status"] in ("uploading", "preparing"):
+        raise ApiError(400, "upload / जाँच पूरी होने दें, फिर copy करें")
+    data = await body(request)
+    nid = db.new_id()
+    old_dir, new_dir = str(storage.project_dir(p["workspace_id"], p["id"])), str(storage.project_dir(p["workspace_id"], nid))
+    assets = db.rows(db.conn().execute("SELECT * FROM assets WHERE project_id = ? AND archived = 0", (p["id"],)))
+
+    def copy_files() -> list[tuple[dict, str]]:
+        done = []
+        for a in assets:
+            src = storage.abs_path(a["path"])
+            if not src.exists():
+                continue
+            rel = a["path"].replace(old_dir, new_dir, 1) if a["path"].startswith(old_dir) else f"{new_dir}/work/{Path(a['path']).name}"
+            dst = storage.ensure_parent(rel)
+            shutil.copy2(src, dst)
+            done.append((a, rel))
+        return done
+
+    copied = await run_in_threadpool(copy_files)
+    has_out = any(a["kind"] == "render" for a, _ in copied)
+    status = p["status"]
+    if status in ("transcribing", "cutting", "rendering", "approved", "review_output", "failed"):
+        status = "review_output" if has_out and status in ("approved", "review_output") else "review_cuts" if p.get("edl") else "failed"
+    idmap: dict[str, str] = {}
+    meta = {k: v for k, v in (p.get("meta") or {}).items() if k not in ("archived_at", "publish_plan", "render_after_matte")}
+    np_ = {"id": nid, "workspace_id": p["workspace_id"], "created_by": user["id"], "channel_id": p.get("channel_id"),
+           "title": (str(data.get("title") or "").strip() or f"{p['title']} (copy)")[:200], "kind": p["kind"], "language": p["language"],
+           "status": status, "status_note": "copy — जाँचें और render करें", "meta": meta, "transcript": p.get("transcript"),
+           "edl": p.get("edl"), "settings": p.get("settings") or {}, "approved_by": None, "approved_at": None,
+           "created_at": db.now(), "updated_at": db.now()}
+    with db.tx() as c:
+        db.insert(c, "projects", np_)
+        for a, rel in copied:
+            na = service.add_asset(c, nid, a["kind"], rel, label=a.get("label"), mime=a.get("mime"), meta=a.get("meta"))
+            idmap[a["id"]] = na["id"]
+        sel = (meta.get("thumbnail") or {})
+        if sel:
+            db.update(c, "projects", nid, {"meta": {**meta, "thumbnail": {k: idmap.get(v) for k, v in sel.items() if idmap.get(v)}}})
+        service.log(c, user["workspace_id"], "project.duplicate", user_id=user["id"], project_id=nid,
+                    detail={"title": np_["title"], "from": p["id"], "files": len(copied)})
+    return ok(_with_urls(service.project_view(db.get("projects", nid))), 201)
+
+
 routes = [
+    Route("/projects/{project_id}/duplicate", duplicate, methods=["POST"]),
     Route("/projects", list_projects),
     Route("/projects", create_project, methods=["POST"]),
     Route("/projects/{project_id}", get_project),
