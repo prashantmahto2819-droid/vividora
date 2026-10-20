@@ -787,7 +787,7 @@ function bindPlan() {
   const collect = () => ({ title: $("#idea-title")?.textContent.trim(), status: $("#idea-status").value, format: $("#idea-format").value, due_at: $("#idea-due").value || null, hook: $("#idea-hook").value, angle: $("#idea-angle").value, outline: $("#idea-outline").value, script: $("#idea-scripttext").value });
   const save = $("#idea-save"); if (save) save.onclick = async () => { await api("PATCH", `/ideas/${id}`, collect()); toast("सेव"); load().then(render); };
   const drop = $("#idea-drop"); if (drop) drop.onclick = async () => { if (confirm("यह idea हटाएँ?")) { await api("PATCH", `/ideas/${id}`, { status: "dropped" }); S.ideaOpen = null; load().then(render); } };
-  const sc = $("#idea-script"); if (sc) sc.onclick = async () => { sc.disabled = true; sc.textContent = "लिख रहा है…"; await api("PATCH", `/ideas/${id}`, collect()); try { const r = await api("POST", `/ideas/${id}/script`, { seconds: $("#script-secs").value || null }); toast(r.source === "llm" ? "script तैयार" : "template बना (AI key नहीं)"); } catch (e) { toast(e.message); } load().then(render); };
+  const sc = $("#idea-script"); if (sc) sc.onclick = async () => { sc.disabled = true; sc.textContent = "लिख रहा है…"; await api("PATCH", `/ideas/${id}`, collect()); try { const r = await api("POST", `/ideas/${id}/script`, { seconds: $("#script-secs").value || null }); toast(r.source === "llm" ? "script तैयार" : r.ai_error ? "AI से नहीं बन पाया, template लगाया — " + r.ai_error : "AI key नहीं मिली, template लगाया — server की .env में GEMINI_API_KEY डालें", 7000); } catch (e) { toast(e.message); } load().then(render); };
   $("#idea-status").onchange = async () => { await api("PATCH", `/ideas/${id}`, { status: $("#idea-status").value }); load().then(render); };
 }
 

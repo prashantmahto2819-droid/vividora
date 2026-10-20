@@ -144,7 +144,8 @@ async def write_script(request: Request, user: dict):
                                                                         "title_options": r.get("title_options"),
                                                                         "script_source": r.get("source")},
                                         "updated_at": db.now()})
-    return ok({**r, "idea": db.get("ideas", i["id"])})
+    from ..engine import llm as _llm
+    return ok({**r, "idea": db.get("ideas", i["id"]), "ai_error": _llm.LAST_ERROR if r.get("source") != "llm" else ""})
 
 
 @require("viewer")

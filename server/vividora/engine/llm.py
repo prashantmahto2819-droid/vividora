@@ -44,7 +44,7 @@ def _cache_dir() -> Path:
 
 
 def _model(which: str) -> str:
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash") if which == "gemini" else os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+    return _gemini_model() if which == "gemini" else os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
 
 
 def _stat(key: str) -> None:
@@ -66,7 +66,7 @@ def stats() -> dict:
         st = json.loads(f.read_text()) if f.exists() else {}
     except ValueError:
         st = {}
-    return {"provider": available(), "calls": st.get("calls", 0), "saved": st.get("hits", 0)}
+    return {"provider": available(), "calls": st.get("calls", 0), "saved": st.get("hits", 0), "last_error": LAST_ERROR}
 
 
 def ask_json(prompt: str, *, system: str = "", max_tokens: int = 2048, timeout: float = 90, cache: bool = True):
@@ -93,22 +93,83 @@ def ask_json(prompt: str, *, system: str = "", max_tokens: int = 2048, timeout: 
     return res
 
 
+LAST_ERROR = ""   # shown in the UI when AI falls back to templates
+
+
+def _gemini_models_auto() -> str | None:
+    """Google retires models regularly ("no longer available to new users"). Ask the API which
+    models this key can use and pick the newest stable Flash; remembered on disk."""
+    f = _cache_dir() / "_gemini_model.txt"
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key={os.environ['GEMINI_API_KEY']}"
+        with urllib.request.urlopen(url, timeout=20) as r:
+            data = json.loads(r.read().decode())
+    except Exception:  # noqa: BLE001
+        return None
+    best, best_key = None, None
+    for m in data.get("models") or []:
+        name = str(m.get("name", "")).split("/")[-1]
+        if "generateContent" not in (m.get("supportedGenerationMethods") or []) or "flash" not in name:
+            continue
+        if any(x in name for x in ("image", "tts", "audio", "live", "thinking", "embed", "8b")):
+            continue
+        ver = re.findall(r"gemini-(\d+(?:\.\d+)?)", name)
+        v = float(ver[0]) if ver else 0.0
+        key = (v, "lite" not in name, "preview" not in name and "exp" not in name, -len(name))
+        if best_key is None or key > best_key:
+            best, best_key = name, key
+    if best:
+        try:
+            f.write_text(best)
+        except OSError:
+            pass
+    return best
+
+
+def _gemini_model() -> str:
+    env = os.getenv("GEMINI_MODEL", "").strip()
+    if env:
+        return env
+    f = _cache_dir() / "_gemini_model.txt"
+    try:
+        if f.exists() and f.read_text().strip():
+            return f.read_text().strip()
+    except OSError:
+        pass
+    return _gemini_models_auto() or "gemini-flash-latest"
+
+
+def _gemini_call(model: str, prompt: str, system: str, max_tokens: int, timeout: float) -> str:
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+           f"?key={os.environ['GEMINI_API_KEY']}")
+    body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": max_tokens,
+                                 "responseMimeType": "application/json"}}
+    if system:
+        body["systemInstruction"] = {"parts": [{"text": system}]}
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = json.loads(r.read().decode())
+    return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+
+
 def _ask(which: str, prompt: str, *, system: str, max_tokens: int, timeout: float):
+    global LAST_ERROR
     try:
         if which == "gemini":
-            model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-            url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-                   f"?key={os.environ['GEMINI_API_KEY']}")
-            body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.4, "maxOutputTokens": max_tokens,
-                                         "responseMimeType": "application/json"}}
-            if system:
-                body["systemInstruction"] = {"parts": [{"text": system}]}
-            req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                data = json.loads(r.read().decode())
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            model = _gemini_model()
+            try:
+                text = _gemini_call(model, prompt, system, max_tokens, timeout)
+            except urllib.error.HTTPError as e:
+                if e.code not in (400, 404):
+                    raise
+                # model retired / renamed → find a current one and retry once
+                (_cache_dir() / "_gemini_model.txt").unlink(missing_ok=True)
+                alt = _gemini_models_auto()
+                if not alt or alt == model:
+                    raise
+                text = _gemini_call(alt, prompt, system, max_tokens, timeout)
         else:
             model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
             body = {"model": model, "max_tokens": max_tokens, "system": system or "Reply with JSON only.",
@@ -120,6 +181,15 @@ def _ask(which: str, prompt: str, *, system: str, max_tokens: int, timeout: floa
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 data = json.loads(r.read().decode())
             text = "".join(p.get("text", "") for p in data.get("content", []))
+        LAST_ERROR = ""
         return _extract_json(text)
-    except (urllib.error.URLError, KeyError, IndexError, ValueError, TimeoutError):
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read().decode()).get("error", {}).get("message", "")
+        except Exception:  # noqa: BLE001
+            msg = ""
+        LAST_ERROR = f"AI ({which}) HTTP {e.code}: {msg[:160]}"
+        return None
+    except (urllib.error.URLError, KeyError, IndexError, ValueError, TimeoutError) as e:
+        LAST_ERROR = f"AI ({which}): {str(e)[:160]}"
         return None
