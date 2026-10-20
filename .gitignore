@@ -13,3 +13,9 @@ __pycache__/
 *.db-shm
 .DS_Store
 .claude/
+
+# local runtime data (never commit)
+/media/
+/data/
+server/media/
+server/data/
