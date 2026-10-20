@@ -11,9 +11,11 @@ from typing import Any
 
 
 class PublishError(RuntimeError):
-    def __init__(self, message: str, *, retry: bool = False):
+    def __init__(self, message: str, *, retry: bool = False, status: int | None = None, reason: str | None = None):
         super().__init__(message)
         self.retry = retry
+        self.status = status  # HTTP status (None for network / local errors)
+        self.reason = reason  # Google error reason, e.g. "insufficientPermissions"
 
 
 def request(method: str, url: str, *, params: dict | None = None, data: Any = None, form: dict | None = None,
@@ -34,14 +36,24 @@ def request(method: str, url: str, *, params: dict | None = None, data: Any = No
             txt = r.read().decode()
             return json.loads(txt) if txt.strip() else {}
     except urllib.error.HTTPError as e:
-        msg = e.read().decode(errors="replace")[:800]
+        msg = e.read().decode(errors="replace")[:2000]
+        reason = None
         try:
             j = json.loads(msg)
             err = j.get("error", j)
-            msg = err.get("message") if isinstance(err, dict) else str(err)
+            if isinstance(err, dict):
+                errs = err.get("errors") or []
+                reason = (errs[0].get("reason") if errs and isinstance(errs[0], dict) else None) or err.get("status")
+                for d in err.get("details") or []:  # newer Google errors: ACCESS_TOKEN_SCOPE_INSUFFICIENT
+                    if isinstance(d, dict) and d.get("reason"):
+                        reason = reason or d["reason"]
+                msg = err.get("message") or msg
+            else:
+                msg = str(err)
         except ValueError:
             pass
-        raise PublishError(f"{e.code}: {msg}", retry=e.code in (429, 500, 502, 503, 504)) from None
+        raise PublishError(f"{e.code}: {msg[:800]}", retry=e.code in (429, 500, 502, 503, 504),
+                           status=e.code, reason=reason) from None
     except urllib.error.URLError as e:
         raise PublishError(f"network: {e.reason}", retry=True) from None
 

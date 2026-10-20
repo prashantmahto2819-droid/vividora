@@ -18,7 +18,8 @@ from typing import Any, Iterator
 
 from .config import settings
 
-JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info", "secrets", "extra"}
+JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info", "secrets", "extra",
+             "metrics", "retention", "dropinfo"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -100,6 +101,10 @@ CREATE TABLE IF NOT EXISTS channels (
   name TEXT NOT NULL, handle TEXT, niche TEXT, language TEXT NOT NULL DEFAULT 'hi', color TEXT,
   settings TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS channels_ws ON channels(workspace_id);
+CREATE TABLE IF NOT EXISTS yt_analytics (
+  publication_id TEXT PRIMARY KEY REFERENCES publications(id) ON DELETE CASCADE, video_id TEXT NOT NULL,
+  fetched_at TEXT NOT NULL, metrics TEXT NOT NULL DEFAULT '{}', retention TEXT NOT NULL DEFAULT '[]',
+  dropinfo TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);

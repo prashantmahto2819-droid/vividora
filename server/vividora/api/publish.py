@@ -181,6 +181,109 @@ def _timing(platform: str, when: str | None, payload: dict) -> tuple[dict, str |
     return payload, iso, hours
 
 
+def _yt_category(p: dict, requested: str | None) -> str:
+    """Explicit category wins; else 27 (Education) if the brand says so; else 22 (People & Blogs)."""
+    c = str(requested or "").strip().lower()
+    if c in youtube.CATEGORIES or c.isdigit():
+        return c
+    b = metadata._brand(p)
+    said = " ".join(str(b.get(k) or "") for k in ("yt_category", "category")).strip().lower()
+    return "education" if ("education" in said or said == "27" or "शिक्षा" in said) else "people"
+
+
+def _playlist_id(v: str | None) -> str | None:
+    """Accepts a playlist id or a youtube.com/playlist?list=… link."""
+    v = (v or "").strip()
+    if "list=" in v:
+        import urllib.parse
+        v = (urllib.parse.parse_qs(urllib.parse.urlparse(v).query).get("list") or [""])[0]
+    return v[:64] or None
+
+
+def _srt_for(p: dict, asset: dict) -> str | None:
+    """Captions for YouTube: the render's own sidecar SRT if there is one (exact output timeline),
+    else built from the transcript after cuts (and inside the Short's clip window)."""
+    sub = db.row(db.conn().execute("SELECT * FROM assets WHERE project_id = ? AND kind = 'subtitle' AND label = ? "
+                                   "ORDER BY created_at DESC LIMIT 1", (p["id"], asset.get("label"))).fetchone())
+    if sub:
+        try:
+            txt = storage.abs_path(sub["path"]).read_text(encoding="utf-8")
+            if txt.strip():
+                return txt
+        except OSError:
+            pass
+    tr = p.get("transcript")
+    if not tr:
+        return None
+    from ..engine.autocut import keep_segments, remap_words, words_of
+    from ..engine.captions import build_srt
+    dur = float((p.get("meta") or {}).get("duration") or 0)
+    edl = p.get("edl") or {"duration": dur, "cuts": []}
+    try:
+        keep = keep_segments({**edl, "duration": edl.get("duration") or dur})
+    except (KeyError, TypeError, ValueError):
+        return None
+    clip = (asset.get("meta") or {}).get("clip") or {}
+    if clip and float(clip.get("end", 0)) > float(clip.get("start", 0)):
+        cs, ce = float(clip["start"]), float(clip["end"])
+        keep = [(max(a, cs), min(b, ce)) for a, b in keep if b > cs and a < ce]
+    words = remap_words(words_of(tr), keep)
+    return build_srt(words) if words else None
+
+
+def youtube_extras(p: dict, asset: dict, data: dict) -> tuple[dict, str | None]:
+    """YouTube-only payload fields + the SRT for captions.insert. Blocking (may read the AI pack)."""
+    brand = metadata._brand(p)
+    extra: dict = {"ai_content": bool(data.get("ai_content", False)),
+                   "category": _yt_category(p, data.get("category")),
+                   "playlist_id": _playlist_id(data.get("playlist_id")) or _playlist_id(brand.get("yt_playlist_id"))}
+    fc = data.get("first_comment")
+    if fc is None:  # not sent → the AI pack's pinned comment (empty string = user wants no comment)
+        try:
+            from ..engine import aipack
+            fc = (aipack.get(p) or {}).get("pinned_comment") if p.get("transcript") else None
+        except Exception:  # noqa: BLE001
+            fc = None
+    extra["first_comment"] = str(fc or "").strip()[:2000] or None
+    loc = data.get("localizations")
+    if isinstance(loc, dict) and loc:
+        extra["localizations"] = {str(k)[:10]: {"title": str((v or {}).get("title") or "")[:100],
+                                               "description": str((v or {}).get("description") or "")[:5000]}
+                                  for k, v in loc.items() if isinstance(v, dict)}
+    srt = None
+    if data.get("captions", True):
+        try:
+            srt = _srt_for(p, asset)
+        except Exception:  # noqa: BLE001 — no captions is fine, never block a publish on it
+            srt = None
+    return extra, srt
+
+
+@require("editor")
+async def list_playlists(request: Request, user: dict):
+    """The connected channel's playlists for the publish form (playlists.list, 1 unit)."""
+    c0 = db.get("connections", request.path_params["conn_id"])
+    if not c0 or c0["workspace_id"] != user["workspace_id"] or c0["platform"] != "youtube":
+        raise ApiError(404, "connection not found")
+    if settings.publish_dry_run or not youtube.configured():
+        return ok({"playlists": [], "default": None})
+
+    def work():
+        tok, sec = youtube.access_token(c0["secrets"])
+        return youtube.list_playlists(tok), sec
+    note = None
+    items: list = []
+    try:
+        items, sec = await run_in_threadpool(work)
+        if sec != c0["secrets"]:
+            with db.tx() as c:
+                db.update(c, "connections", c0["id"], {"secrets": sec, "updated_at": db.now()})
+    except PublishError as e:
+        note = youtube.REAUTH_NOTE if youtube.is_scope_error(e) else str(e)
+    ch = db.get("channels", c0.get("channel_id") or "") or {}
+    return ok({"playlists": items, "default": ((ch.get("settings") or {}).get("brand") or {}).get("yt_playlist_id"), "note": note})
+
+
 def pub_view(p: dict) -> dict:
     return {k: p.get(k) for k in ("id", "project_id", "asset_id", "connection_id", "platform", "status", "payload",
                                   "remote_id", "url", "error", "created_at", "finished_at")}
@@ -213,6 +316,10 @@ async def create_publication(request: Request, user: dict):
                "scheduled_at": data.get("scheduled_at") or None, "category": data.get("category", "people"),
                "language": p.get("language") if p.get("language") in ("hi", "en") else None,
                "kind": "video" if asset["meta"].get("width", 0) > asset["meta"].get("height", 0) else "reel"}
+    srt = None
+    if conn["platform"] == "youtube":
+        extra, srt = await run_in_threadpool(youtube_extras, p, asset, data)
+        payload.update(extra)
     payload, run_after, link_h = _timing(conn["platform"], data.get("when") or data.get("publish_at"), payload)
     pub = {"id": db.new_id(), "workspace_id": user["workspace_id"], "project_id": p["id"], "asset_id": asset["id"],
            "connection_id": conn["id"], "platform": conn["platform"], "status": "queued", "payload": payload,
@@ -226,7 +333,7 @@ async def create_publication(request: Request, user: dict):
             "publication_id": pub["id"], "platform": conn["platform"], "asset_id": asset["id"],
             "secrets": conn["secrets"], "payload": payload,
             "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=link_h)}" if settings.public_url else None,
-            "thumb_asset_id": thumb_id,
+            "thumb_asset_id": thumb_id, "captions_srt": srt,
             "dry_run": settings.publish_dry_run})
         service.log(c, user["workspace_id"], "publish.queue", user_id=user["id"], project_id=p["id"],
                     detail={"platform": conn["platform"], "title": payload["title"]})
@@ -244,8 +351,13 @@ async def publish_plan_run(request: Request, user: dict):
     queued = []
     yt = any((db.get("connections", it.get("connection_id") or "") or {}).get("platform") == "youtube" for it in items if it.get("selected", True))
     thumb_id = await run_in_threadpool(thumbs.publish_thumb_asset_id, p) if yt else None
+    yt_extra: dict[int, tuple[dict, str | None]] = {}  # computed outside the write transaction (may read the AI pack)
+    for i, it in enumerate(items):
+        a0, c0 = db.get("assets", it.get("asset_id") or ""), db.get("connections", it.get("connection_id") or "")
+        if it.get("selected", True) and a0 and c0 and c0["platform"] == "youtube" and a0["project_id"] == p["id"]:
+            yt_extra[i] = await run_in_threadpool(youtube_extras, p, a0, it)
     with db.tx() as c:
-        for it in items:
+        for i, it in enumerate(items):
             if not it.get("selected", True):
                 continue
             asset = db.get("assets", it.get("asset_id")); conn = db.get("connections", it.get("connection_id"))
@@ -256,6 +368,8 @@ async def publish_plan_run(request: Request, user: dict):
                        "publish_at": it.get("publish_at") or None, "scheduled_at": it.get("scheduled_at") or None,
                        "category": "people", "language": p.get("language") if p.get("language") in ("hi", "en") else None,
                        "kind": "video" if asset["meta"].get("width", 0) > asset["meta"].get("height", 0) else "reel"}
+            extra, srt = yt_extra.get(i, ({}, None))
+            payload.update(extra)
             pub = {"id": db.new_id(), "workspace_id": user["workspace_id"], "project_id": p["id"], "asset_id": asset["id"],
                    "connection_id": conn["id"], "platform": conn["platform"], "status": "queued", "payload": payload,
                    "remote_id": None, "url": None, "error": None, "created_by": user["id"], "created_at": db.now(), "finished_at": None}
@@ -265,7 +379,8 @@ async def publish_plan_run(request: Request, user: dict):
             queue.enqueue(c, p["id"], "publish", {
                 "publication_id": pub["id"], "platform": conn["platform"], "asset_id": asset["id"], "secrets": conn["secrets"],
                 "payload": payload, "public_url": f"{settings.public_url}/pub/{make_token(asset['id'], kind='pub', hours=link_h)}" if settings.public_url else None,
-                "thumb_asset_id": thumb_id if conn["platform"] == "youtube" else None, "dry_run": settings.publish_dry_run},
+                "thumb_asset_id": thumb_id if conn["platform"] == "youtube" else None, "captions_srt": srt,
+                "dry_run": settings.publish_dry_run},
                 run_after=run_after)
             queued.append(pub["id"])
         service.log(c, user["workspace_id"], "publish.plan", user_id=user["id"], project_id=p["id"], detail={"count": len(queued)})
@@ -298,6 +413,7 @@ routes = [
     Route("/connections", list_connections),
     Route("/connections/{conn_id}", delete_connection, methods=["DELETE"]),
     Route("/connections/{conn_id}", move_connection, methods=["PATCH"]),
+    Route("/connections/{conn_id}/playlists", list_playlists),
     Route("/connect/{platform}/start", connect_start, methods=["POST"]),
     Route("/connect/youtube/callback", youtube_callback),
     Route("/connect/meta/callback", meta_callback),
