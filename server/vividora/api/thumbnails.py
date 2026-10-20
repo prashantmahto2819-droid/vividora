@@ -5,6 +5,7 @@ GET    /projects/{id}/thumbnails                     saved thumbnails + selected
 GET    /projects/{id}/thumbnails/frames?refresh=1    best-frame timestamps
 GET    /projects/{id}/thumbnails/frame?t=&w=         one still (JPEG)
 POST   /projects/{id}/thumbnails/preview             {settings} → JPEG (lint in X-Thumb-Lint header)
+POST   /projects/{id}/thumbnails/layers              {settings, have} → background + one sprite per layer (direct editing)
 POST   /projects/{id}/thumbnails/lint                {settings} → {warnings, info}
 POST   /projects/{id}/thumbnails/text                AI / heuristic thumbnail texts
 POST   /projects/{id}/thumbnails                     {settings, select} → saved asset
@@ -35,7 +36,9 @@ def _has_video(p: dict) -> None:
 @require("viewer")
 async def templates(request: Request, user: dict):
     return ok({"templates": T.templates_json(), "fonts": list(T.FONTS), "styles": T.STYLES, "bg_types": T.BG_TYPES,
-               "shapes": T.SHAPES, "sizes": {k: list(v) for k, v in T.SIZES.items()}, "raqm": T.RAQM})
+               "shapes": T.SHAPES, "sizes": {k: list(v) for k, v in T.SIZES.items()}, "raqm": T.RAQM,
+               "grades": T.GRADES, "overlays": T.OVERLAYS, "shadows": T.SHADOWS, "style_defaults": T.STYLE_DEF,
+               "max_stickers": T.MAX_STICKERS, "emoji": any(p.exists() for p in T.EMOJI_FONTS)})
 
 
 @require("viewer")
@@ -88,6 +91,17 @@ async def preview(request: Request, user: dict):
     hdr = json.dumps({"warnings": warnings, "info": {k: info.get(k) for k in ("font_px", "contrast", "cutout", "t", "words")}}, ensure_ascii=True)
     return Response(jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store", "X-Thumb-Lint": hdr,
                                                            "Access-Control-Expose-Headers": "X-Thumb-Lint"})
+
+
+@require("viewer")
+async def layers(request: Request, user: dict):
+    p = own_project(request, user)
+    _has_video(p)
+    data = await body(request)
+    try:
+        return ok(await run_in_threadpool(thumbs.render_layers, p, data.get("settings") or {}, data.get("have") or []))
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(500, f"thumbnail नहीं बना: {str(e)[-300:]}")
 
 
 @require("viewer")
@@ -159,6 +173,7 @@ routes = [
     Route("/projects/{project_id}/thumbnails/frames", frames),
     Route("/projects/{project_id}/thumbnails/frame", frame),
     Route("/projects/{project_id}/thumbnails/preview", preview, methods=["POST"]),
+    Route("/projects/{project_id}/thumbnails/layers", layers, methods=["POST"]),
     Route("/projects/{project_id}/thumbnails/lint", lint, methods=["POST"]),
     Route("/projects/{project_id}/thumbnails/text", text, methods=["POST"]),
     Route("/projects/{project_id}/thumbnails/variants", variants, methods=["POST"]),
