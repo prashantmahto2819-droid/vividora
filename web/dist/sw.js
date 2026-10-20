@@ -1,5 +1,5 @@
 // Vividora service worker: the app shell works offline; API calls always go to the network.
-const SHELL = "vividora-shell-v5";
+const SHELL = "vividora-shell-v6";
 const FILES = ["/", "/assets/app.css", "/assets/app.js", "/assets/editor.css", "/assets/editor.js", "/assets/record.js", "/assets/thumbs.js", "/assets/voice.js", "/assets/textfx.js", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {

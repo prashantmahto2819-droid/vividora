@@ -74,7 +74,26 @@ def create_app() -> Starlette:
                 routes.append(Route(f"/{extra}", (lambda p: (lambda r: FileResponse(p)))(settings.web_dist / extra)))
     routes.append(Route("/{path:path}", spa))
 
-    middleware = []
+    class _Revalidate:
+        """App files (JS/CSS/HTML) must never be reused from the browser cache after an update:
+        "no-cache" makes the browser ask every time (a cheap 304 when nothing changed)."""
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            path = scope.get("path", "") if scope["type"] == "http" else ""
+            if not path or path.startswith("/api/") or path.startswith("/pub/"):
+                return await self.app(scope, receive, send)
+
+            async def send2(msg):
+                if msg["type"] == "http.response.start":
+                    hs = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
+                    hs.append((b"cache-control", b"no-cache"))
+                    msg = {**msg, "headers": hs}
+                await send(msg)
+            return await self.app(scope, receive, send2)
+
+    middleware = [Middleware(_Revalidate)]
     if settings.cors_origins:
         middleware.append(Middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                                      allow_methods=["*"], allow_headers=["*"], allow_credentials=True))
