@@ -161,12 +161,41 @@ async def notify_test(request: Request, user: dict):
     return ok()
 
 
+def _flatten_inbound(data: dict) -> dict:
+    """Gateways wrap messages differently ({data: {...}}, {message: {text}}, Baileys-style keys…) → one flat dict."""
+    d = data
+    for k in ("data", "payload", "event"):
+        if isinstance(d.get(k), dict) and not d.get("text"):
+            d = {**d, **d[k]}
+    msg = d.get("message")
+    if isinstance(msg, dict):
+        d = {**d, "text": d.get("text") or msg.get("text") or msg.get("conversation") or msg.get("body") or msg.get("caption") or "",
+             "media": d.get("media") or msg.get("media") or msg.get("audio")}
+        if isinstance(msg.get("extendedTextMessage"), dict):
+            d["text"] = d["text"] or msg["extendedTextMessage"].get("text", "")
+    if isinstance(d.get("text"), dict):
+        d["text"] = d["text"].get("body") or ""
+    d["text"] = d.get("text") or d.get("body") or (msg if isinstance(msg, str) else "") or ""
+    d["from"] = d.get("from") or d.get("sender") or d.get("phone") or d.get("remoteJid") or ((d.get("key") or {}).get("remoteJid") if isinstance(d.get("key"), dict) else "") or ""
+    d["from_me"] = bool(d.get("fromMe") or d.get("from_me") or ((d.get("key") or {}).get("fromMe") if isinstance(d.get("key"), dict) else False))
+    return d
+
+
+async def inbound_info(request: Request):
+    """Opening the link in a browser: say it is alive (no secrets)."""
+    return ok({"alive": True, "method": "POST", "configured": bool(settings.notify_inbound_secret),
+               "how": "Vivid Relay webhook: POST JSON {from, text} या voice note {from, audio_base64 | audio_url}; header X-Hook-Secret"})
+
+
 async def inbound(request: Request):
     """WhatsApp reply → approval. Body: {"from": "...", "text": "ok 7F3A"}."""
-    secret = request.headers.get("x-hook-secret", "")
+    auth = request.headers.get("authorization", "")
+    secret = request.headers.get("x-hook-secret") or (auth[7:] if auth.lower().startswith("bearer ") else "") or request.query_params.get("secret", "")
     if not settings.notify_inbound_secret or not hmac.compare_digest(secret, settings.notify_inbound_secret):
         raise ApiError(401, "bad secret")
-    data = await body(request)
+    data = _flatten_inbound(await body(request))
+    if data.get("from_me"):
+        return ok({"matched": False, "ignored": "own message"})
     text = str(data.get("text") or data.get("message") or "").strip()
     m = re.search(r"\b(ok|okay|approve|हाँ|ha|yes)\s+([0-9a-f]{4})\b", text, re.I)
     if not m:
@@ -262,4 +291,5 @@ routes = [
     Route("/notify", notify_status),
     Route("/notify/test", notify_test, methods=["POST"]),
     Route("/hooks/inbound", inbound, methods=["POST"]),
+    Route("/hooks/inbound", inbound_info, methods=["GET"]),
 ]
