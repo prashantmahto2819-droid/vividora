@@ -69,10 +69,20 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
     audio_asset = next((a for a in assets if a["kind"] == "audio_asr"), None)
     if audio_asset is None:
         raise ValueError("project has no audio_asr file")
+    pl = job["payload"]
+    rng = pl.get("range")
+    window = (float(rng[0]), float(rng[1])) if isinstance(rng, (list, tuple)) and len(rng) == 2 else None
     with tempfile.TemporaryDirectory(prefix="vividora_gpu_") as td:
         audio = client.download(audio_asset["id"], Path(td) / "audio.wav")
-        transcript = transcribe_file(audio, language=job["payload"].get("language", "hi"),
-                                     on_progress=progress)
+        try:
+            transcript = transcribe_file(audio, language=pl.get("language", "hi"), prompt=pl.get("prompt"),
+                                         on_progress=progress, window=window,
+                                         alternatives=int(pl.get("alternatives", 0) or 0), model=pl.get("model") or None)
+        except TypeError:  # lib/ still has the old transcriber copy
+            if window:
+                raise ValueError("GPU worker पुराना है — gpu-worker में .\\install.ps1 दोबारा चलाएँ") from None
+            transcript = transcribe_file(audio, language=pl.get("language", "hi"), on_progress=progress)
+    # the channel's learned word fixes are applied by the server (service.after_job)
     return {"transcript": transcript}
 
 

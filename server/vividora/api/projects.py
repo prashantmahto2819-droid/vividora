@@ -120,6 +120,15 @@ async def update_project(request: Request, user: dict):
                         "final_seconds": round(float(edl["duration"]) - removed, 2)}
         changes["edl"] = edl
     if "transcript" in data and isinstance(data["transcript"], dict):
+        # the editor may still hold the transcript from before a re-transcribe: lines re-heard since
+        # are merged in; after a whole re-transcribe the old words are not written back
+        fresh = service.transcript_for_save(p.get("transcript"), data["transcript"])
+        if fresh is None:
+            data.pop("transcript")
+        else:
+            fresh["text"] = " ".join((s.get("text") or "").strip() for s in fresh.get("segments") or []).strip()
+            data["transcript"] = fresh
+    if "transcript" in data and isinstance(data["transcript"], dict):
         changes["transcript"] = data["transcript"]
         # remember the creator's word corrections for this channel → future transcripts get them automatically
         from ..engine import vocab
@@ -315,16 +324,43 @@ async def autopilot_apply(request: Request, user: dict):
 
 @require("editor")
 async def retranscribe(request: Request, user: dict):
-    """Run speech-to-text again (new model / new vocabulary). Cuts are rebuilt afterwards."""
+    """Run speech-to-text again.
+
+    Empty body → the whole recording (new model / new vocabulary); the cut list is rebuilt
+    afterwards, keeping the creator's manual cuts and switched-off cuts.
+    {"start": s, "end": e} (source seconds) or {"segments": [i, ...]} → only that part:
+    the project stays in its editing state and only words inside the part are replaced.
+    Optional: "alternatives" (0–3, default 2 for a part), "model" (e.g. "medium")."""
     p = own_project(request, user)
     if not any(a["kind"] == "audio_asr" for a in service.project_view(p).get("assets", [])):
         raise ApiError(400, "इस project में आवाज़ नहीं है")
+    data = await body(request)
     from .. import queue
+    try:
+        payload = service.transcribe_payload(p, part=data)
+    except ValueError as e:
+        raise ApiError(400, str(e)) from None
     with db.tx() as c:
+        busy = db.rows(c.execute("SELECT id, status, payload FROM jobs WHERE project_id = ? AND kind = 'transcribe' "
+                                 "AND status IN ('queued','running')", (p["id"],)))
+        if payload.get("range"):
+            if any(not (j.get("payload") or {}).get("range") for j in busy) or p["status"] == "transcribing":
+                raise ApiError(409, "पूरा transcript अभी बन रहा है — उसके बाद line दोबारा बनाएँ")
+            if not p.get("transcript"):
+                raise ApiError(400, "पहले transcript बनने दें")
+            job = queue.enqueue(c, p["id"], "transcribe", payload)
+            db.update(c, "projects", p["id"], {"status_note": "line दोबारा सुन रहे हैं…", "updated_at": db.now()})
+            service.log(c, user["workspace_id"], "project.retranscribe_part", user_id=user["id"], project_id=p["id"],
+                        detail={"range": payload["range"]})
+            return ok({"job": job})
+        # whole recording: an older transcribe (whole or one line) must not land on top of the new one
+        for j in busy:
+            db.update(c, "jobs", j["id"], {"status": "cancelled", "finished_at": db.now(),
+                                           "message": "नया transcript माँगा गया"})
         service.set_status(c, p["id"], "transcribing", "transcript दोबारा बन रहा है")
-        queue.enqueue(c, p["id"], "transcribe", service.transcribe_payload(p))
+        job = queue.enqueue(c, p["id"], "transcribe", payload)
         service.log(c, user["workspace_id"], "project.retranscribe", user_id=user["id"], project_id=p["id"])
-    return ok()
+    return ok({"job": job})
 
 
 @require("editor")

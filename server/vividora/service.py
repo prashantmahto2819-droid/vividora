@@ -123,15 +123,58 @@ def project_channel(project: dict) -> dict:
     return row or {}
 
 
-def transcribe_payload(project: dict) -> dict:
-    """Language + the channel's vocabulary (prompt + learned corrections) for the transcriber."""
-    from .engine import vocab
+def transcribe_payload(project: dict, part: dict | None = None) -> dict:
+    """Language + the channel's vocabulary (prompt + learned corrections) for the transcriber.
+
+    part ({"start", "end"} or {"segments": [...]}, see POST /retranscribe) → a one-line job:
+    payload.core = the chosen window, payload.range = core ± 0.3 s (the audio that is heard),
+    payload.alternatives = other readings to offer (default 2)."""
+    from .engine import retranscribe, vocab
     ch = project_channel(project)
     st = ch.get("settings") or {}
     lang = project.get("language", "hi")
-    return {"language": lang, "prompt": vocab.prompt(lang, st), "fixes": st.get("vocab_fixes") or {},
-            "context": " ".join(x for x in [ch.get("niche") or "", project.get("title") or ""] if x)[:200],
-            "polish": st.get("llm_polish", True)}
+    pl = {"language": lang, "prompt": vocab.prompt(lang, st), "fixes": st.get("vocab_fixes") or {},
+          "context": " ".join(x for x in [ch.get("niche") or "", project.get("title") or ""] if x)[:200],
+          "polish": st.get("llm_polish", True)}
+    part = part or {}
+    if part.get("model"):
+        if str(part["model"]) not in WHISPER_MODELS:
+            raise ValueError(f"model इनमें से चुनें: {', '.join(WHISPER_MODELS)}")
+        pl["model"] = str(part["model"])
+    win = retranscribe.part_window(project.get("transcript"), part)
+    if win:
+        dur = float((project.get("meta") or {}).get("duration") or 0) or win[1] + retranscribe.PAD
+        pl.update(core=list(win), range=[round(max(0.0, win[0] - retranscribe.PAD), 3), round(min(dur, win[1] + retranscribe.PAD), 3)],
+                  alternatives=max(0, min(3, int(part.get("alternatives", 2) or 0))), polish=False)
+    else:
+        pl["retranscribe"] = bool(project.get("transcript"))
+    return pl
+
+
+WHISPER_MODELS = ("large-v3", "large-v3-turbo", "turbo", "large-v2", "medium", "small", "base", "stub")
+
+
+def finish_transcript(tr: dict, payload: dict) -> dict:
+    """Server-side clean-up of a transcribe result: repaired word timings, and the channel's
+    learned word fixes when the worker did not apply them (the GPU worker never does)."""
+    from .engine import vocab, wordfix
+    alts = tr.get("alts")
+    tr = wordfix.clean_transcript(tr) or {"segments": []}
+    if "fixes_applied" not in tr and payload.get("fixes"):
+        tr, n = vocab.apply_fixes(tr, payload["fixes"])
+        for a in alts or []:
+            vocab.apply_fixes({"segments": [a]}, payload["fixes"])
+            a["text"] = " ".join(w.get("w", "") for w in a.get("words") or [])
+        tr["fixes_applied"] = n
+    if alts is not None:
+        tr["alts"] = alts
+    return tr
+
+
+def transcript_for_save(current: dict | None, incoming: dict) -> dict | None:
+    """What to store when the editor saves a transcript (None = it is older than a re-transcribe)."""
+    from .engine import retranscribe
+    return retranscribe.reconcile(current, incoming)
 
 
 def booked_times(workspace_id: str, channel_id: str | None) -> dict:
@@ -201,17 +244,43 @@ def after_job(c, job: dict, result: dict) -> None:
             set_status(c, pid, "review_cuts", "कोई आवाज़ नहीं मिली — सीधे render करें")
 
     elif kind == "transcribe":
-        tr = result.get("transcript") or {}
+        from .engine import retranscribe
+        pl = job.get("payload") or {}
+        tr = finish_transcript(result.get("transcript") or {}, pl)
+        cur = project.get("transcript") or None
+        if pl.get("range"):
+            # one line re-heard: replace only the words inside the chosen window
+            core = pl.get("core") or pl["range"]
+            merged = retranscribe.splice_window(cur, core, tr.get("segments"), tr.get("alts"))
+            merged = retranscribe.bump(merged, cur, {"range": [float(core[0]), float(core[1])], "at": db.now()})
+            n = sum(1 for sg in tr.get("segments") or [] for w in sg.get("words") or []
+                    if float(core[0]) <= (w["start"] + w["end"]) / 2 <= float(core[1]))
+            db.update(c, "projects", pid, {"transcript": merged, "updated_at": db.now(),
+                                           "status_note": f"line दोबारा बनी ✓ ({n} शब्द)" if n else "line में कोई शब्द नहीं सुनाई दिया"})
+            return
+        tr = retranscribe.bump(tr, cur, {"full": True, "at": db.now()})
         changes = {"transcript": tr, "updated_at": db.now()}
         if tr.get("language"):
             changes["language"] = tr["language"]  # detected when the project was set to auto
         db.update(c, "projects", pid, changes)
-        set_status(c, pid, "cutting", "कट ढूँढे जा रहे हैं")
-        queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {})})
+        again = bool(pl.get("retranscribe")) and bool(project.get("edl"))
+        set_status(c, pid, "cutting", "नए transcript से कट ढूँढे जा रहे हैं (आपके manual कट रहेंगे)" if again else "कट ढूँढे जा रहे हैं")
+        queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {}),
+                                          **({"retranscribe": True} if again else {})})
 
     elif kind == "autocut":
-        db.update(c, "projects", pid, {"edl": result.get("edl"), "updated_at": db.now()})
-        st = result.get("edl", {}).get("stats", {})
+        edl = result.get("edl") or {}
+        if (job.get("payload") or {}).get("retranscribe"):
+            # transcript was rebuilt: keep the creator's manual cuts and switched-off cuts, no autopilot render
+            from .engine import retranscribe
+            edl = retranscribe.carry_cut_choices(project.get("edl"), edl)
+            db.update(c, "projects", pid, {"edl": edl, "updated_at": db.now()})
+            st = edl.get("stats", {})
+            set_status(c, pid, "review_cuts", f"transcript दोबारा बना ✓ · {st.get('cuts', 0)} कट"
+                       + (f" ({st['kept_manual']} manual रखे)" if st.get("kept_manual") else "") + " — जाँचें")
+            return
+        db.update(c, "projects", pid, {"edl": edl, "updated_at": db.now()})
+        st = edl.get("stats", {})
         if project.get("settings", {}).get("autopilot"):
             project = db.get("projects", pid)
             opts = autopilot_plan(project, c)
@@ -382,6 +451,17 @@ def fail_job(c, job: dict, error: str) -> None:
         db.update(c, "projects", pid, {"status_note": f"{job['kind']} असफल: {error.splitlines()[-1][:160] if error else 'error'}",
                                        "updated_at": db.now()})
         return
+    if job["kind"] == "transcribe" and (job.get("payload") or {}).get("range"):
+        # one line: the project stays in the editor; only the note says it did not work
+        db.update(c, "projects", pid, {"status_note": f"line दोबारा नहीं बनी: {error.splitlines()[-1][:160] if error else 'error'}",
+                                       "updated_at": db.now()})
+        return
+    if job["kind"] in ("transcribe", "autocut") and (job.get("payload") or {}).get("retranscribe"):
+        p = db.get("projects", pid) or {}
+        if p.get("transcript") and p.get("edl"):
+            # the old transcript + cuts are still there: back to editing instead of "failed"
+            set_status(c, pid, "review_cuts", f"transcript दोबारा नहीं बना ({error.splitlines()[-1][:140] if error else 'error'}) — पुराना रखा है")
+            return
     if job["kind"] in ("montage", "montage_plan"):
         set_status(c, pid, "review_cuts", f"{'beat plan' if job['kind'] == 'montage_plan' else 'montage'} असफल: {error.splitlines()[-1][:160] if error else 'error'} — settings बदलकर फिर कोशिश करें")
         return
