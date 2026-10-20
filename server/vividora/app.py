@@ -54,6 +54,21 @@ async def _scheduler():
         await asyncio.sleep(3600)
 
 
+async def _autopilot_watchdog():
+    """Every minute: resume autopilot steps lost to a restart, wake stalled steps, tell the owner
+    when no worker can take a waiting job (autopilot_flow.kick)."""
+    import asyncio
+    from starlette.concurrency import run_in_threadpool
+    from . import autopilot_flow
+    await asyncio.sleep(5)
+    while True:
+        try:
+            await run_in_threadpool(autopilot_flow.kick)
+        except Exception as e:  # noqa: BLE001
+            log.warning("autopilot watchdog: %s", e)
+        await asyncio.sleep(60)
+
+
 def create_app() -> Starlette:
     logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -103,8 +118,10 @@ def create_app() -> Starlette:
     @contextlib.asynccontextmanager
     async def lifespan(app):
         task = asyncio.create_task(_scheduler())
+        wd = asyncio.create_task(_autopilot_watchdog())
         yield
         task.cancel()
+        wd.cancel()
 
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan,
                     exception_handlers={HTTPException: error_handler})

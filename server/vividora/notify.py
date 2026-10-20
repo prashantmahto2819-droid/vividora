@@ -82,6 +82,8 @@ def on_event(event: str, project: dict, extra: str = "") -> None:
     msgs = {
         "review_cuts": f"✂️ {title}\nकट तैयार हैं — dashboard में जाँचें:\n{link}",
         "review_output": f"🎬 {title}\nrender तैयार है{(' · ' + extra) if extra else ''}\nदेखें: {link}\nमंज़ूरी देने के लिए reply करें: ok {code}",
+        # autopilot finished every step — the only message of an autopilot run (besides a failure)
+        "autopilot_ready": f"✈ {title}\nautopilot पूरा: {extra}\nदेखें: {link}\nमंज़ूरी के लिए reply करें: ok {code}\n(publish तभी होगा जब आप dashboard से Publish दबाएँ)",
         "failed": f"⚠️ {title}\nरुक गया: {extra}\n{link}",
         "published": f"🚀 {title}\n{extra}",
         "publish_failed": f"❌ {title}\npublish असफल: {extra}",

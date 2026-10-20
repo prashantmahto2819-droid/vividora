@@ -29,6 +29,16 @@ def _f(level, preset, msg, fix=None, item=None):
     return {"level": level, "preset": preset, "platform": RULES.get(preset, {}).get("label", preset), "msg": msg, "fix": fix, "item": item}
 
 
+def _caption_margin(preset_id: str) -> float:
+    """How high the preset puts bottom captions (fraction of the height) — the IG/FB presets already
+    lift them above the 35 % caption/button area, so "bottom" there is safe."""
+    try:
+        from .presets import platform
+        return float(platform(preset_id).get("caption_margin_v") or 0)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def _text_y(t: dict) -> float:
     if t.get("pos") == "free":
         return float(t.get("y", .5))
@@ -67,7 +77,8 @@ def check(project: dict, rs: dict, presets: list[str] | None = None, meta_text: 
                     out.append(_f("warn", p, f"Text “{str(t.get('text', ''))[:24]}” {r['label']} के बटन/caption वाले हिस्से में है (ऊपर {int(z['top'] * 100)}%, नीचे {int(z['bottom'] * 100)}% खाली रखें)।",
                                   item=t.get("_id")))
             cap = (rs.get("captions") or {}).get("position") or ""
-            if p in ("ig-reel", "fb-reel") and cap in ("", "bottom") and rs.get("burn_captions", True):
+            if p in ("ig-reel", "fb-reel") and cap in ("", "bottom") and rs.get("burn_captions", True) \
+                    and _caption_margin(p) < z["bottom"]:
                 out.append(_f("tip", p, "Instagram/Facebook में नीचे का 35% हिस्सा caption/बटन से ढका रहता है — captions “बीच” पर रखें।",
                               fix={"captions": {**(rs.get("captions") or {}), "position": "center"}}))
             for b in fx.get("broll") or []:

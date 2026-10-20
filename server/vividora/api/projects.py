@@ -323,6 +323,41 @@ async def autopilot_apply(request: Request, user: dict):
 
 
 @require("editor")
+async def autopilot_resume(request: Request, user: dict):
+    """“Autopilot फिर चलाएँ”: continue the autopilot sequence from the step that failed or stalled
+    (or run it again on a finished project). Nothing is published — approval stays manual."""
+    from .. import autopilot_flow
+    p = own_project(request, user)
+    if p.get("kind") == "montage":
+        raise ApiError(400, "montage project पर autopilot नहीं चलता")
+    if p["status"] == "uploading":
+        raise ApiError(400, "पहले recording upload करें")
+    with db.tx() as c:
+        step = autopilot_flow.resume(c, db.get("projects", p["id"]))
+        service.log(c, user["workspace_id"], "project.autopilot_resume", user_id=user["id"], project_id=p["id"], detail={"step": step})
+    return ok({"step": step, **_with_urls(service.project_view(db.get("projects", p["id"])))})
+
+
+@require("viewer")
+async def autopilot_status(request: Request, user: dict):
+    """The autopilot sequence for the progress UI: every step with done / current / todo / failed."""
+    from .. import autopilot_flow
+    from ..engine import autopilot as ap_eng
+    p = own_project(request, user)
+    st = autopilot_flow.state(p)
+    cur = st.get("stage")
+    n = ap_eng.step_no(cur) if cur in ap_eng.STEP_KEYS else (len(ap_eng.STEPS) + 1 if cur == ap_eng.READY else 0)
+    steps = [{"key": k, "label": lbl, "n": i + 1,
+              "state": "failed" if st.get("failed") == k else "done" if i + 1 < n else "current" if i + 1 == n else "todo"}
+             for i, (k, lbl) in enumerate(ap_eng.STEPS)]
+    job = db.row(db.conn().execute("SELECT kind, status, progress, message FROM jobs WHERE project_id = ? AND status = 'running' "
+                                   "ORDER BY started_at DESC LIMIT 1", (p["id"],)).fetchone())
+    return ok({"on": bool((p.get("settings") or {}).get("autopilot")), "stage": cur, "steps": steps, "job": job,
+               "note": p.get("status_note"), "status": p["status"], "percent": st.get("percent", 0),
+               "warnings": st.get("warnings") or [], "preflight": st.get("preflight") or [], "hook_score": st.get("hook_score")})
+
+
+@require("editor")
 async def retranscribe(request: Request, user: dict):
     """Run speech-to-text again.
 
@@ -705,6 +740,8 @@ routes = [
     Route("/projects/{project_id}/recut", recut, methods=["POST"]),
     Route("/projects/{project_id}/retranscribe", retranscribe, methods=["POST"]),
     Route("/projects/{project_id}/autopilot/apply", autopilot_apply, methods=["POST"]),
+    Route("/projects/{project_id}/autopilot/resume", autopilot_resume, methods=["POST"]),
+    Route("/projects/{project_id}/autopilot", autopilot_status),
     Route("/projects/{project_id}/hooks", hook_studio),
     Route("/projects/{project_id}/preflight", preflight),
     Route("/projects/{project_id}/prompts", ai_prompts),

@@ -60,11 +60,14 @@ def heuristic(project: dict, platform: str, label: str | None) -> dict:
     title = (short or {}).get("title") or project.get("title") or (sents[0] if sents else "")
     title = title.strip(" ।.")[:95]
     hook = (short or {}).get("hook") or (sents[0][:120] if sents else "")
-    summary = " ".join(sents[:4])[:420]
+    # the hook line opens the description — the summary continues after it instead of repeating it
+    summary = " ".join(sents[1:5] if hook and sents and hook == sents[0][:120] else sents[:4])[:420]
     kws = _keywords(first)
     brand = _brand(project)
-    tags = list(dict.fromkeys([*kws[:10], *[h.lstrip("#") for h in (brand.get("hashtags") or "").split()], *BASE_TAGS[lang]]))[:25]
-    hashtags = " ".join("#" + t.replace(" ", "") for t in tags[:8])
+    own = [h.lstrip("#") for h in (brand.get("hashtags") or "").split() if h.lstrip("#")]
+    tags = list(dict.fromkeys([*kws[:10], *own, *BASE_TAGS[lang]]))[:25]
+    # hashtags: the channel's own first (platforms show only the first 3–5), then topic words
+    hashtags = " ".join("#" + t.replace(" ", "") for t in list(dict.fromkeys([*own, *kws[:4], *BASE_TAGS[lang][:2]]))[:8])
     cta = brand.get("cta") or "ऐसी और कहानियों के लिए channel subscribe करें।"
     is_short = platform != "youtube" or (label or "").startswith("short-") or label in ("yt-short", "ig-reel", "fb-reel")
     if is_short:
@@ -157,6 +160,8 @@ def _suggest(project: dict, *, platform: str = "youtube", label: str | None = No
         if not packed["tags"]:
             packed["tags"] = base["tags"]
         return packed
+    if aipack.failed(project) or not (project.get("transcript") or {}).get("segments"):
+        return base  # the AI is not answering (or nothing was said) — don't spend another call per output
     tr = project.get("transcript") or {}
     text = plain_text(tr)[:6000] if tr else ""
     is_short = platform != "youtube" or (label or "").startswith("short-") or label in ("yt-short", "ig-reel", "fb-reel")

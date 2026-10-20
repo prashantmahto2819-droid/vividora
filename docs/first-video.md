@@ -26,7 +26,22 @@ Dashboard → नीचे **channels** →
 **Phone camera app / दूसरी app से:** record करें → dashboard → **+ नया** → files चुनें (कई clips एक साथ चुनें तो क्रम से जुड़ेंगी) → ✈ Autopilot ✓ → upload.
 
 ## 3. Autopilot क्या करेगा (10-min video ≈ 20–40 min, CPU)
-आवाज़ साफ़ → transcript (Hindi/English/Hinglish auto) → चुप्पी/अं-आं/retake कट → hook card → captions (brand style) → zoom (slow push / punch) → color grade → mood वाली background music (बोलते समय धीमी) → logo → Subscribe popup + pop SFX → Like/Sub/Bell popup → YouTube long + 3 Shorts (face tracking के साथ) → AI titles/description/tags।
+हर कदम पिछले के पूरा होने के बाद ही शुरू होता है; project की line पर दिखता है कि कौन-सा कदम चल रहा है (जैसे “3/11 · कट ढूँढ रहे हैं”):
+
+1. फ़ाइल जाँच + आवाज़ साफ़
+2. transcript (Hindi/English/Hinglish auto)
+3. चुप्पी/अं-आं/retake कट
+4. edit plan — hook heading, captions (brand style), color, mood वाली music, emoji stickers, बड़ी lines, Subscribe/Follow popup (English, हर platform का अपना), zoom
+5. platform नियम जाँच — जो अपने-आप ठीक हो सकता है वो ठीक: लंबा वीडियो Reel नहीं बनता (Shorts कटते हैं), hook कमज़ोर हो तो बेहतर hook, text/sticker safe zone में
+6. मुख्य वीडियो render (+ quality check: शुरू के काले frames हटते हैं, loudness, captions)
+7. Shorts चुने जाते हैं (लंबी video से; गिनती Settings → Autopilot में, 0 = कोई नहीं)
+8. Shorts render — हर Short के अपने hook/stickers/popup
+9. 3 thumbnails + 9:16 cover
+10. title / description / tags — AI key हो तो **एक ही AI call** में सब, नहीं तो transcript से
+11. publish plan + समय (channel के posting slots)
+
+फिर status “✅ autopilot पूरा … code XXXX” और WhatsApp पर **एक** message। Publish कभी अपने-आप नहीं होता — मंज़ूरी (dashboard या WhatsApp पर `ok XXXX`) के बाद Publish आप दबाते हैं।
+कोई कदम असफल हो तो line पर लिखा होता है क्या हुआ और क्या करें; ठीक करके **Autopilot फिर चलाएँ** (`POST /api/projects/{id}/autopilot/resume`) — वहीं से आगे चलता है।
 
 ## 4. Review (5–10 मिनट)
 Project खोलें → editor:

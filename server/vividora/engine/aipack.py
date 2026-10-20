@@ -10,6 +10,8 @@ first and falls back to its own rules when no key is set.
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
 
 from . import llm, shorts
 
@@ -26,12 +28,43 @@ def key(project: dict) -> str:
     return hashlib.sha1(body.encode()).hexdigest()[:12]
 
 
+_memo: dict[str, tuple[float, dict | None]] = {}
+_locks: dict[str, threading.Lock] = {}
+_guard = threading.Lock()
+RETRY_FAILED_AFTER = 600  # a failed call (no key credit, network down) is not repeated for 10 min
+
+
+def failed(project: dict) -> bool:
+    """The pack call for this transcript failed recently — callers skip their own extra AI calls too."""
+    hit = _memo.get(key(project))
+    return bool(hit and hit[1] is None and time.time() - hit[0] < RETRY_FAILED_AFTER)
+
+
 def get(project: dict) -> dict | None:
+    """The pack for this transcript: from the project (autopilot stores it in meta.aipack), from this
+    process' memory, from the LLM disk cache, or — once — from the LLM. Concurrent callers (thumbnail
+    thread + metadata) wait for the one call instead of starting their own."""
     if not llm.available():
         return None
     body, sents = _text(project)
     if not sents:
         return None
+    k = key(project)
+    stored = (project.get("meta") or {}).get("aipack")
+    if isinstance(stored, dict) and stored.get("key") == k and stored.get("hooks"):
+        return stored
+    with _guard:
+        lock = _locks.setdefault(k, threading.Lock())
+    with lock:
+        hit = _memo.get(k)
+        if hit and (hit[1] is not None or time.time() - hit[0] < RETRY_FAILED_AFTER):
+            return hit[1]
+        res = _ask(project, body)
+        _memo[k] = (time.time(), res)
+        return res
+
+
+def _ask(project: dict, body: str) -> dict | None:
     from .metadata import voice_text
     voice = voice_text()
     hindi = project.get("language") != "en"
