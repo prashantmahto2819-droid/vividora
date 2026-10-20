@@ -480,3 +480,15 @@ a.stat:hover { border-color: #46546A; } .stat b { font-size: 1.55rem; font-varia
   .th-canvas.vertical { max-height: 60vh; }
   .th-saved { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.apgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .4rem .9rem; align-items: center; }
+.schgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .75rem; }
+.schlane { border: 1px solid var(--line); border-radius: 12px; padding: .6rem .7rem; display: flex; flex-direction: column; gap: .4rem; }
+.schslot { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.schslot .days { display: flex; gap: 2px; }
+.dchip { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 6px; padding: .1rem .35rem; font-size: .75rem; cursor: pointer; }
+.dchip.on { background: var(--amber); color: #111; border-color: var(--amber); }
+.card.radar { margin-bottom: 1rem; }
+.schlane input, .section .row input[type=number] { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: .3rem .45rem; color: var(--text); }
+.schslot input[type=time] { color-scheme: dark; }
+.dchip { color: var(--text); }

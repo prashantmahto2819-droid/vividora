@@ -18,8 +18,10 @@ import re
 from . import llm
 
 STYLE_HINT = {
-    "hi": "नमस्ते दोस्तों। आज मैं आपको एक सच्ची कहानी सुनाने वाला हूँ, जो आपकी ज़िंदगी बदल सकती है।",
-    "en": "Hello friends. Today I am going to tell you a true story.",
+    # the "अं… उम्म" in the hint makes Whisper write filler sounds instead of silently
+    # dropping them, so autocut can find and cut them
+    "hi": "नमस्ते दोस्तों। अं… तो आज मैं, उम्म, आपको एक सच्ची कहानी सुनाने वाला हूँ, जो आपकी ज़िंदगी बदल सकती है।",
+    "en": "Hello friends. Um, so today I'm, uh, going to tell you a true story.",
 }
 MAX_FIXES = 600
 _PUNCT = "।॥,.!?;:\"'“”‘’()[]…-"

@@ -93,11 +93,11 @@ async function load() {
   if (r.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (r.kind === "users" || (r.kind === "account" && S.user?.role === "admin")) S.users = await api("GET", "/users").catch(() => []);
   if (r.kind === "plan") { const [t, i, n, rf] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = rf; }
-  if (r.kind === "trends") S.trends = await api("GET", "/trends").catch(() => ({ trends: [], setup: {} }));
+  if (r.kind === "trends") { S.trends = await api("GET", "/trends").catch(() => ({ trends: [], setup: {} })); S.radar = S.channel ? await api("GET", `/radar?channel=${S.channel}`).catch(() => null) : null; }
   if (r.kind === "publish") { const [o, p] = await Promise.all([api("GET", "/overview" + ovQ).catch(() => null), api("GET", "/publications" + ovQ).catch(() => [])]); S.overview = o; S.pubs = p; }
   if (r.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
   if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
-  if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); }
+  if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; }
   const ids = new Set(S.projects.map((p) => p.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   schedulePoll();
 }
@@ -672,11 +672,53 @@ function settingsView() {
         <div class="field" style="flex:1;min-width:220px"><label>शब्दावली (नाम/खास शब्द — transcript इन्हें सही लिखेगा)</label><input name="vocab_words" value="${esc(S.brand?.vocab_words || "")}" placeholder="Prashant Mahto, UPSC, सफलता, मोटिवेशन"></div>
         <div class="field"><label>आवाज़ enhance</label><select name="voice_preset">${[["studio", "Studio"], ["soft", "Soft / warm"], ["podcast", "Podcast"], ["bright", "Clear / bright"], ["phone", "Phone mic fix"], ["clean", "हल्का"], ["off", "बंद"]].map(([k, l]) => `<option value="${k}" ${(S.brand?.voice_preset || "studio") === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
         ${S.user.role === "admin" ? `<button class="btn primary">सेव</button>` : ""}</form></div>
+    ${autopilotSection()}
+    <div id="sched-wrap">${scheduleSection()}</div>
     <div class="section"><h2>एक बार का setup</h2>
       <details><summary><b>YouTube</b> (free, 10 मिनट)</summary><ol class="small muted"><li>console.cloud.google.com → नया project → "YouTube Data API v3" enable करें</li><li>OAuth consent screen → External → अपना Gmail test user में जोड़ें</li><li>Credentials → OAuth client ID → Web application → Authorized redirect URI: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/youtube/callback</code></li><li>client id/secret को .env में <code>YT_CLIENT_ID</code> / <code>YT_CLIENT_SECRET</code> में डालें, <code>docker compose up -d</code>, फिर यहाँ "+ YouTube"</li></ol><p class="small muted">quota: ~6 upload/दिन (10,000 units, upload 1,600)।</p></details>
       <details><summary><b>Instagram / Facebook</b> (free, Business account चाहिए)</summary><ol class="small muted"><li>Instagram को Professional (Creator/Business) बनाएँ और एक Facebook Page से link करें</li><li>developers.facebook.com → Create App (Business) → products: Facebook Login for Business + Instagram Graph API</li><li>Facebook Login → Settings → Valid OAuth Redirect URIs: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/meta/callback</code></li><li>App ID/Secret को .env में <code>META_APP_ID</code> / <code>META_APP_SECRET</code>; फिर "+ Instagram / Facebook"</li><li>Cloudflare Access में <code>/pub/*</code> path को bypass करें (Meta वहीं से वीडियो उठाता है)</li></ol><p class="small muted">limit: Instagram 100 post/24h, Facebook Reels ~30/24h।</p></details></div>`;
 }
+// ---------- autopilot switches + posting schedule (per channel) ----------
+function autopilotSection() {
+  const ap = S.presets?.autopilot; if (!ap) return "";
+  const cur = { ...ap.defaults, ...(S.brand?.autopilot || {}) }; const admin = S.user.role === "admin";
+  return `<div class="section"><h2>✈ Autopilot क्या-क्या करे</h2><p class="muted small">Autopilot वाला हर नया वीडियो इन्हीं से edit होगा। Publish फिर भी आपकी मंज़ूरी से ही होगा।</p>
+    <form id="ap-form" class="apgrid">${Object.entries(ap.labels).filter(([k]) => k !== "shorts").map(([k, l]) => `<label class="chk"><input type="checkbox" name="${k}" ${cur[k] ? "checked" : ""} ${admin ? "" : "disabled"}> ${esc(l)}</label>`).join("")}
+      <label class="field" style="margin:0"><span class="small">${esc(ap.labels.shorts || "Shorts")}</span><select name="shorts" ${admin ? "" : "disabled"}>${[0, 1, 2, 3, 4, 5, 6, 8].map((n) => `<option ${+cur.shorts === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      ${admin ? `<div><button class="btn primary">सेव</button></div>` : ""}</form></div>`;
+}
+const LANES = [["youtube_long", "▶ YouTube लंबा वीडियो"], ["youtube_short", "▶ YouTube Shorts"], ["instagram", "◎ Instagram Reels"], ["facebook", "f Facebook Reels"]];
+const DAYH = { mon: "सो", tue: "मं", wed: "बु", thu: "गु", fri: "शु", sat: "श", sun: "र" };
+function scheduleSection() {
+  const d = S.sched; if (!d) return "";
+  const sc = S.schedEdit || (S.schedEdit = JSON.parse(JSON.stringify(d.schedule))); const admin = S.user.role === "admin"; const dis = admin ? "" : "disabled";
+  return `<div class="section"><div class="row between"><h2>🗓 Posting schedule</h2><label class="chk"><input type="checkbox" id="sc-auto" ${sc.auto ? "checked" : ""} ${dis}> तैयार वीडियो को अगले खाली slot में अपने-आप रखें</label></div>
+    <p class="muted small">हर platform के लिए हफ़्ते के समय (${esc(sc.timezone || "Asia/Kolkata")})। मंज़ूरी देने पर वीडियो इन्हीं समय पर जाएगा — YouTube/Facebook खुद schedule करते हैं, Instagram हमारी queue से उसी समय।${d.suggested?.length ? ` <b>आपके पुराने videos के हिसाब से अच्छा समय: ${d.suggested.map((x) => x.time).join(", ")}</b>` : ""}</p>
+    <div class="schgrid">${LANES.map(([k, l]) => `<div class="schlane"><div class="row between"><b>${l}</b><span class="small muted">दिन में max <input type="number" min="0" max="10" data-scmax="${k}" value="${sc.max_per_day?.[k] ?? 1}" style="width:3.2rem" ${dis}></span></div>
+      ${(sc.slots?.[k] || []).map((sl, i) => `<div class="schslot"><input type="time" data-sctime="${k}:${i}" value="${esc(sl.time)}" ${dis}><span class="days">${(d.days || Object.keys(DAYH)).map((dy) => `<button type="button" class="dchip ${(sl.days || []).includes(dy) ? "on" : ""}" data-scday="${k}:${i}:${dy}" ${dis}>${DAYH[dy] || dy}</button>`).join("")}</span><button type="button" class="ibtn" data-scdel="${k}:${i}" title="हटाएँ" ${dis}>✕</button></div>`).join("") || `<p class="small muted">कोई slot नहीं — इस platform पर अपने-आप schedule नहीं होगा।</p>`}
+      ${admin ? `<button type="button" class="btn quiet small" data-scadd="${k}">+ समय</button>` : ""}</div>`).join("")}</div>
+    <div class="row" style="flex-wrap:wrap;gap:.75rem;margin-top:.5rem"><label class="small">दो Shorts के बीच <input type="number" id="sc-sgap" min="1" max="48" value="${sc.short_gap_hours}" style="width:3.5rem" ${dis}> घंटे</label>
+      <label class="small">YouTube Short → Insta/FB <input type="number" id="sc-cgap" min="0" max="24" value="${sc.cross_gap_hours}" style="width:3.5rem" ${dis}> घंटे बाद</label>
+      ${admin ? `<button class="btn primary" id="sc-save">schedule सेव</button>${d.suggested?.length ? `<button class="btn quiet" id="sc-sugg">सुझाया समय लगाएँ</button>` : ""}<button class="btn quiet" id="sc-reset">default</button>` : ""}</div></div>`;
+}
+function bindSchedule() {
+  const sc = S.schedEdit; if (!sc) return;
+  const redraw = () => { const el = $("#sched-wrap"); if (el) { el.innerHTML = scheduleSection(); bindSchedule(); } };
+  $$("[data-sctime]").forEach((el) => (el.onchange = () => { const [k, i] = el.dataset.sctime.split(":"); sc.slots[k][+i].time = el.value; }));
+  $$("[data-scday]").forEach((b) => (b.onclick = () => { const [k, i, dy] = b.dataset.scday.split(":"); const sl = sc.slots[k][+i]; sl.days = sl.days.includes(dy) ? sl.days.filter((x) => x !== dy) : [...sl.days, dy]; redraw(); }));
+  $$("[data-scdel]").forEach((b) => (b.onclick = () => { const [k, i] = b.dataset.scdel.split(":"); sc.slots[k].splice(+i, 1); redraw(); }));
+  $$("[data-scadd]").forEach((b) => (b.onclick = () => { const k = b.dataset.scadd; (sc.slots[k] = sc.slots[k] || []).push({ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], time: "19:00" }); redraw(); }));
+  $$("[data-scmax]").forEach((el) => (el.onchange = () => { sc.max_per_day = { ...(sc.max_per_day || {}), [el.dataset.scmax]: +el.value }; }));
+  const g = (id, f) => { const el = $(id); if (el) el.onchange = () => f(el); };
+  g("#sc-auto", (el) => (sc.auto = el.checked)); g("#sc-sgap", (el) => (sc.short_gap_hours = +el.value)); g("#sc-cgap", (el) => (sc.cross_gap_hours = +el.value));
+  const sv = $("#sc-save"); if (sv) sv.onclick = async () => { try { const r = await api("PUT", "/schedule", { channel_id: S.channel, schedule: sc }); S.sched.schedule = r.schedule; S.schedEdit = JSON.parse(JSON.stringify(r.schedule)); toast("schedule सेव"); redraw(); } catch (e) { toast(e.message); } };
+  const sg = $("#sc-sugg"); if (sg) sg.onclick = () => { S.sched.suggested.forEach((x, n) => { const lane = n === 0 ? "youtube_long" : "youtube_short"; sc.slots[lane] = [{ days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], time: x.time }, ...(sc.slots[lane] || []).slice(1)]; }); redraw(); toast("सुझाया समय लगा — सेव दबाएँ"); };
+  const rs = $("#sc-reset"); if (rs) rs.onclick = () => { S.schedEdit = JSON.parse(JSON.stringify(S.sched.defaults)); redraw(); };
+}
 function bindSettings() {
+  bindSchedule();
+  const apf = $("#ap-form"); if (apf) apf.onsubmit = async (e) => { e.preventDefault(); const ap = {}; for (const el of apf.elements) if (el.name) ap[el.name] = el.type === "checkbox" ? el.checked : +el.value;
+    try { await api("PUT", `/brand?channel=${S.channel}`, { autopilot: ap }); S.brand = { ...(S.brand || {}), autopilot: ap }; toast("autopilot settings सेव"); } catch (err) { toast(err.message); } };
   const stl = $("#st-load"); if (stl) stl.onclick = () => loadStorage();
   const bf = $("#brand"); if (bf) bf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const body = {}; for (const el of f.elements) if (el.name) body[el.name] = el.type === "color" ? (el.value === "#ffffff" && el.name === "primary" ? "" : el.value) : el.value; try { await api("PUT", `/brand?channel=${S.channel}`, body); toast("brand kit सेव"); } catch (err) { toast(err.message); } };
   const start = async (pl) => { try { const r = await api("POST", `/connect/${pl}/start?channel=${S.channel}`); location.href = r.url; } catch (e) { toast(e.message); } };
@@ -876,9 +918,31 @@ function trendsView() {
   const bySrc = {}; for (const r of t.trends) (bySrc[r.source] = bySrc[r.source] || []).push(r);
   return `<div class="pghead"><div><h1>Trends</h1><p class="muted small">${t.fetched_at ? `आख़िरी: ${new Date(t.fetched_at).toLocaleString("hi-IN")}` : "अभी कुछ नहीं लिया"} · किसी trend पर “+ idea” से Plan में idea बनता है।</p></div>${canEdit ? `<button class="btn primary" id="tr-refresh">⟳ ताज़ा करें</button>` : ""}</div>
     ${!st.yt_api_key ? `<div class="note small">YouTube Top के लिए .env में YT_API_KEY डालें · WATCH_CHANNELS=UC… से पसंदीदा channels देखें</div>` : ""}
+    ${radarSection(canEdit)}
     <div class="trcols">${Object.keys(bySrc).length ? Object.entries(bySrc).map(([k, rows]) => `<section class="card"><div class="card-h"><h2>${src[k] || esc(k)}</h2><span class="small muted">${rows.length}</span></div><ul class="trlist2">${rows.slice(0, 25).map((r) => `<li><span class="grow">${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.traffic ? r.meta.traffic + "+ searches" : r.meta?.views_per_day ? r.meta.views_per_day.toLocaleString("en-IN") + "/day" : r.meta?.views ? r.meta.views.toLocaleString("en-IN") + " views" : ""}${r.meta?.channel ? " · " + esc(r.meta.channel) : ""}</span></span>${canEdit ? `<button class="btn quiet small" data-tidea="${esc(r.title)}">+ idea</button>` : ""}</li>`).join("")}</ul></section>`).join("") : `<div class="empty"><p>“ताज़ा करें” दबाएँ — Google Trends बिना key के आता है।</p></div>`}</div>`;
 }
+function radarSection(canEdit) {
+  const R = S.radar; if (!R) return "";
+  const st = R.settings || {}; const admin = S.user.role === "admin"; const dis = admin ? "" : "disabled";
+  return `<section class="card radar"><div class="card-h"><h2>📡 रोज़ का Radar — आपकी niche में क्या चल रहा है</h2><span class="small muted">${R.last ? "आख़िरी: " + relTime(R.last) : "अभी नहीं चला"}</span></div>
+    <p class="small muted">हर दिन चुने समय पर: आपकी niche की search + पसंदीदा channels → जो वीडियो अपने channel के normal से ${st.outlier_x || 2}× ज़्यादा चल रहे हैं (outliers) → ${st.ideas || 5} ideas → WhatsApp पर छोटा digest। सिर्फ़ सुझाव — बनाना/डालना आपके हाथ में।</p>
+    ${!R.has_yt_key ? `<div class="note small">Niche search के लिए .env में <b>YT_API_KEY</b> चाहिए (free, Google Cloud)। बिना key के सिर्फ़ Google Trends आएँगे।</div>` : ""}
+    <details ${admin && !R.last ? "open" : ""}><summary class="small"><b>Radar settings</b></summary><form id="rd-form" class="row" style="align-items:flex-end;flex-wrap:wrap">
+      <label class="chk"><input type="checkbox" name="daily" ${st.daily ? "checked" : ""} ${dis}> रोज़ चलाओ</label>
+      <div class="field"><label>किस समय</label><select name="hour" ${dis}>${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${+st.hour === h ? "selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("")}</select></div>
+      <div class="field"><label>outlier = normal से</label><select name="outlier_x" ${dis}>${[1.5, 2, 3, 5].map((x) => `<option value="${x}" ${+st.outlier_x === x ? "selected" : ""}>${x}×</option>`).join("")}</select></div>
+      <div class="field"><label>ideas</label><select name="ideas" ${dis}>${[3, 5, 8, 10].map((x) => `<option ${+st.ideas === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+      <div class="field" style="flex:1;min-width:240px"><label>niche searches (एक line = एक search)</label><textarea name="queries" rows="3" ${dis}>${esc((st.queries || []).join("\n"))}</textarea></div>
+      <div class="field" style="flex:1;min-width:240px"><label>नज़र रखने वाले channels (UC… id या @handle, एक line में एक)</label><textarea name="watch" rows="3" ${dis}>${esc((st.watch || []).join("\n"))}</textarea></div>
+      ${admin ? `<button class="btn primary">सेव</button>` : ""}</form></details>
+    ${canEdit ? `<div class="row" style="gap:.5rem;margin:.5rem 0"><button class="btn" id="rd-run">⟳ अभी चलाओ</button><label class="chk small"><input type="checkbox" id="rd-send"> WhatsApp पर भी भेजो</label></div>` : ""}
+    <ul class="trlist2">${(R.outliers || []).map((r) => `<li><span class="grow">${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}<span class="small muted">${r.meta?.views_per_day ? (+r.meta.views_per_day).toLocaleString("en-IN") + "/दिन" : ""}${r.meta?.outlier_x ? ` · <b style="color:var(--amber)">${r.meta.outlier_x}×</b> normal से` : ""}${r.meta?.channel ? " · " + esc(r.meta.channel) : ""}</span></span>${canEdit ? `<button class="btn quiet small" data-tidea="${esc(r.title)}">+ idea</button>` : ""}</li>`).join("") || `<li class="small muted">अभी कोई outlier नहीं — “अभी चलाओ” दबाएँ।</li>`}</ul></section>`;
+}
 function bindTrends() {
+  const rdf = $("#rd-form"); if (rdf) rdf.onsubmit = async (e) => { e.preventDefault(); const f = rdf.elements; const lines = (v) => v.split("\n").map((x) => x.trim()).filter(Boolean);
+    const body = { channel_id: S.channel, settings: { daily: f.daily.checked, hour: +f.hour.value, outlier_x: +f.outlier_x.value, ideas: +f.ideas.value, queries: lines(f.queries.value), watch: lines(f.watch.value) } };
+    try { const r = await api("PUT", "/radar", body); S.radar.settings = r.settings; toast("radar settings सेव"); } catch (err) { toast(err.message); } };
+  const rr = $("#rd-run"); if (rr) rr.onclick = async () => { rr.disabled = true; rr.textContent = "देख रहा है… (1–2 मिनट)"; try { const r = await api("POST", "/radar/run", { channel_id: S.channel, send: $("#rd-send")?.checked }); toast(`${(r.outliers || []).length} outliers · ${(r.ideas || []).length} ideas (Plan में)`); } catch (e) { toast(e.message); } load().then(render); };
   const rf = $("#tr-refresh"); if (rf) rf.onclick = async () => { rf.disabled = true; rf.textContent = "ला रहा है…"; try { const r = await api("POST", "/trends/refresh"); toast(`${r.count} trends`); } catch (e) { toast(e.message); } load().then(render); };
   $$("[data-tidea]").forEach((b) => (b.onclick = async () => { b.disabled = true; try { await api("POST", "/ideas", { title: b.dataset.tidea, format: "short", source: "trend", channel_id: S.channel }); b.textContent = "✓ Plan में"; toast("idea जुड़ा — Plan में script लिखें"); } catch (e) { toast(e.message); b.disabled = false; } }));
 }

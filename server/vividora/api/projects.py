@@ -40,7 +40,9 @@ async def list_projects(request: Request, user: dict):
     for p in projects:
         p.pop("transcript", None)
         p.pop("edl", None)
-        tid = thumbs.get(p["id"])
+        sel = (p.get("meta") or {}).get("thumbnail") or {}
+        tid = (sel.get("yt") or sel.get("vertical") or next(iter(sel.values()), None)) if isinstance(sel, dict) and sel else None
+        tid = tid or thumbs.get(p["id"])
         p["thumb_url"] = f"/api/media/{tid}?t={media_token(tid)}" if tid else None
         out.append(p)
     return ok(out)
