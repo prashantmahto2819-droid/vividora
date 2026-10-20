@@ -38,6 +38,7 @@ DEFAULT_EFFECTS = {
     "voice_track": "original",       # or a `dub` asset id (AI voice-over); see engine/dub.py
     "voice_track_mode": "replace",   # replace | both (original quieter under the AI voice)
     "voice_track_under": 0.25,
+    "pro": {},          # main-video pro tools (stabilize, denoise, sharpen, face_refine, speed_warp, color, morph_cut, mask) — docs/editor-schema.md
 }
 
 DEFAULT_RENDER = {
@@ -50,6 +51,7 @@ DEFAULT_RENDER = {
     "focus_y": 0.5,
     "hook": {"text": "", "seconds": 3},
     "effects": DEFAULT_EFFECTS,
+    "markers": [],      # [{id, t, label, kind: chapter|note|todo, color}] — chapters feed YouTube (engine/markers.py)
 }
 
 

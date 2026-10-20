@@ -86,6 +86,12 @@ def chapters(project: dict, min_total: float = 180, every: float = 90) -> list[t
     edl = project.get("edl") or {}
     dur = float((project.get("meta") or {}).get("duration") or 0)
     keep = keep_segments({"duration": dur, **edl}) if edl.get("cuts") is not None else [(0.0, dur)]
+    # the creator's chapter markers (render settings `markers`, output timeline) win over auto chapters
+    from .markers import chapters as marker_chapters
+    mk = marker_chapters(((project.get("settings") or {}).get("render") or {}).get("markers"),
+                         sum(b - a for a, b in keep or [(0.0, dur)]))
+    if mk:
+        return mk
 
     def to_out(t: float) -> float | None:
         o = 0.0
