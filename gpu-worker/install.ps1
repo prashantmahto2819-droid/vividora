@@ -39,6 +39,8 @@ $venvPy = Join-Path $here ".venv\Scripts\python.exe"
 New-Item -ItemType Directory -Force -Path lib | Out-Null
 Copy-Item ..\server\vividora\worker\client.py lib\vividora_client.py -Force
 Copy-Item ..\server\vividora\worker\transcribe.py lib\vividora_transcribe.py -Force
+# word-timing repair used by the transcriber (pure Python)
+Copy-Item ..\server\vividora\engine\wordfix.py lib\vividora_wordfix.py -Force
 # AI voice-over / dubbing engine (packages: requirements-tts.txt, see README)
 Copy-Item ..\server\vividora\engine\tts.py lib\vividora_tts.py -Force
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
@@ -54,6 +56,7 @@ $shim = @(
 Set-Content -Path lib\ffmpeg_shim.py -Value $shim -Encoding UTF8
 $t = Get-Content lib\vividora_transcribe.py -Raw -Encoding UTF8
 $t = $t.Replace("from ..engine import ffmpeg", "import ffmpeg_shim as ffmpeg")
+$t = $t.Replace("from ..engine import wordfix", "import vividora_wordfix as wordfix")
 Set-Content -Path lib\vividora_transcribe.py -Value $t -Encoding UTF8
 
 # 5. Config

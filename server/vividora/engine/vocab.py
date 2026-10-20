@@ -24,6 +24,7 @@ STYLE_HINT = {
     "en": "Hello friends. Um, so today I'm, uh, going to tell you a true story.",
 }
 MAX_FIXES = 600
+MAX_PROMPT_VOCAB_CHARS = 120
 _PUNCT = "।॥,.!?;:\"'“”‘’()[]…-"
 
 
@@ -35,15 +36,22 @@ def prompt(language: str, settings: dict | None) -> str:
     s = settings or {}
     raw = s.get("vocab_words") or (s.get("brand") or {}).get("vocab_words") or ""
     words = [w.strip() for w in re.split(r"[,\n]", str(raw)) if w.strip()]
-    fixes = list((s.get("vocab_fixes") or {}).values())
+    fixes = list(reversed(list((s.get("vocab_fixes") or {}).values())))  # newest corrections first
     extra = []
     for w in words + fixes:
         if w not in extra:
             extra.append(w)
     base = STYLE_HINT.get(language, STYLE_HINT["hi"])
-    tail = ", ".join(extra[:60])
-    # Whisper reads at most ~224 tokens of prompt; keep it short
-    return (base + (" " + tail + "।" if tail else ""))[:600]
+    # Keep it SHORT. Whisper keeps only the last ~223 prompt tokens (Devanagari ≈ 1 token per
+    # 1–2 characters), so a long word list pushed out the style hint, and a prompt that is a
+    # comma list makes Whisper answer with lists or skip quiet speech. The channel's own words
+    # first, then the newest learned corrections.
+    tail = ""
+    for w in extra:
+        if len(tail) + len(w) + 2 > MAX_PROMPT_VOCAB_CHARS:
+            break
+        tail = f"{tail}, {w}" if tail else w
+    return base + (" " + tail + "।" if tail else "")
 
 
 def learn(old: dict | None, new: dict | None) -> dict[str, str]:
@@ -77,8 +85,8 @@ def merge_fixes(current: dict | None, new: dict[str, str]) -> dict[str, str]:
 
 def _replace_word(w: str, fixes: dict[str, str]) -> str:
     n = norm(w)
-    if n not in fixes:
-        return w
+    if not n or n not in fixes or not str(fixes[n] or "").strip().strip(_PUNCT):
+        return w  # never turn a word into nothing
     lead = w[: len(w) - len(w.lstrip(_PUNCT))]
     trail = w[len(w.rstrip(_PUNCT)):]
     return f"{lead}{fixes[n]}{trail}"
@@ -99,6 +107,39 @@ def apply_fixes(tr: dict, fixes: dict | None) -> tuple[dict, int]:
     if n:
         tr["text"] = " ".join(s.get("text", "") for s in tr.get("segments") or [])
     return tr, n
+
+
+def polish_line(words: list[dict], line: str) -> list[str] | None:
+    """The LLM's corrected words for one segment, or None when it is not a safe 1:1 spelling fix.
+
+    Rejected: a different word count (words merged / deleted / added), an empty or
+    punctuation-only word where a real word was, or so many changed words that the
+    line was probably rewritten or shifted by one word."""
+    if not words:
+        return None
+    line = re.sub(r"^\s*\d+[.)]\s+", "", line)
+    new = line.split()
+    if len(new) != len(words):
+        return None
+    out, changed, shifted = [], 0, 0
+    for i, (w, nw) in enumerate(zip(words, new)):
+        old = w.get("w", "")
+        if not norm(nw) and norm(old):
+            return None
+        if nw == old:
+            out.append(nw)
+            continue
+        changed += 1
+        # keep the original punctuation around the word (the LLM is told not to touch it)
+        lead = old[: len(old) - len(old.lstrip(_PUNCT))]
+        trail = old[len(old.rstrip(_PUNCT)):]
+        core = nw.strip(_PUNCT)
+        if i and norm(nw) == norm(words[i - 1].get("w", "")) and norm(nw) != norm(old):
+            shifted += 1
+        out.append(f"{lead}{core}{trail}" if core else nw)
+    if shifted or (len(words) >= 3 and changed > max(2, len(words) // 2)):
+        return None
+    return out
 
 
 def llm_polish(tr: dict, language: str = "hi", context: str = "", batch: int = 40) -> tuple[dict, int]:
@@ -125,10 +166,10 @@ def llm_polish(tr: dict, language: str = "hi", context: str = "", batch: int = 4
         if not isinstance(fixed, list) or len(fixed) != len(part):
             continue
         for s, new in zip(part, fixed):
-            new = re.sub(r"^\d+\.\s*", "", str(new)).split()
             ws = s.get("words") or []
-            if len(new) != len(ws):
-                continue
+            new = polish_line(ws, str(new))
+            if new is None:
+                continue  # the LLM merged / dropped / shifted words — keep Whisper's words
             for w, nw in zip(ws, new):
                 if nw != w["w"]:
                     w["w"] = nw

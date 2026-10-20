@@ -11,6 +11,8 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Any
 
+from . import wordfix
+
 # Isolated filler sounds (Hindi + English). Real words like "मतलब" are kept on
 # purpose — they often carry meaning in Hindi speech.
 FILLERS = {
@@ -25,6 +27,7 @@ DEFAULTS = {
     "cut_fillers": True,
     "cut_retakes": True,
     "retake_similarity": 0.72,
+    "retake_max_gap": 6.0,  # s between a failed take and its retry
 }
 
 _PUNCT = re.compile(r"[\s\.,!?।॥\"'“”‘’…\-–—:;()\[\]]+")
@@ -35,17 +38,17 @@ def norm(word: str) -> str:
     return _PUNCT.sub("", w)
 
 
+_FILLER_NORM = {norm(f) for f in FILLERS}
+
+
 def words_of(transcript: dict) -> list[dict]:
+    """All words in time order. Words without timestamps, zero-length / reversed /
+    overlapping words, punctuation tokens and segments with text but no words are
+    repaired (engine/wordfix.py) instead of being dropped."""
     out: list[dict] = []
-    for seg in transcript.get("segments", []):
-        for w in seg.get("words") or []:
-            if w.get("end") is None or w.get("start") is None:
-                continue
-            text = (w.get("w") or w.get("word") or "").strip()
-            if not text:
-                continue
-            out.append({"w": text, "start": float(w["start"]), "end": float(w["end"]),
-                        "p": float(w.get("p", w.get("probability", 1.0)) or 1.0)})
+    for w in wordfix.all_words(transcript):
+        out.append({"w": w["w"], "start": float(w["start"]), "end": float(w["end"]),
+                    "p": float(w.get("p", 1.0) if w.get("p") is not None else 1.0)})
     out.sort(key=lambda x: x["start"])
     return out
 
@@ -63,11 +66,23 @@ def _sentences(words: list[dict], gap: float = 0.7) -> list[list[dict]]:
     return sents
 
 
-def _merge(cuts: list[dict]) -> list[dict]:
+def _word_between(a: float, b: float, words: list[dict]) -> bool:
+    """Does a spoken (non-filler) word sit in the kept stretch a..b between two cuts?"""
+    if b <= a:
+        return False
+    for w in words:
+        if w["start"] >= b:
+            break
+        if min(w["end"], b) - max(w["start"], a) > 0.03 and norm(w["w"]) not in _FILLER_NORM:
+            return True
+    return False
+
+
+def _merge(cuts: list[dict], words: list[dict] | None = None) -> list[dict]:
     cuts = sorted(cuts, key=lambda c: c["start"])
     merged: list[dict] = []
     for c in cuts:
-        if merged and c["start"] <= merged[-1]["end"] + 0.15:
+        if merged and c["start"] <= merged[-1]["end"] + 0.15 and not _word_between(merged[-1]["end"], c["start"], words or []):
             m = merged[-1]
             m["end"] = max(m["end"], c["end"])
             if c["reason"] not in m["reasons"]:
@@ -103,15 +118,26 @@ def build_edl(transcript: dict, duration: float, silences: list[tuple[float, flo
     pad, max_pause, min_cut = opt["keep_pause"], opt["max_pause"], opt["min_cut"]
     raw: list[dict] = []
 
+    def pause(s: float, e: float) -> None:
+        """A pause between words. When we know where the audio is really silent, cut only
+        there: a stretch without words but with sound is often speech Whisper missed."""
+        if not silences:
+            raw.append({"start": s, "end": e, "reason": "silence"})
+            return
+        for a, b in silences:
+            cs, ce = max(s, a + pad if a > 0 else 0.0), min(e, b - pad if b < duration - 0.05 else duration)
+            if ce - cs > 0:
+                raw.append({"start": cs, "end": ce, "reason": "silence"})
+
     if words:
         if words[0]["start"] - pad > min_cut:
-            raw.append({"start": 0.0, "end": words[0]["start"] - pad, "reason": "silence"})
+            pause(0.0, words[0]["start"] - pad)
         if duration - (words[-1]["end"] + pad) > min_cut:
-            raw.append({"start": words[-1]["end"] + pad, "end": duration, "reason": "silence"})
+            pause(words[-1]["end"] + pad, duration)
         for a, b in zip(words, words[1:]):
             gap = b["start"] - a["end"]
             if gap > max_pause:
-                raw.append({"start": a["end"] + pad, "end": b["start"] - pad, "reason": "silence"})
+                pause(a["end"] + pad, b["start"] - pad)
 
     for s, e in silences or []:
         if e - s > max_pause:
@@ -121,24 +147,30 @@ def build_edl(transcript: dict, duration: float, silences: list[tuple[float, flo
 
     if opt["cut_fillers"]:
         for i, w in enumerate(words):
-            if norm(w["w"]) in {norm(f) for f in FILLERS}:
+            # the whole word must be a filler: "अं," is one, "अंदर" / "हम" are words
+            if norm(w["w"]) in _FILLER_NORM:
                 prev_end = words[i - 1]["end"] if i else 0.0
                 nxt_start = words[i + 1]["start"] if i + 1 < len(words) else duration
-                raw.append({
-                    "start": max(prev_end, w["start"] - 0.04),
-                    "end": min(nxt_start, w["end"] + 0.04),
-                    "reason": "filler", "text": w["w"],
-                })
+                # Whisper sometimes stretches a filler over speech it did not write down —
+                # cut at most the filler's own sound (≤ 0.8 s), never into the neighbours
+                s0 = max(prev_end, w["start"] - 0.04)
+                e0 = min(nxt_start, w["end"] + 0.04, s0 + 0.8)
+                if e0 > s0:
+                    raw.append({"start": s0, "end": e0, "reason": "filler", "text": w["w"]})
 
     if opt["cut_retakes"]:
         sents = _sentences(words)
         for a, b in zip(sents, sents[1:]):
-            aw = [norm(x["w"]) for x in a if norm(x["w"])]
-            bw = [norm(x["w"]) for x in b if norm(x["w"])]
-            if len(aw) < 2 or len(bw) < 2:
+            aw = [norm(x["w"]) for x in a if norm(x["w"]) and norm(x["w"]) not in _FILLER_NORM]
+            bw = [norm(x["w"]) for x in b if norm(x["w"]) and norm(x["w"]) not in _FILLER_NORM]
+            # 2-word lines ("बहुत अच्छा।" "बहुत अच्छा लगा।") are style, not retakes; and a retake
+            # comes right after the failed try, not much later in the video
+            if len(aw) < 3 or len(bw) < 3 or b[0]["start"] - a[-1]["end"] > float(opt.get("retake_max_gap", 6.0)):
                 continue
             ratio = SequenceMatcher(None, aw, bw[: len(aw) + 1]).ratio()
-            if ratio >= opt["retake_similarity"]:
+            # the take that stays must say (almost) everything the cut one said
+            kept = sum(m.size for m in SequenceMatcher(None, aw, bw).get_matching_blocks())
+            if ratio >= opt["retake_similarity"] and kept >= 0.75 * len(aw):
                 raw.append({
                     "start": max(0.0, a[0]["start"] - 0.05),
                     "end": max(a[0]["start"], b[0]["start"] - 0.05),
@@ -146,7 +178,7 @@ def build_edl(transcript: dict, duration: float, silences: list[tuple[float, flo
                     "text": " ".join(x["w"] for x in a),
                 })
 
-    cuts = [c for c in _merge([c for c in raw if c["end"] - c["start"] >= min_cut])
+    cuts = [c for c in _merge([c for c in raw if c["end"] - c["start"] >= min_cut], words)
             if c["end"] - c["start"] >= min_cut]
     for i, c in enumerate(cuts):
         c["id"] = f"c{i + 1}"
@@ -188,19 +220,46 @@ def keep_segments(edl: dict) -> list[tuple[float, float]]:
 
 
 def remap_words(words: list[dict], keep: list[tuple[float, float]]) -> list[dict]:
-    """Move word times onto the new, shorter timeline. Words inside cuts are dropped."""
-    out: list[dict] = []
+    """Move word times onto the new, shorter timeline.
+
+    A word is shown when it is mostly kept (≥ 40 % of it, or ≥ 0.2 s of it, survives
+    the cuts) — even when its middle falls in a cut or it straddles a cut and lands in
+    two kept pieces. Only words (almost) entirely inside a cut are dropped."""
     offset = 0.0
-    seg_starts = []
+    segs = []
     for s, e in keep:
-        seg_starts.append((s, e, offset))
+        segs.append((s, e, offset))
         offset += e - s
+
+    def to_out(t: float) -> float | None:
+        for s, e, off in segs:
+            if s <= t <= e:
+                return t - s + off
+        return None
+    return map_words(words, segs, to_out)
+
+
+def map_words(words: list[dict], keep: list, to_out, min_frac: float = 0.4, min_kept: float = 0.2) -> list[dict]:
+    """Map words to output time with to_out(src) → out | None (None = cut away).
+
+    `keep` = kept source ranges (first two items of each tuple are start, end)."""
+    out: list[dict] = []
+    ranges = sorted((float(k[0]), float(k[1])) for k in keep)
     for w in words:
-        mid = (w["start"] + w["end"]) / 2
-        for s, e, off in seg_starts:
-            if s <= mid <= e:
-                ns = max(s, w["start"]) - s + off
-                ne = min(e, w["end"]) - s + off
-                out.append({**w, "start": round(ns, 3), "end": round(max(ns + 0.05, ne), 3)})
-                break
+        s, e = float(w["start"]), max(float(w["end"]), float(w["start"]))
+        parts = [(max(s, a), min(e, b)) for a, b in ranges if min(e, b) > max(s, a)]
+        if e - s <= 1e-6:  # a point: keep it if it sits in a kept range
+            parts = [(s, s)] if any(a <= s <= b for a, b in ranges) else []
+        if not parts:
+            continue
+        kept = sum(b - a for a, b in parts)
+        if e - s > 1e-6 and kept / (e - s) < min_frac and kept < min(min_kept, e - s):
+            continue
+        ns, ne = to_out(parts[0][0]), to_out(parts[-1][1])
+        if ns is None:
+            continue
+        if ne is None or ne < ns:
+            ne = ns + (parts[0][1] - parts[0][0])
+        out.append({**w, "start": round(ns, 3), "end": round(max(ns + 0.05, ne), 3)})
+    out.sort(key=lambda x: x["start"])
     return out

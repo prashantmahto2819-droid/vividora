@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import wordfix
+
 ALIGN = {"bottom": 2, "center": 5, "top": 8}
 
 
@@ -49,6 +51,16 @@ def _srt_t(sec: float) -> str:
     m, ms = divmod(ms, 60000)
     s, ms = divmod(ms, 1000)
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _timed(words: list[dict]) -> list[dict]:
+    """Copies of the words in time order with sane, non-overlapping times (no word dropped:
+    a caption line whose words overlap would end before it starts and never be drawn)."""
+    ws = [{**w, "w": str(w.get("w") or "")} for w in words or [] if str(w.get("w") or "").strip()
+          and w.get("start") is not None and w.get("end") is not None]
+    for w in ws:
+        w["start"], w["end"] = float(w["start"]), float(w["end"])
+    return wordfix.resolve_overlaps(ws)
 
 
 def chunk_words(words: list[dict], max_words: int, max_chars: int, gap_break: float = 0.6) -> list[list[dict]]:
@@ -207,7 +219,7 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
     def word_text(t: str) -> str:
         return t.upper() if (upper and _is_latin(t)) else t
 
-    chunks = chunk_words(words, max_words, max_chars * max_lines)
+    chunks = chunk_words(_timed(words), max_words, max_chars * max_lines)
     for ci, chunk in enumerate(chunks):
         texts = [word_text(_esc(w["w"].strip())) for w in chunk]
         breaks = _wrap(texts, max_chars, max_lines)
@@ -243,13 +255,21 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
         if mode == "line":
             lines.append(f"Dialogue: 0,{_t(start)},{_t(end)},Cap,,0,0,0,,{render(None)}")
         else:
+            # one event per word, back to back. Times are on the 1/100 s grid of ASS: an event
+            # that rounds to zero length is never drawn, so each word gets ≥ 1 cs — and in
+            # typewriter mode the last word must appear even if the chunk ends early.
+            t_prev = int(round(start * 100))
+            t_end = max(int(round(end * 100)), t_prev + len(chunk))
             for wi, w in enumerate(chunk):
-                ws = start if wi == 0 else w["start"]
-                we = chunk[wi + 1]["start"] if wi + 1 < len(chunk) else end
-                if we <= ws:
-                    continue
+                ws_cs = t_prev
+                nxt_w = chunk[wi + 1]["start"] if wi + 1 < len(chunk) else None
+                we_cs = int(round(nxt_w * 100)) if nxt_w is not None else t_end
+                we_cs = min(max(we_cs, ws_cs + 1), t_end - (len(chunk) - 1 - wi))
+                if we_cs <= ws_cs:
+                    we_cs = ws_cs + 1
                 text = render(wi, upto=wi) if mode == "typewriter" else render(wi)
-                lines.append(f"Dialogue: 0,{_t(ws)},{_t(we)},Cap,,0,0,0,,{text}")
+                lines.append(f"Dialogue: 0,{_t(ws_cs / 100)},{_t(we_cs / 100)},Cap,,0,0,0,,{text}")
+                t_prev = we_cs
 
     if hook and hook.get("text"):
         hd = float(hook.get("seconds", 3.0))
@@ -262,7 +282,7 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
 
 def build_srt(words: list[dict], max_words: int = 9, max_chars: int = 42) -> str:
     out = []
-    chunks = chunk_words(words, max_words, max_chars)
+    chunks = chunk_words(_timed(words), max_words, max_chars)
     for i, chunk in enumerate(chunks, start=1):
         text = " ".join(w["w"].strip() for w in chunk)
         end = chunk[-1]["end"] + 0.1

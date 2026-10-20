@@ -376,7 +376,8 @@ function captionChunks() {
     cur.push(w); n += w.w.length + 1;
   });
   if (cur.length) out.push(cur);
-  return out.map((ws) => ({ start: ws[0].start, end: ws[ws.length - 1].end + 0.15, words: ws }));
+  // end at the next line's start (an overlap hid that line's first words) and never before own start
+  return out.map((ws, i) => { const nx = out[i + 1]?.[0].start; let end = ws[ws.length - 1].end + 0.15; if (nx != null && nx < end) end = nx; return { start: ws[0].start, end: Math.max(end, Math.min(ws[0].start + 0.3, nx ?? Infinity)), words: ws }; });
 }
 function styleOf() { return (E.ctx.S.presets?.caption_styles || []).find((s) => s.id === E.rs.caption_style); }
 function renderOverlay() {
