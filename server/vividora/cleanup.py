@@ -39,9 +39,10 @@ def _referenced(workspace_id: str) -> set[str]:
     refs = set()
     for r in db.conn().execute("SELECT a.path FROM assets a JOIN projects p ON p.id = a.project_id WHERE p.workspace_id = ?", (workspace_id,)):
         refs.add(str(storage.abs_path(r[0])))
-    for r in db.conn().execute("SELECT path FROM library WHERE workspace_id = ?", (workspace_id,)):
-        if r[0]:
-            refs.add(str(storage.abs_path(r[0])))
+    for r in db.conn().execute("SELECT path, json_extract(meta, '$.alpha.path') FROM library WHERE workspace_id = ?", (workspace_id,)):
+        for v in r:  # the library file and its cached person matte (cutout.py)
+            if v:
+                refs.add(str(storage.abs_path(v)))
     for r in db.conn().execute("SELECT u.path FROM uploads u JOIN projects p ON p.id = u.project_id WHERE p.workspace_id = ?", (workspace_id,)):
         if r[0]:
             refs.add(str(storage.abs_path(r[0])))

@@ -37,6 +37,7 @@ const ICON = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
 };
 import * as TFX from "./textfx.js";
+import * as CUT from "./cutout.js";
 const TABS_ALL = [["cuts", "कट"], ["media", "Media"], ["audio", "Audio"], ["text", "Text"], ["stickers", "Stickers"], ["effects", "Effects"], ["transitions", "Transitions"], ["color", "Filters"], ["captions", "Captions"], ["body", "Cutout"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["ai", "AI Studio"], ["refs", "Refs"]];
 const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
@@ -95,7 +96,7 @@ export function unmount() {
   if (E.dirty && E.canEdit && !E.locked) { clearTimeout(E.saveT); doSave(E, false); }
   document.removeEventListener("keydown", onKey);
   window.removeEventListener("resize", layoutFrame);
-  cancelAnimationFrame(E.raf);
+  cancelAnimationFrame(E.raf); cutTeardown();
   clearTimeout(E.saveT); clearTimeout(E.pubT);
   E = null;
 }
@@ -128,6 +129,10 @@ function update(project) {
   if (E.montage) { const r = project.assets.find((a) => a.kind === "render"); const v = $("#pv", E.root); if (r && v && !v.src.includes(r.id)) { v.src = r.url; E.dur = project.meta?.duration || E.dur; renderTimeline(); } if (E.tab === "montage") renderPanel(); }
   const fresh = JSON.stringify(project.meta?.shorts || []);
   if (fresh !== E.shortsSeen) { E.shortsSeen = fresh; if (!E.shortsDirty) { E.shorts = JSON.parse(fresh); if (E.tab === "shorts") renderPanel(); renderTimeline(); } }
+  // a cutout finished (main video or a library clip) → the live preview / overlay picks it up
+  if (finished.some((j) => j.kind === "matte_lib" && j.status === "done")) loadLib();
+  if (!E.montage) { cutSync(); const st = $("#bd-status", E.root); if (st) { const h2 = bodyStatus(); if (st._h !== h2) { st._h = h2; st.innerHTML = h2; bindBodyStatus(st); } } }
+  if (E.sel?.type === "broll" && activeJobs(project).concat(finished).some((j) => j.kind === "matte_lib")) renderInspector();
   renderTop();
   if (E.exportOpen) renderExport();
   if (was !== project.status && project.status === "review_output") { E.exportOpen = true; renderExport(); }
@@ -135,7 +140,7 @@ function update(project) {
 
 // ---------- jobs (progress card + finish/fail toasts) ----------
 const JOB_LABEL = { transcribe: "Transcript", autocut: "कट ढूँढना", render: "Render", shorts_plan: "Shorts ढूँढना", montage: "Montage", montage_plan: "Beat plan",
-  matte: "Cutout", dub: "AI आवाज़", publish: "Publish", prepare: "तैयारी", thumbnail: "Thumbnail", autopilot: "Autopilot" };
+  matte: "Cutout", matte_lib: "Cutout (B-roll)", dub: "AI आवाज़", publish: "Publish", prepare: "तैयारी", thumbnail: "Thumbnail", autopilot: "Autopilot" };
 function jobLabel(j) {
   if (jobRange(j)) return `Line दोबारा सुन रहे (${fmt(jobRange(j).start)}–${fmt(jobRange(j).end)})`;
   if (j.kind === "render" && j.payload?.label?.startsWith("short-")) return "Short render";
@@ -249,11 +254,13 @@ function skeleton() {
       <div class="ed-jobs" id="ed-jobs" hidden></div>
       <div class="ed-viewport" id="viewport">
         <div class="ed-frame" id="frame">
-          <div class="vclip"><div class="vpost" id="vpost"><div class="vbox" id="vbox"><div class="vrot" id="vrot"><video id="pv" playsinline preload="auto" src="${(E.p.assets.find((a) => a.kind === (E.montage ? "render" : "proxy")) || {}).url || ""}" ${E.montage ? "controls" : ""}></video></div></div></div></div>
+          <div class="vclip"><div class="vpost" id="vpost"><div class="vbox" id="vbox"><div class="vrot" id="vrot"><video id="pv" playsinline preload="auto" src="${(E.p.assets.find((a) => a.kind === (E.montage ? "render" : "proxy")) || {}).url || ""}" ${E.montage ? "controls" : ""}></video><canvas id="pv-cut" hidden></canvas></div></div></div></div>
           <div class="ed-mask" id="mask"></div>
           <div class="ed-safe" id="safe"></div>
           <div class="ed-ovl" id="ovl"><div id="ovl-media"></div><div id="ovl-text"></div></div>
           <div class="ed-hdl" id="hdl"></div>
+          <div class="ed-cutbadge" id="cutbadge" hidden></div>
+          <div class="ed-cutmedia" id="cutmedia" aria-hidden="true"></div>
           <div class="ed-frameprev" id="frameprev" hidden><img alt=""><button class="ibtn" id="frameprev-x">✕</button><span class="small">rendered frame @ <b></b></span></div>
         </div>
       </div>
@@ -331,6 +338,7 @@ function bindStatic() {
   v.onloadedmetadata = () => { layoutFrame(); renderOverlay(); };
   v.onplay = () => { $("#t-play", E.root).innerHTML = ICON.pause; tick(); };
   v.onpause = () => { $("#t-play", E.root).innerHTML = ICON.play; cancelAnimationFrame(E.raf); renderOverlay(); };
+  v.addEventListener("seeked", cutKick); v.addEventListener("loadeddata", cutKick); v.addEventListener("ratechange", cutKick); watchFrames(v);
   $("#t-play", E.root).onclick = togglePlay;
   $("#t-prev", E.root).onclick = () => { const c = [...E.cuts].filter((c) => c.start < E.t - 0.3).sort((a, b) => b.start - a.start)[0]; seek(c ? c.start - 0.5 : 0); };
   $("#t-next", E.root).onclick = () => { const c = [...E.cuts].filter((c) => c.start > E.t + 0.05).sort((a, b) => a.start - b.start)[0]; seek(c ? c.start - 0.5 : E.dur); };
@@ -441,7 +449,7 @@ function applyVideoCss() {
   if (!v || !post || !fb) return;
   if (E.montage || cropView()) { // plain: the whole source fills the frame
     post.style.cssText = box.style.cssText = rot.style.cssText = "left:0;top:0;width:100%;height:100%;transform:none";
-    v.style.cssText = `left:0;top:0;width:100%;height:100%;filter:${E.vf || ""}`; renderHandles(); return;
+    v.style.cssText = `left:0;top:0;width:100%;height:100%;filter:${E.vf || ""}`; cutCss(); renderHandles(); return;
   }
   const g = mainGeom(fb.w, fb.h); const t = g.t;
   post.style.cssText = `left:0;top:0;width:${fb.w}px;height:${fb.h}px;transform:translate(${((+t.x || 0) * fb.w).toFixed(1)}px,${((+t.y || 0) * fb.h).toFixed(1)}px) scale(${+t.scale || 1})`;
@@ -452,7 +460,7 @@ function applyVideoCss() {
   rot.style.cssText = `left:50%;top:50%;width:${iw.toFixed(1)}px;height:${ih.toFixed(1)}px;transform:translate(-50%,-50%) rotate(${ang}deg) scale(${k2.toFixed(4)}) scale(${t.flip_h ? -1 : 1},${t.flip_v ? -1 : 1}) rotate(${g.rot}deg)`;
   const kk = iw / (g.vw * g.c.w);
   v.style.cssText = `left:${(-g.c.x * g.vw * kk).toFixed(1)}px;top:${(-g.c.y * g.vh * kk).toFixed(1)}px;width:${(g.vw * kk).toFixed(1)}px;height:${(g.vh * kk).toFixed(1)}px;filter:${E.vf || ""}`;
-  renderHandles();
+  cutCss(); renderHandles();
 }
 
 // ---------- on-canvas handles: move / scale / rotate / crop the selected thing right on the preview ----------
@@ -614,15 +622,15 @@ function renderOverlay() {
   // B-roll + watermark: rebuilt only when the visible set changes (so <video> keeps playing)
   const active = E.rs.effects.broll.filter((b) => ot >= b.start && ot < b.end && (!b.platforms?.length || b.platforms.includes(E.pvPlat || "youtube")) && !(E.rs.effects.hidden_tracks || []).includes(`broll:${b.track || 0}`)).sort((a, b) => (a.track || 0) - (b.track || 0));
   const wm = E.rs.effects.watermark; const wmi = wm.id && libItem(wm.id);
-  const mkey = active.map((b) => `${b._id}:${b.id}:${b.fit}:${b.pos}:${b.x}:${b.y}:${b.scale}:${b.rotate}:${b.opacity}:${JSON.stringify(b.to || 0)}:${b.fit === "free" ? ot.toFixed(1) : ""}:${b.blend || ""}`).join("|") + `#${wm.id}:${wm.opacity}:${wm.size}:${wm.pos}#${E.rs.effects.frame?.id}:${E.rs.effects.frame?.opacity}#${(E.lib || []).length}#${E.pvPlat || ""}` + (E.sel?.type === "broll" ? E.sel.id : "");
+  const mkey = active.map((b) => `${b._id}:${b.id}:${b.fit}:${b.pos}:${b.x}:${b.y}:${b.scale}:${b.rotate}:${b.opacity}:${JSON.stringify(b.to || 0)}:${b.fit === "free" ? ot.toFixed(1) : ""}:${b.blend || ""}:${cutOn(b, libItem(b.id)) ? "c" : ""}`).join("|") + `#${wm.id}:${wm.opacity}:${wm.size}:${wm.pos}#${E.rs.effects.frame?.id}:${E.rs.effects.frame?.opacity}#${(E.lib || []).length}#${E.pvPlat || ""}` + (E.sel?.type === "broll" ? E.sel.id : "");
   if (mkey !== E.mkey) {
     E.mkey = mkey; let mh = "";
     for (const b of active) {
     const item = libItem(b.id); const pip = b.fit === "pip";
     if (b.fit === "free") { const k = (b.end - b.start) > 0 ? Math.max(0, Math.min(1, (ot - b.start) / (b.end - b.start))) : 0; const to = b.to || {}; const x = (b.x ?? 0.5) + ((to.x ?? b.x ?? 0.5) - (b.x ?? 0.5)) * k, y = (b.y ?? 0.5) + ((to.y ?? b.y ?? 0.5) - (b.y ?? 0.5)) * k, sc = (b.scale ?? 0.4) + ((to.scale ?? b.scale ?? 0.4) - (b.scale ?? 0.4)) * k;
-      mh += `<div class="ov-broll ${E.sel?.type === "broll" && E.sel.id === b._id ? "sel" : ""}" data-bid="${b._id}" style="position:absolute;left:${(x * 100).toFixed(2)}%;top:${(y * 100).toFixed(2)}%;width:${(sc * 100).toFixed(2)}%;transform:translate(-50%,-50%) rotate(${b.rotate || 0}deg);opacity:${b.opacity ?? 1};${({ screen: "mix-blend-mode:screen;", black: "mix-blend-mode:screen;", white: "mix-blend-mode:multiply;" })[b.blend] || ""}">${item?.kind === "image" || item?.kind === "sticker" || item?.kind === "frame" ? `<img src="${item.url}" style="width:100%;display:block">` : item ? `<video src="${item.url}" muted autoplay loop playsinline style="width:100%;display:block"></video>` : ""}</div>`; continue; }
+      mh += `<div class="ov-broll ${E.sel?.type === "broll" && E.sel.id === b._id ? "sel" : ""}" data-bid="${b._id}" style="position:absolute;left:${(x * 100).toFixed(2)}%;top:${(y * 100).toFixed(2)}%;width:${(sc * 100).toFixed(2)}%;transform:translate(-50%,-50%) rotate(${b.rotate || 0}deg);opacity:${b.opacity ?? 1};${({ screen: "mix-blend-mode:screen;", black: "mix-blend-mode:screen;", white: "mix-blend-mode:multiply;" })[b.blend] || ""}">${item?.kind === "image" || item?.kind === "sticker" || item?.kind === "frame" ? `<img src="${item.url}" style="width:100%;display:block">` : item ? (cutOn(b, item) ? `<div class="ov-cutslot" data-cut="${b._id}" data-fit="free"></div>` : `<video src="${item.url}" muted autoplay loop playsinline style="width:100%;display:block"></video>`) : ""}</div>`; continue; }
     const style = pip ? `width:42%;aspect-ratio:${fb.w > fb.h ? "16/9" : "9/16"};${{ tl: "left:4%;top:3%", tr: "right:4%;top:3%", bl: "left:4%;bottom:28%", br: "right:4%;bottom:28%" }[b.pos || "tr"]}` : "inset:0";
-      mh += `<div class="ov-broll ${E.sel?.type === "broll" && E.sel.id === b._id ? "sel" : ""}" data-bid="${b._id}" style="position:absolute;${style};overflow:hidden;border-radius:${pip ? 6 : 0}px;${({ screen: "mix-blend-mode:screen;", black: "mix-blend-mode:screen;", white: "mix-blend-mode:multiply;" })[b.blend] || ""}">${item?.kind === "image" ? `<img src="${item.url}" style="width:100%;height:100%;object-fit:cover">` : item ? `<video src="${item.url}" muted autoplay loop playsinline style="width:100%;height:100%;object-fit:cover"></video>` : ""}<span class="ov-tag">${esc(item?.name || "B-roll")}</span></div>`;
+      mh += `<div class="ov-broll ${E.sel?.type === "broll" && E.sel.id === b._id ? "sel" : ""}" data-bid="${b._id}" style="position:absolute;${style};overflow:hidden;border-radius:${pip ? 6 : 0}px;${({ screen: "mix-blend-mode:screen;", black: "mix-blend-mode:screen;", white: "mix-blend-mode:multiply;" })[b.blend] || ""}">${item?.kind === "image" ? `<img src="${item.url}" style="width:100%;height:100%;object-fit:cover">` : item ? (cutOn(b, item) ? `<div class="ov-cutslot" data-cut="${b._id}" data-fit="cover"></div>` : `<video src="${item.url}" muted autoplay loop playsinline style="width:100%;height:100%;object-fit:cover"></video>`) : ""}<span class="ov-tag">${esc(item?.name || "B-roll")}${b.cutout ? (cutOn(b, item) ? " · ✂ सिर्फ़ इंसान" : " · ✂ cutout बाकी") : ""}</span></div>`;
     }
     const frm = E.rs.effects.frame || {}; const frmi = frm.id && libItem(frm.id);
     if (frmi) mh += `<img src="${frmi.url}" style="position:absolute;inset:0;width:100%;height:100%;opacity:${frm.opacity ?? 1};pointer-events:none">`;
@@ -664,8 +672,167 @@ function renderOverlay() {
   }
   $("#ovl-text", ovl).innerHTML = html;
   // effect/filter clips under the playhead change the look of the video while it plays
-  const vf = videoFilter(); if (vf !== E.vf) { E.vf = vf; const v = $("#pv", E.root); if (v) v.style.filter = vf; }
+  const vf = videoFilter(); if (vf !== E.vf) { E.vf = vf; const v = $("#pv", E.root); if (v) v.style.filter = vf; const cv = $("#pv-cut", E.root); if (cv) cv.style.filter = vf; }
+  cutOverlays(); cutSync();
   renderHandles();
+}
+
+// ---------- live cutout (cutout.js): the person over a new background, moving, in the preview ----------
+// The main <video> keeps playing (it is the clock and the picture texture); its matte plays in a hidden
+// <video> that follows it (seek on jumps / cuts, playbackRate nudges while playing) and a <canvas> on
+// top of it composites both every frame. B-roll "सिर्फ़ इंसान" overlays get their own small canvas.
+const alphaAsset = () => E.p.assets.find((a) => a.kind === "alpha");
+// localStorage vividora_cut2d = "1" → the canvas-2D compositor (old / broken GPU drivers)
+function cut2d() { try { return localStorage.getItem("vividora_cut2d") === "1"; } catch { return false; } }
+function cutOn(b, item) { return !!b?.cutout && item?.kind === "broll" && !!item?.meta?.alpha?.url; }
+function cutLiveWanted() { return !E.montage && !!E.rs.effects.body?.enabled && !cropView(); }
+function hiddenVideo(src, loop) {
+  const el = document.createElement("video"); el.muted = true; el.playsInline = true; el.preload = "auto"; el.loop = !!loop; el.crossOrigin = "anonymous";
+  el.addEventListener("loadeddata", cutKick); el.addEventListener("seeked", cutKick); if (src) el.src = src;
+  $("#cutmedia", E.root)?.appendChild(el); watchFrames(el); return el;
+}
+// requestVideoFrameCallback: which frame each <video> really shows (mediaTime) → composite only matching frames
+function watchFrames(el) { if (!el.requestVideoFrameCallback) return; const cb = (_now, m) => { el._vvNew = true; el._vvT = m?.mediaTime; if (E) el.requestVideoFrameCallback(cb); }; el.requestVideoFrameCallback(cb); }
+// playing: the two presented frames are the same moment (±½ frame); without rVFC fall back to the clocks
+// (±1 frame; after 3 mismatches in a row draw anyway — a moving preview beats a frozen one)
+function sameFrame(a, b, t, fps) {
+  const ok = a._vvT != null && b._vvT != null && !a.seeking && !b.seeking ? Math.abs(a._vvT - b._vvT) <= 1.01 / fps : near(b, t, 0.12);
+  b._vvMiss = ok ? 0 : (b._vvMiss || 0) + ((a._vvNew || b._vvNew) ? 1 : 0); return ok || (b._vvMiss > 3 && near(b, t, 0.3));
+}
+function cutCss() {
+  const v = $("#pv", E.root), cv = $("#pv-cut", E.root); if (!v || !cv) return;
+  v.style.opacity = ""; cv.style.cssText = v.style.cssText; cv.style.position = "absolute"; cv.style.pointerEvents = "none";
+  if (E.cut?.live) v.style.opacity = "0";
+}
+function cutSync() {
+  const v = $("#pv", E.root), cv = $("#pv-cut", E.root); if (!v || !cv) return;
+  const want = cutLiveWanted(), al = alphaAsset(), b = E.rs.effects.body || {};
+  const live = want && !!al;
+  if (live) {
+    const C = E.cut || (E.cut = {});
+    if (C.alphaId !== al.id) { C.alphaId = al.id; if (C.av) C.av.src = al.url; else C.av = hiddenVideo(al.url); }
+    if (!C.comp) { C.comp = CUT.compositor(cv, { force2d: cut2d() }); cv.dataset.kind = C.comp?.kind || "none"; }
+    const bgId = b.bg === "image" ? b.bg_image : b.bg === "video" ? b.bg_video : "";
+    if (bgId !== C.bgId) {
+      C.bgId = bgId; if (C.bgEl?.tagName === "VIDEO") { C.bgEl.pause(); C.bgEl.remove(); } C.bgEl = null;
+      const it = bgId && libItem(bgId);
+      if (it && b.bg === "image") { C.bgEl = new Image(); C.bgEl.crossOrigin = "anonymous"; C.bgEl.onload = cutKick; C.bgEl.src = it.url; }
+      else if (it) C.bgEl = hiddenVideo(it.url, true);
+      if (bgId && !it) C.bgId = null; // library not loaded yet → try again next time
+    }
+    // canvas pixels = what is on screen (× devicePixelRatio), never more than the proxy → less GPU work on small previews
+    const vw = v.videoWidth || E.p.meta?.width || 1280, vh = v.videoHeight || E.p.meta?.height || 720;
+    const shown = (parseFloat(v.style.width) || vw) * (window.devicePixelRatio || 1); const k = Math.min(1, 1280 / Math.max(vw, vh), Math.max(0.25, shown / vw));
+    const W = Math.round(vw * k), H = Math.round(vh * k); if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  } else if (E.cut?.av && !E.cut.av.paused) E.cut.av.pause();
+  if (E.cut) E.cut.live = live;
+  if (cv.hidden === live) { cv.hidden = !live; cutCss(); }
+  cutBadge(want && !al);
+  E.cutDirty = true; cutLoop();
+}
+function cutBadge(show) {
+  const el = $("#cutbadge", E.root); if (!el) return;
+  if (!show) { el.hidden = true; el._k = ""; return; }
+  const mj = (E.p.jobs || []).find((j) => j.kind === "matte" && ["queued", "running"].includes(j.status));
+  const key = mj ? `${mj.status}|${mj.progress}|${mj.message}` : "btn";
+  el.hidden = false; if (el._k === key) return; el._k = key;
+  el.innerHTML = mj ? `<span class="spin"></span><span>${mj.status === "queued" ? "Cutout queue में…" : `Cutout बन रहा है ${Math.round(mj.progress || 0)}%`}<small>${E.ctx.esc(String(mj.message || "").replace(/^cutout \d+\/\d+ · /, ""))}</small></span>`
+    : `<span>✂ यह preview अभी सादा है — person cutout नहीं बना</span><button class="btn small primary" id="cutbadge-go" ${E.canEdit ? "" : "disabled"}>Cutout बनाएँ</button>`;
+  const go = $("#cutbadge-go", el); if (go) go.onclick = () => startMatte();
+}
+const MATTE_Q = [["fast", "तेज़ (512p)"], ["balanced", "बढ़िया (720p) — सुझाया"], ["hair", "बाल/बारीकी (1080p, धीमा)"]];
+function bodyStatus() {
+  const { esc } = E.ctx; const alpha = alphaAsset(); const mj = (E.p.jobs || []).find((j) => j.kind === "matte" && ["queued", "running"].includes(j.status));
+  const q = E.rs.effects.body?.quality || "balanced"; const dis = E.canEdit ? "" : "disabled"; const m = alpha?.meta || {};
+  const head = mj ? `<p class="small">⏳ cutout ${mj.status === "queued" ? "queue में" : `बन रहा है… ${Math.round(mj.progress || 0)}%`}</p><div class="progress"><i style="width:${mj.progress || 0}%"></i></div><p class="small muted">${esc(String(mj.message || "").replace(/^cutout /, ""))}</p>`
+    : alpha ? `<p class="small">✅ cutout तैयार · ${m.frames || ""} frames${m.quality ? ` · ${esc(m.quality)}` : ""}${m.ms_per_frame ? ` · ${m.ms_per_frame} ms/frame` : ""}</p>`
+    : `<p class="small muted">CapCut के "Auto cutout" जैसा — चलते वीडियो में इंसान को अलग करता है (CPU पर, एक बार; 1 min ≈ 1–4 min)।</p>`;
+  return `${head}<div class="row"><select id="bd-q" class="small" ${dis || (mj ? "disabled" : "")} title="quality / speed">${MATTE_Q.map(([k, l]) => `<option value="${k}" ${q === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <button class="btn small ${alpha ? "quiet" : "primary"}" id="bd-matte" ${dis || (mj ? "disabled" : "")}>${alpha ? "cutout दोबारा बनाएँ" : "Cutout बनाएँ"}</button></div>`;
+}
+function bindBodyStatus(root) {
+  const qs = $("#bd-q", root); if (qs) qs.onchange = () => { E.rs.effects.body.quality = qs.value; touch(); };
+  const bt = $("#bd-matte", root); if (bt) bt.onclick = () => { bt.disabled = true; startMatte(); };
+}
+// B-roll / overlay clip: "सिर्फ़ इंसान" — its own matte, cached on the library item (job matte_lib)
+function brollCutoutBox(it, item, dis) {
+  const { esc } = E.ctx; const a = item?.meta?.alpha;
+  const j = (E.p.jobs || []).find((x) => x.kind === "matte_lib" && x.payload?.library_id === item.id && ["queued", "running"].includes(x.status));
+  const st = !it.cutout ? "" : a ? `<span class="small">✅ cutout तैयार${a.ms_per_frame ? ` · ${a.ms_per_frame} ms/frame` : ""}</span>`
+    : j ? `<span class="small">⏳ cutout ${j.status === "queued" ? "queue में" : `${Math.round(j.progress || 0)}%`} <span class="muted">${esc(String(j.message || "").replace(/^cutout \d+\/\d+ · /, ""))}</span></span>`
+    : `<button class="btn small primary" data-libmatte="${item.id}" ${dis}>Cutout बनाएँ</button>`;
+  return `<div class="box"><label class="chk"><input type="checkbox" data-k="cutout" ${it.cutout ? "checked" : ""} ${dis}> <b>सिर्फ़ इंसान (cutout)</b></label> ${st}
+    ${it.cutout ? `<p class="small muted">clip का background हटकर सिर्फ़ इंसान main video पर आएगा (preview में live)।</p><div class="irow">${field(`किनारा अंदर <b>${it.edge_shrink || 0}</b>`, `<input type="range" data-k="edge_shrink" min="0" max="6" step="0.5" value="${it.edge_shrink || 0}" ${dis}>`)}${field(`नरम <b>${it.edge_feather || 0}</b>`, `<input type="range" data-k="edge_feather" min="0" max="6" step="0.5" value="${it.edge_feather || 0}" ${dis}>`)}</div>` : ""}</div>`;
+}
+async function ensureLibMatte(libId, force) {
+  const item = libItem(libId); if (!item || (item.meta?.alpha && !force)) return;
+  try { const r = await E.ctx.api("POST", `/projects/${E.pid}/matte_lib`, { library_id: libId, quality: E.rs.effects.body?.quality || "balanced" });
+    if (r.job) E.ctx.toast("इस clip का cutout बन रहा है — progress ऊपर दिखेगा"); await E.ctx.load(); E.ctx.render(); }
+  catch (err) { E.ctx.toast(err.message); }
+}
+async function startMatte(quality) {
+  try { await E.ctx.api("POST", `/projects/${E.pid}/matte`, { quality: quality || E.rs.effects.body?.quality || "balanced" }); E.ctx.toast("cutout बन रहा है — progress ऊपर दिखेगा"); await E.ctx.load(); E.ctx.render(); }
+  catch (err) { E.ctx.toast(err.message); }
+}
+function cutKick() { if (!E) return; E.cutDirty = true; cutLoop(); }
+function cutLoop() { if (!E || E.cutRaf) return; const ed = E; ed.cutRaf = requestAnimationFrame(() => { ed.cutRaf = 0; if (E !== ed) return; if (cutFrame()) cutLoop(); }); }
+const near = (el, t, tol) => !el.seeking && el.readyState >= 2 && Math.abs(el.currentTime - Math.min(Math.max(0, t), (el.duration || Infinity) - 0.001)) <= tol;
+// one animation frame: keep the followers on the main clock and redraw what changed → true = keep looping
+function cutFrame() {
+  const v = $("#pv", E.root); if (!v) return false;
+  // main picture buffering (readyState < 3) → hold the followers too, so they do not run ahead
+  const playing = !v.paused && !v.ended && v.readyState >= 3; const fps = E.p.meta?.fps || 30; const rate = v.playbackRate || 1; const ot = outOf(v.currentTime);
+  let busy = playing; const dirty = E.cutDirty; E.cutDirty = false;
+  const C = E.cut;
+  if (C?.live && C.comp && C.av) {
+    CUT.follow(C.av, v.currentTime, playing, rate, fps);
+    const b = E.rs.effects.body || {};
+    if (C.bgEl?.tagName === "VIDEO" && C.bgEl.duration) { const sp = Math.max(0.25, Math.min(4, +b.bg_speed || 1)); CUT.follow(C.bgEl, (ot * sp) % C.bgEl.duration, playing, rate * sp, fps); }
+    const synced = playing ? sameFrame(v, C.av, v.currentTime, fps) : near(C.av, v.currentTime, 0.6 / fps);
+    const fresh = v._vvNew || C.av._vvNew || C.bgEl?._vvNew || !v.requestVideoFrameCallback;
+    if ((playing ? fresh : (dirty || C.pend)) && synced) {
+      const ok = C.comp.draw({ vid: v, alpha: C.av, ...CUT.bodyState(b, ot, outDur(), C.bgEl) });
+      v._vvNew = C.av._vvNew = false; if (C.bgEl) C.bgEl._vvNew = false;
+      C.pend = !ok; if (!ok) busy = busy || C.av.readyState < 2;
+      if (ok) { const cv = $("#pv-cut", E.root); cv.dataset.draws = (+cv.dataset.draws || 0) + 1; }
+    } else if (!playing && (dirty || C.pend)) { C.pend = true; busy = busy || (!C.av.error && (C.av.seeking || !synced)); }
+    else if (playing && fresh) { v._vvNew = C.av._vvNew = false; const cv = $("#pv-cut", E.root); cv.dataset.skips = (+cv.dataset.skips || 0) + 1; } // frames did not match → keep the last good composite
+  }
+  for (const [id, o] of E.cutOv || []) {
+    const it = E.rs.effects.broll.find((x) => x._id === id); if (!it || !o.vid) continue;
+    const lt = ot - (+it.start || 0); const dur = o.vid.duration || Infinity;
+    o.cv.style.visibility = lt > dur ? "hidden" : "";
+    CUT.follow(o.vid, lt, playing, rate, fps); CUT.follow(o.av, lt, playing, rate, fps);
+    const synced = playing ? sameFrame(o.vid, o.av, lt, fps) && near(o.vid, lt, 0.3) : near(o.av, lt, 0.6 / fps) && near(o.vid, lt, 0.6 / fps);
+    if (synced && (playing || dirty || o.pend)) { o.pend = !o.comp.draw({ vid: o.vid, alpha: o.av, edge: { shrink: +it.edge_shrink || 0, feather: +it.edge_feather || 0 } }); if (!o.pend) o.cv.dataset.draws = (+o.cv.dataset.draws || 0) + 1; }
+    else if (!playing) { o.pend = true; busy = busy || (!o.av.error && !o.vid.error && (o.av.seeking || o.vid.seeking || !synced)); }
+  }
+  return busy;
+}
+// "सिर्फ़ इंसान" B-roll: persistent canvas + picture/matte videos per timeline item, re-attached when the overlay DOM is rebuilt
+function cutOverlays() {
+  E.cutOv = E.cutOv || new Map(); const seen = new Set();
+  for (const slot of $$("#ovl-media .ov-cutslot", E.root)) {
+    const id = slot.dataset.cut; const it = E.rs.effects.broll.find((x) => x._id === id); const item = it && libItem(it.id); if (!cutOn(it, item)) continue;
+    seen.add(id); let o = E.cutOv.get(id);
+    if (o && (o.libId !== item.id || o.alphaUrl !== item.meta.alpha.url)) { cutOvDrop(id); o = null; }
+    if (!o) {
+      const cv = document.createElement("canvas"); cv.className = "ov-cut";
+      const k = Math.min(1, 960 / Math.max(item.meta?.width || 960, item.meta?.height || 540)); cv.width = Math.round((item.meta?.width || 960) * k); cv.height = Math.round((item.meta?.height || 540) * k);
+      o = { cv, comp: CUT.compositor(cv, { overlay: true, force2d: cut2d() }), vid: hiddenVideo(item.url), av: hiddenVideo(item.meta.alpha.url), libId: item.id, alphaUrl: item.meta.alpha.url };
+      cv.dataset.kind = o.comp?.kind || "none"; E.cutOv.set(id, o);
+    }
+    o.cv.style.cssText = slot.dataset.fit === "free" ? "width:100%;display:block" : "width:100%;height:100%;object-fit:cover;display:block";
+    if (o.cv.parentNode !== slot) slot.appendChild(o.cv);
+  }
+  for (const id of [...E.cutOv.keys()]) if (!seen.has(id)) cutOvDrop(id);
+  if (seen.size) cutKick();
+}
+function cutOvDrop(id) { const o = E.cutOv.get(id); if (!o) return; for (const el of [o.vid, o.av]) { el.pause(); el.removeAttribute("src"); el.load(); el.remove(); } o.comp?.destroy(); o.cv.remove(); E.cutOv.delete(id); }
+function cutTeardown() {
+  cancelAnimationFrame(E.cutRaf); E.cutRaf = 0;
+  for (const id of [...(E.cutOv?.keys() || [])]) cutOvDrop(id);
+  if (E.cut) { for (const el of [E.cut.av, E.cut.bgEl]) if (el?.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); } E.cut.comp?.destroy(); E.cut = null; }
 }
 
 // ---------- selection / inspector ----------
@@ -834,6 +1001,7 @@ function renderInspector() {
       <div class="irow"><label class="chk small"><input type="checkbox" data-k="_kf" ${it.to ? "checked" : ""} ${dis}> keyframe: अंत में यहाँ पहुँचे</label>${it.to ? `${field("X₂", `<input type="range" data-k="to.x" min="0" max="1" step="0.01" value="${it.to.x ?? it.x ?? 0.5}" ${dis}>`)}${field("Y₂", `<input type="range" data-k="to.y" min="0" max="1" step="0.01" value="${it.to.y ?? it.y ?? 0.5}" ${dis}>`)}${field("size₂", `<input type="range" data-k="to.scale" min="0.05" max="1" step="0.01" value="${it.to.scale ?? it.scale ?? 0.4}" ${dis}>`)}` : ""}</div>
       <div class="irow">${field("animation", `<select data-k="anim" ${dis}>${(E.ctx.S.presets?.sticker_anims || [{ id: "none", label: "none" }, { id: "fade", label: "fade" }]).map((a) => `<option value="${a.id}" ${(it.anim || "none") === a.id ? "selected" : ""}>${esc(a.label)}</option>`).join("")}</select>`)}` : ""}
       ${field("कोना", `<select data-k="pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${(it.pos || "tr") === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`)}</div>
+      ${item?.kind === "broll" ? brollCutoutBox(it, item, dis) : ""}
       <div class="ifield"><label>किस platform पर दिखे (कोई नहीं चुना = सब पर)</label><div class="irow">${["youtube", "instagram", "facebook"].map((pl) => `<label class="chk small"><input type="checkbox" data-plat="${pl}" ${(it.platforms || []).includes(pl) ? "checked" : ""} ${dis}> ${{ youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" }[pl]}</label>`).join("")}</div></div>
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "sfx") {
@@ -883,6 +1051,7 @@ function renderInspector() {
     else if (el.type === "number" || el.type === "range") it[k] = +el.value;
     else it[k] = el.value;
     if (k === "fit" || k === "blend") { touch(); renderInspector(); return; }
+    if (k === "cutout") { touch(); if (it.cutout) ensureLibMatte(it.id); renderInspector(); return; }
     if (type === "title" && ["pos", "box", "_outline", "_shadow"].includes(k)) { touch(); renderInspector(); return; }
     if (el.type === "range") { const lb = el.closest(".ifield")?.querySelector("label b"); if (lb) lb.textContent = (+el.value).toFixed(+el.step < 0.01 ? 3 : +el.step < 1 ? 2 : 0); }
     if (k === "bg" && type !== "hook" && !$('[data-k="_bgon"]', ins).checked) it.bg = "";
@@ -901,6 +1070,7 @@ function renderInspector() {
   $$("[data-rot]", ins).forEach((b) => (b.onclick = () => { it.rotate = +b.dataset.rot; touch(); applyVideoCss(); renderInspector(); }));
   bindAlts(ins);
   bindFxClipInspector(ins, it);
+  const lm = $("[data-libmatte]", ins); if (lm) lm.onclick = () => { lm.disabled = true; ensureLibMatte(lm.dataset.libmatte, true); };
   $$("[data-act]", ins).forEach((b) => (b.onclick = () => {
     const a = b.dataset.act;
     if (a === "del") deleteSel();
@@ -1139,9 +1309,10 @@ function renderPanel() {
     const b = fx.body; const alpha = E.p.assets.find((a) => a.kind === "alpha"); const mj = E.p.jobs?.find((j) => j.kind === "matte" && ["queued", "running"].includes(j.status));
     const lib = E.lib || [];
     h = `<div class="ph"><h3>Body effects</h3><span class="small muted">person cutout</span></div>
-      <div class="box">${alpha ? `<p class="small">✅ cutout तैयार (${alpha.meta?.frames || ""} frames)</p>` : mj ? `<p class="small">⏳ cutout बन रहा है… ${mj.progress || 0}%</p><div class="progress"><i style="width:${mj.progress || 0}%"></i></div>` : `<p class="small muted">CapCut के "Auto cutout / Body effects" जैसा — पहले cutout बनता है (CPU पर, 10 min video ≈ 15–25 min, एक बार)।</p>`}
-        <div class="row"><button class="btn small ${alpha ? "quiet" : "primary"}" id="bd-matte" ${dis || (mj ? "disabled" : "")}>${alpha ? "cutout दोबारा बनाएँ" : "cutout बनाएँ"}</button><label class="chk small"><input type="checkbox" id="bd-on" ${b.enabled ? "checked" : ""} ${dis}> <b>Body effects चालू</b></label></div>
-        <p class="small muted">preview में नहीं दिखता (render में बनता है) — "Preview frame" से एक frame देखें।</p></div>
+      <div class="box"><div id="bd-status">${bodyStatus()}</div>
+        <div class="row"><label class="chk small"><input type="checkbox" id="bd-on" ${b.enabled ? "checked" : ""} ${dis}> <b>Body effects चालू</b></label></div>
+        <p class="small muted">cutout बनने के बाद preview में <b>चलते वीडियो पर live</b> दिखता है (WebGL)। बिल्कुल final जैसा एक frame: "🎞 Preview frame"।</p></div>
+      <h4>किनारा (edge)</h4><div class="irow">${field(`अंदर करें <b>${b.edge_shrink || 0}</b>`, `<input type="range" data-bd="edge_shrink" min="0" max="6" step="0.5" value="${b.edge_shrink || 0}" ${dis} title="पुराने background की पतली लकीर (halo) हटाएँ">`)}${field(`नरम <b>${b.edge_feather || 0}</b>`, `<input type="range" data-bd="edge_feather" min="0" max="6" step="0.5" value="${b.edge_feather || 0}" ${dis} title="किनारे को हल्का धुँधला करें">`)}</div>
       <h4>Background</h4><div class="irow">${field("", `<select id="bd-bg" ${dis}>${(S.presets?.body_bg || []).map((o) => `<option value="${o.id}" ${b.bg === o.id ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`)}
         ${b.bg === "blur" ? field("blur", `<input type="range" id="bd-blur" min="4" max="40" step="1" value="${b.bg_blur}" ${dis}>`) : ""}
         ${["flat", "gradient"].includes(b.bg) ? field("रंग", `<input type="color" id="bd-c1" value="${b.bg_color}" ${dis}>`) : ""}${b.bg === "gradient" ? field("रंग 2", `<input type="color" id="bd-c2" value="${b.bg_color2}" ${dis}>`) : ""}
@@ -1346,7 +1517,7 @@ function bindPanel() {
   // body
   if (fx.body) {
     const b = fx.body; const { api: api2, load: load2 } = E.ctx;
-    on("#bd-matte", "onclick", async () => { try { await api2("POST", `/projects/${E.pid}/matte`); toast("cutout बन रहा है"); await load2(); renderPanel(); } catch (err) { toast(err.message); } });
+    bindBodyStatus(panel);
     on("#bd-on", "onchange", (e) => { b.enabled = e.target.checked; touch(); });
     on("#bd-bg", "onchange", (e) => { b.bg = e.target.value; touch(); renderPanel(); });
     on("#bd-blur", "oninput", (e) => { b.bg_blur = +e.target.value; touch(); });

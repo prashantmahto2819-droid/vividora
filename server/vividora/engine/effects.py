@@ -319,20 +319,51 @@ def _key(item: dict) -> str:
     return ""
 
 
-def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, out_label: str, idx: int) -> str:
+ALPHA_RANGE = "lut=y='if(lt(val\\,22)\\,0\\,clip((val-16)*255/219\\,0\\,255))'"
+
+
+def edge_filter(shrink: float, feather: float, short_side: int) -> str:
+    """Edge refinement of a gray alpha: shrink (erode) the matte by `shrink` px and soften it by
+    `feather` px. Values are in pixels of a 720p picture and scale with the real size."""
+    k = max(0.5, short_side / 720)
+    f = []
+    n = int(round(max(0.0, min(8.0, float(shrink or 0))) * k))
+    f += ["erosion"] * n
+    fe = max(0.0, min(8.0, float(feather or 0))) * k
+    if fe >= 0.3:
+        f.append(f"gblur=sigma={fe:.2f}")
+    return ",".join(f)
+
+
+def _cut_src(item: dict, input_index: int, alpha_index: int | None, idx: int, h: int) -> tuple[str, str, str]:
+    """Source picture of an overlay: the clip itself, or — for a "सिर्फ़ इंसान" (cutout) clip — the
+    clip with its cached person matte as alpha. → (pre-chain;, source label, key filter)."""
+    if alpha_index is None:
+        return "", f"[{input_index}:v]", _key(item)
+    edge = edge_filter(item.get("edge_shrink", 0), item.get("edge_feather", 0), h)
+    pre = (f"[{alpha_index}:v]extractplanes=y,{ALPHA_RANGE}{',' + edge if edge else ''}[oa{idx}];"
+           f"[oa{idx}][{input_index}:v]scale2ref=flags=bicubic[oas{idx}][ovs{idx}];"
+           f"[ovs{idx}]format=rgba[ovr{idx}];[ovr{idx}][oas{idx}]alphamerge[ocut{idx}];")
+    return pre, f"[ocut{idx}]", ""  # the person matte replaces colour keying
+
+
+def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, out_label: str, idx: int,
+                   alpha_index: int | None = None) -> str:
     """Full-frame B-roll (fit: cover), a picture-in-picture box, or a free transform
-    (fit: free → x, y, scale, opacity, rotate, optional keyframe `to` for a move/zoom)."""
+    (fit: free → x, y, scale, opacity, rotate, optional keyframe `to` for a move/zoom).
+    alpha_index: input with the clip's person matte → only the person is laid over the video."""
     s, e = float(item["start"]), float(item["end"])
     pip = item.get("fit") == "pip"
     if item.get("fit") == "free":
-        return _free_overlay(item, input_index, w, h, in_label, out_label, idx)
+        return _free_overlay(item, input_index, w, h, in_label, out_label, idx, alpha_index)
+    pre, src, key = _cut_src(item, input_index, alpha_index, idx, h)
     if pip:
         bw, bh = int(w * 0.42), int(h * 0.42 * (9 / 16) if w < h else h * 0.42)
-        prep = (f"[{input_index}:v]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh}{_key(item)},"
+        prep = (f"{pre}{src}scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh}{key},"
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = {"tl": "24:24", "tr": f"W-w-24:24", "bl": f"24:H-h-{int(h*0.28)}", "br": f"W-w-24:H-h-{int(h*0.28)}"}.get(item.get("pos", "tr"), "W-w-24:24")
     else:
-        prep = (f"[{input_index}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}{_key(item)},"
+        prep = (f"{pre}{src}scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}{key},"
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = "0:0"
     fade = ""
@@ -348,8 +379,10 @@ def _lerp(a: float, b: float, s: float, e: float) -> str:
     return f"({a:.4f}+({b:.4f}-{a:.4f})*min(1\\,max(0\\,(t-{s:.3f})/{d:.3f})))"
 
 
-def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_label: str, idx: int) -> str:
+def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_label: str, idx: int,
+                  alpha_index: int | None = None) -> str:
     s, e = float(item["start"]), float(item["end"])
+    pre, src, key = _cut_src(item, idx_in, alpha_index, idx, h)
     x0, y0 = float(item.get("x", 0.5)), float(item.get("y", 0.5))          # centre, fraction of frame
     sc0 = float(item.get("scale", 0.4))                                       # width as fraction of frame width
     op = max(0.0, min(1.0, float(item.get("opacity", 1.0))))
@@ -357,7 +390,7 @@ def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_la
     to = item.get("to") or {}
     x1, y1, sc1 = float(to.get("x", x0)), float(to.get("y", y0)), float(to.get("scale", sc0))
     ow = max(8, int(w * max(sc0, sc1)))
-    prep = (f"[{idx_in}:v]scale={ow}:-2:flags=bicubic,format=rgba{_key(item)},setpts=PTS-STARTPTS+{s:.3f}/TB")
+    prep = (f"{pre}{src}scale={ow}:-2:flags=bicubic,format=rgba{key},setpts=PTS-STARTPTS+{s:.3f}/TB")
     if rot:
         prep += f",rotate={rot}*PI/180:c=black@0:ow='hypot(iw,ih)':oh=ow"
     if op < 1:
@@ -548,7 +581,11 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
     n_alpha = 1 + (1 if body.get("glow") else 0) + (1 if body.get("stroke") else 0) + (1 if shadow else 0)
     labels = "".join(f"[al{i}]" for i in range(n_alpha))
     # matte videos are limited-range (black = 16): stretch to 0…255 so "empty" is really transparent
-    rng = "lut=y='if(lt(val\\,22)\\,0\\,clip((val-16)*255/219\\,0\\,255))'"
+    rng = ALPHA_RANGE
+    # "किनारा": shrink / soften the matte edge (halo of the old background, hard pixel edges)
+    edge = edge_filter(body.get("edge_shrink", 0), body.get("edge_feather", 0), min(w, h))
+    if edge:
+        rng += "," + edge
     ch.append(f"{a_in}format=gray,{rng},split={n_alpha}{labels}" if n_alpha > 1 else f"{a_in}format=gray,{rng}[al0]")
     ai = 1
     base = bg_label

@@ -7,6 +7,7 @@ video for one platform.
   flash     bool                           white flash on cuts
   music     {path, volume, duck}           background music, ducked under speech
   broll     [{path, type: video|image, start, end, fit: cover|pip, pos}]
+            cutout + alpha_path (worker-resolved person matte) → only the person is overlaid
   titles    [{start, end, text, pos, size, color, bg}]
   watermark {path, opacity, size, pos}
   sfx       [{path, at, volume}]
@@ -352,7 +353,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             chains.append(f"[0:v]trim=start={sg['a']:.3f}:end={sg['b']:.3f},setpts=(PTS-STARTPTS)/{sg['rate']:.4f},fps={fps},settb=AVTB,format=yuv420p[sv{i}]")
             vlabels.append(f"[sv{i}]")
             if body:
-                chains.append(f"[{body_alpha_in}:v]scale={src_w0}:{src_h0},trim=start={sg['a']:.3f}:end={sg['b']:.3f},"
+                chains.append(f"[{body_alpha_in}:v]extractplanes=y,scale={src_w0}:{src_h0},trim=start={sg['a']:.3f}:end={sg['b']:.3f},"
                               f"setpts=(PTS-STARTPTS)/{sg['rate']:.4f},fps={fps},settb=AVTB,format=gray[sm{i}]")
                 mlabels.append(f"[sm{i}]")
             if a_src:
@@ -424,7 +425,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         frame += "," + post_tf
     if body and not use_segments:
         chains.append(f"[0:v]fps={fps},select='{sel}',setpts=N/({fps})/TB[vcut0]")
-        chains.append(f"[{body_alpha_in}:v]scale={src_w0}:{src_h0},fps={fps},select='{sel}',setpts=N/({fps})/TB,format=gray[mcut]")
+        chains.append(f"[{body_alpha_in}:v]extractplanes=y,scale={src_w0}:{src_h0},fps={fps},select='{sel}',setpts=N/({fps})/TB,format=gray[mcut]")
         chains.extend(_body(body, src_w0, src_h0, "[vcut0]", "[mcut]", "[vseg]", extra_in, work, e, new_dur, src_fps))
         v = f"[vseg]{frame}"
     else:
@@ -479,9 +480,14 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         if not path or float(item.get("end", 0)) <= float(item.get("start", 0)):
             continue
         inputs += fx.overlay_input_args(item, Path(path))
-        chains.append(fx.overlay_filter(item, next_in, w, h, cur, f"[vo{i}]", i))
+        a_idx = None
+        if item.get("cutout") and item.get("alpha_path") and item.get("type") != "image" and Path(item["alpha_path"]).exists():
+            # "सिर्फ़ इंसान": the clip's cached person matte (engine/matting.py, job matte_lib) as its alpha
+            inputs += fx.overlay_input_args(item, Path(item["alpha_path"]))
+            a_idx = next_in + 1
+        chains.append(fx.overlay_filter(item, next_in, w, h, cur, f"[vo{i}]", i, alpha_index=a_idx))
         cur = f"[vo{i}]"
-        next_in += 1
+        next_in += 2 if a_idx is not None else 1
 
     # ---- frame / border overlay (full-frame PNG with transparency)
     fr = e.get("frame") or {}
