@@ -92,7 +92,7 @@ function toast(msg, ms = 2600) {
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|characters|scenes|characters3d|scenes3d)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|characters|scenes|characters3d|scenes3d|copilot)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -125,6 +125,7 @@ async function load() {
   if (r.kind === "templates" && !r.id) { const q = S.tplFilter || {}; S.tpls = await api("GET", `/templates?${new URLSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v)))}`).catch(() => ({ templates: [], formats: {}, industries: {}, fields: {} })); if (S.tplTab === "trends") S.trendTpl = await api("GET", "/trends/templates").catch(() => null); }
   if (r.kind === "compress") { const [c, src] = await Promise.all([api("GET", "/compress").catch(() => ({ jobs: [], presets: {} })), api("GET", "/compress/sources").catch(() => [])]); S.comp = c; S.compSrc = src; }
   if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
+  if (r.kind === "copilot") { const [h, a] = await Promise.all([api("GET", `/copilot/hooks?channel=${S.channel}`).catch(() => []), api("GET", `/copilot/audit?channel=${S.channel}`).catch(() => null)]); S.copilotHooks = h; S.copilotAudit = a; }
   if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; S.notify = await api("GET", "/notify").catch(() => null); }
   const ids = new Set(S.projects.map((p) => p.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   schedulePoll();
@@ -143,7 +144,7 @@ function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SE
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
   ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1]]],
-  ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["publish", "#/publish", "send", "Publish"]]],
+  ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["copilot", "#/copilot", "pulse", "Copilot"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
 function navActive(id) {
@@ -231,12 +232,12 @@ function render() {
     return;
   }
   app.dataset.mode = "shell"; ED.unmount();
-  const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
+  const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, copilot: copilotView, library: libraryView,
                   thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
-  const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, library: bindLibrary, home: bindHome,
+  const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, copilot: bindCopilot, library: bindLibrary, home: bindHome,
                   publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }) };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
@@ -1089,6 +1090,55 @@ function bindLibCards() {
 }
 
 // ---------- analytics ----------
+// ---------- Channel Copilot ----------
+function copilotView() {
+  const hooks = S.copilotHooks || []; const audit = S.copilotAudit || {}; const canEdit = S.user.role !== "viewer";
+  const n = (x) => (x || 0).toLocaleString("en-IN");
+  const hookBadge = (s) => s >= 70 ? `<span class="pill" style="background:#22c55e;color:#fff">${s}</span>` : s >= 40 ? `<span class="pill" style="background:#eab308;color:#000">${s}</span>` : `<span class="pill" style="background:#ef4444;color:#fff">${s}</span>`;
+  const dist = audit.hook_distribution || {};
+  const posting = audit.posting || {};
+  // Audit card
+  const auditCard = audit.videos ? `<div class="section"><h2>Weekly Audit</h2>
+    <div class="stats2"><div class="stat"><b>${audit.videos}</b><span>videos</span></div><div class="stat"><b>${dist.avg || 0}</b><span>avg hook score</span></div><div class="stat"><b style="color:#22c55e">${dist.green || 0}</b><span>अच्छे (70+)</span></div><div class="stat"><b style="color:#eab308">${dist.yellow || 0}</b><span>ठीक (40-69)</span></div><div class="stat"><b style="color:#ef4444">${dist.red || 0}</b><span>कमज़ोर (&lt;40)</span></div></div>
+    ${posting.best_day || posting.best_hour ? `<p class="small">सबसे अच्छा समय: <b>${esc(posting.best_day || "")}</b> ${posting.best_hour ? `<b>${esc(posting.best_hour)}</b>` : ""}</p>` : ""}
+    ${(audit.suggestions || []).length ? `<div class="note"><b>सुझाव:</b><ul style="margin:.4rem 0 0;padding-left:1.2rem">${audit.suggestions.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>` : ""}
+    ${(audit.retention_notes || []).length ? `<div class="note">${audit.retention_notes.map((t) => `<span class="small">• ${esc(t)}</span>`).join("<br>")}</div>` : ""}
+    ${(audit.best || []).length ? `<div style="margin-top:.75rem"><b class="small">Best performers:</b><div class="tablewrap"><table><tr><th>Video</th><th>Views</th><th>Hook</th></tr>${audit.best.map((v) => `<tr><td><a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a></td><td>${n(v.views)}</td><td>${hookBadge(v.hook_score)} <span class="small muted">${esc(v.hook_verdict)}</span></td></tr>`).join("")}</table></div></div>` : ""}
+    ${(audit.worst || []).length ? `<div style="margin-top:.5rem"><b class="small">ध्यान दें:</b><div class="tablewrap"><table><tr><th>Video</th><th>Views</th><th>Hook</th></tr>${audit.worst.map((v) => `<tr><td><a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a></td><td>${n(v.views)}</td><td>${hookBadge(v.hook_score)} <span class="small muted">${esc(v.hook_verdict)}</span></td></tr>`).join("")}</table></div></div>` : ""}
+    </div>` : `<div class="section"><p class="muted">Audit के लिए published videos चाहिए।</p></div>`;
+  // Posting analysis
+  const postingCard = posting.by_day && Object.keys(posting.by_day).length ? `<div class="section"><h2>Posting Time Analysis</h2>
+    <div class="tablewrap"><table><tr><th>दिन</th><th>Videos</th><th>औसत Views</th></tr>${Object.entries(posting.by_day).map(([d, v]) => `<tr><td>${esc(d)}</td><td>${v.count}</td><td>${n(v.avg_views)}</td></tr>`).join("")}</table></div>
+    ${posting.by_hour && Object.keys(posting.by_hour).length ? `<div class="tablewrap" style="margin-top:.5rem"><table><tr><th>घंटा</th><th>Videos</th><th>औसत Views</th></tr>${Object.entries(posting.by_hour).map(([h, v]) => `<tr><td>${esc(h)}</td><td>${v.count}</td><td>${n(v.avg_views)}</td></tr>`).join("")}</table></div>` : ""}</div>` : "";
+  // Hook scores table
+  const hooksTable = hooks.length ? `<div class="section"><h2>Hook Scores <em class="cnt">${hooks.length}</em></h2><p class="small muted">पहले 3 सेकंड की retention vs overall — hook ने दर्शक पकड़ा या नहीं।</p>
+    <div class="tablewrap"><table><tr><th>Video</th><th>Score</th><th>Retention</th><th>CTR</th><th>Velocity</th><th>Verdict</th></tr>${hooks.map((v) => { const h = v.hook || {}; const b = h.breakdown || {};
+      return `<tr><td><a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a><div class="small muted">${n(v.views)} views · ${v.published_at ? new Date(v.published_at).toLocaleDateString("hi-IN") : ""}</div></td><td>${hookBadge(h.score)}</td><td class="small">${b.retention}/40 <span class="muted">(ratio ${b.hook_ratio})</span></td><td class="small">${b.ctr}/30 <span class="muted">(${b.ctr_pct}%)</span></td><td class="small">${b.velocity}/30 <span class="muted">(${n(b.views_per_day)}/day)</span></td><td class="small">${esc(h.verdict)}</td></tr>`; }).join("")}</table></div></div>` : "";
+  // Comment queue
+  const commentSec = canEdit ? `<div class="section"><h2>Comment Reply Queue</h2><p class="small muted">Video का URL डालें — top comments लाकर AI reply draft बनाएँगे।</p>
+    <div class="row" style="gap:.5rem"><input id="cp-vid-title" placeholder="Video title" style="flex:1"><button class="btn primary" id="cp-comment-btn">Comments लाएँ</button></div>
+    <div class="small muted" style="margin-top:.3rem">नीचे comments paste करें (एक per line: author | comment text)</div>
+    <textarea id="cp-comments" rows="4" placeholder="राहुल | बहुत अच्छा video&#10;प्रिया | कब आएगा अगला part?" style="width:100%;margin-top:.4rem"></textarea>
+    <button class="btn small" id="cp-draft-btn" style="margin-top:.4rem">AI Reply Drafts बनाएँ</button>
+    <div id="cp-drafts"></div></div>` : "";
+  return `<div class="pghead"><div><h1>Channel Copilot</h1><p class="muted">Hook score analysis, weekly audit और comment reply queue — channel growth का AI साथी।</p></div>
+    ${canEdit ? `<button class="btn primary" id="cp-audit-btn">Audit चलाएँ</button>` : ""}</div>
+    ${auditCard}${postingCard}${hooksTable}${commentSec}`;
+}
+function bindCopilot() {
+  const ab = $("#cp-audit-btn"); if (ab) ab.onclick = async () => { ab.disabled = true; ab.textContent = "Audit चल रहा है…"; try { S.copilotAudit = await api("GET", `/copilot/audit?channel=${S.channel}`); S.copilotHooks = await api("GET", `/copilot/hooks?channel=${S.channel}`); } catch (e) { toast(e.message); } render(); };
+  const db2 = $("#cp-draft-btn"); if (db2) db2.onclick = async () => {
+    const title = ($("#cp-vid-title") || {}).value || ""; const raw = ($("#cp-comments") || {}).value || "";
+    const comments = raw.split("\n").filter(Boolean).map((l, i) => { const [a, ...t] = l.split("|"); return { id: "c" + i, author: (a || "").trim(), text: (t.join("|") || "").trim(), likes: 0 }; }).filter((c) => c.text);
+    if (!comments.length) { toast("कम से कम एक comment डालें"); return; }
+    db2.disabled = true; db2.textContent = "AI सोच रहा है…";
+    try { const r = await api("POST", "/copilot/comment-drafts", { video_title: title, comments, channel_id: S.channel });
+      const el = $("#cp-drafts"); if (el) el.innerHTML = `<div class="tablewrap" style="margin-top:.5rem"><table><tr><th>Comment</th><th>Draft Reply</th><th></th></tr>${(r.drafts || []).map((d) => { const c = comments.find((x) => x.id === d.comment_id) || {}; return `<tr><td><b>${esc(c.author)}</b>: ${esc(c.text)}</td><td><textarea class="cp-reply" data-cid="${esc(d.comment_id)}" rows="2" style="width:100%;min-width:200px">${esc(d.draft)}</textarea></td><td><button class="btn small cp-copy" data-cid="${esc(d.comment_id)}">Copy</button></td></tr>`; }).join("")}</table></div>`;
+      $$(".cp-copy").forEach((b) => (b.onclick = () => { const ta = $(`.cp-reply[data-cid="${b.dataset.cid}"]`); if (ta) { navigator.clipboard.writeText(ta.value).then(() => toast("Reply copy हो गया")).catch(() => toast("Copy नहीं हुआ")); } }));
+    } catch (e) { toast(e.message); } db2.disabled = false; db2.textContent = "AI Reply Drafts बनाएँ";
+  };
+}
+
 function analyticsView() {
   const a = S.analytics || { videos: [], learn: {} }; const L = a.learn || {}; const canEdit = S.user.role !== "viewer";
   const n = (x) => (x || 0).toLocaleString("en-IN");
