@@ -6,6 +6,8 @@ uploading → preparing → transcribing → cutting → review_cuts → renderi
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -67,6 +69,67 @@ def log(c, workspace_id: str, action: str, *, user_id: str | None = None,
 def set_status(c, project_id: str, status: str, note: str | None = None) -> None:
     db.update(c, "projects", project_id, {"status": status, "status_note": note,
                                           "updated_at": db.now()})
+
+
+def edit_sig(project: dict) -> str:
+    """Short fingerprint of everything a render depends on (render settings + cuts). A finished render
+    carries the fingerprint it was made from; when the project's differs, that output is stale."""
+    body = {"render": (project.get("settings") or {}).get("render") or {}, "edl": project.get("edl") or {}}
+    return hashlib.sha1(json.dumps(body, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:12]
+
+
+def cancel_job(c, job: dict, by: str | None = None) -> dict:
+    """Stop a job the creator no longer wants. Queued → gone at once; running → the worker sees `cancelled`
+    on its next heartbeat and kills ffmpeg. The project goes back to a sane editing state."""
+    pid = job["project_id"]
+    if job["status"] not in ("queued", "running"):
+        return job
+    db.update(c, "jobs", job["id"], {"status": "cancelled", "finished_at": db.now(),
+                                     "message": "रद्द किया" + (f" ({by})" if by else "")})
+    kind = job["kind"]
+    p = db.get("projects", pid) or {}
+    others = c.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND status IN ('queued','running') AND id != ? "
+                       "AND kind NOT IN ('publish')", (pid, job["id"])).fetchone()[0]
+    if kind == "publish" and (job.get("payload") or {}).get("publication_id"):
+        db.update(c, "publications", job["payload"]["publication_id"],
+                  {"status": "failed", "error": "रद्द किया", "finished_at": db.now()})
+        return db.get("jobs", job["id"])
+    if kind in ("dub", "shorts_plan", "matte_lib") or (kind == "transcribe" and (job.get("payload") or {}).get("range")):
+        db.update(c, "projects", pid, {"status_note": f"{kind} रद्द किया", "updated_at": db.now()})
+        return db.get("jobs", job["id"])
+    if others:
+        db.update(c, "projects", pid, {"status_note": f"{kind} रद्द किया — बाकी काम चल रहा है", "updated_at": db.now()})
+        return db.get("jobs", job["id"])
+    from . import autopilot_flow as apf
+    if apf.active(p) and kind in ("prepare", "transcribe", "autocut", "render", "shorts_plan"):
+        apf.fail(c, pid, apf.state(p).get("stage") or kind, "आपने रद्द किया", "“Autopilot फिर चलाएँ” दबाएँ, या खुद edit करें")
+        return db.get("jobs", job["id"])
+    if kind in ("render", "matte", "montage", "montage_plan") and p.get("edl"):
+        set_status(c, pid, "review_cuts", f"{'montage' if kind.startswith('montage') else kind} रद्द किया — editing वैसी ही है")
+    elif kind in ("render", "montage", "montage_plan") and (p.get("meta") or {}).get("duration"):
+        set_status(c, pid, "review_cuts", f"{kind} रद्द किया")
+    elif kind in ("transcribe", "autocut") and p.get("transcript") and p.get("edl"):
+        set_status(c, pid, "review_cuts", f"{kind} रद्द किया — पुराना transcript रखा है")
+    elif kind == "autocut" and p.get("transcript"):
+        db.update(c, "projects", pid, {"edl": autocut.build_edl(p["transcript"], float((p.get("meta") or {}).get("duration") or 0)),
+                                       "updated_at": db.now()})
+        set_status(c, pid, "review_cuts", "autocut रद्द किया — बिना कट के editor खुला है")
+    else:
+        set_status(c, pid, "failed", f"{kind} रद्द किया — “फिर से चलाएँ” या दोबारा upload करें")
+    return db.get("jobs", job["id"])
+
+
+def queue_position(c, job: dict) -> int | None:
+    """1-based place of a queued job among the jobs a worker of its kind would take before it."""
+    if job.get("status") != "queued":
+        return None
+    mine_slow = 1 if job["kind"] in ("render", "montage", "matte", "dub") else 0
+    ahead = c.execute(
+        "SELECT COUNT(*) FROM jobs WHERE status = 'queued' AND id != ? AND (run_after IS NULL OR run_after <= ?) AND ("
+        " (CASE WHEN kind IN ('render','montage','matte','dub') THEN 1 ELSE 0 END) < ? OR "
+        " ((CASE WHEN kind IN ('render','montage','matte','dub') THEN 1 ELSE 0 END) = ? AND created_at < ?))",
+        (job["id"], db.now(), mine_slow, mine_slow, job["created_at"])).fetchone()[0]
+    return int(ahead) + 1
 
 
 def add_asset(c, project_id: str, kind: str, rel_path: str, *, label: str | None = None,
@@ -430,10 +493,11 @@ def after_job(c, job: dict, result: dict) -> None:
                                        "updated_at": db.now()})
 
     elif kind == "render":
+        sig = (job.get("payload") or {}).get("edit_sig")
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
             add_asset(c, pid, f["kind"], f["path"], label=f.get("label"), mime=f.get("mime"),
-                      meta=f.get("meta"))
+                      meta={**(f.get("meta") or {}), **({"edit_sig": sig} if sig else {})})
         # autopilot: the sequence moves on (shorts → thumbnails → metadata → publish plan) only
         # when every render of the current step is finished
         if apf.on_render_finished(c, pid, result.get("warnings") or []):
@@ -530,7 +594,8 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
     set_status(c, pid, "rendering", f"{len(opts['presets'])} वीडियो render हो रहे हैं")
     fonts = [r[0] for r in c.execute("SELECT id FROM library WHERE workspace_id = ? AND kind = 'font'", (project["workspace_id"],))]
     sigs = render_sigs(db.get("projects", pid) or project)
-    return [queue.enqueue(c, pid, "render", {"preset": p, "fonts": fonts, "signature": sigs.get(p),
+    sig = edit_sig({**project, "settings": new_settings})
+    return [queue.enqueue(c, pid, "render", {"preset": p, "fonts": fonts, "signature": sigs.get(p), "edit_sig": sig,
                                              **{k: v for k, v in opts.items() if k != 'presets'}})
             for p in opts["presets"]]
 
@@ -771,6 +836,13 @@ def project_view(project: dict) -> dict:
                                 (project["id"],)))
     jobs = db.rows(cn.execute("SELECT * FROM jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 20",
                               (project["id"],)))
+    qlen = None
+    for j in jobs:
+        if j.get("status") == "queued":
+            if qlen is None:
+                qlen = cn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'queued'").fetchone()[0]
+            j["queue_pos"] = queue_position(cn, j)
+            j["queue_len"] = qlen
     return {**project, "assets": [{k: v for k, v in a.items() if k != "path"} for a in assets],
-            "jobs": jobs, "render_defaults": {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})},
+            "jobs": jobs, "edit_sig": edit_sig(project), "render_defaults": {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})},
             "render_sigs": render_sigs(project)}

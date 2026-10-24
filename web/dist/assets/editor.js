@@ -182,15 +182,51 @@ function trackJobs(p) {
   }
   return done;
 }
+// what a running job says about itself: queue place, attempt number, ETA from the worker's message
+function jobSub(j) {
+  if (j.status === "queued") return j.queue_pos ? `कतार में ${j.queue_pos}/${Math.max(j.queue_len || 0, j.queue_pos)}` : "queue में";
+  const parts = [];
+  if ((+j.attempts || 0) > 1) parts.push(`कोशिश ${j.attempts}/3`);
+  parts.push((j.message || E.p.status_note || "").slice(0, 60));
+  return parts.filter(Boolean).join(" · ");
+}
+function jobsPref() { try { return JSON.parse(localStorage.getItem("vividora_jobs_ui") || "{}"); } catch { return {}; } }
+function saveJobsPref(p) { try { localStorage.setItem("vividora_jobs_ui", JSON.stringify({ ...jobsPref(), ...p })); } catch { /* private mode */ } }
 function renderJobs() {
   const el = $("#ed-jobs", E.root); if (!el) return; const { esc } = E.ctx;
   const act = activeJobs(E.p); const ap = PRO.autopilotStrip();
-  if (!act.length && !ap) { el.hidden = true; el.innerHTML = ""; return; }
+  if (!act.length && !ap) { el.hidden = true; el.innerHTML = ""; el.classList.remove("mini"); return; }
+  const pref = jobsPref(); const phone = matchMedia("(max-width: 640px)").matches;
+  if (E.jobsMini === undefined) E.jobsMini = pref.mini !== undefined ? !!pref.mini : phone; // phones: never cover the preview
   el.hidden = false;
-  el.innerHTML = ap + act.slice(0, 4).map((j) => { const pc = Math.max(0, Math.min(100, Math.round(+j.progress || 0)));
-    return `<div class="jobrow" title="${esc(j.message || E.p.status_note || "")}"><span class="spin"></span><span class="jl"><b>${esc(jobLabel(j))}</b><span class="muted">${j.status === "queued" ? "queue में" : esc((j.message || E.p.status_note || "").slice(0, 60))}</span></span><span class="jp">${j.status === "queued" ? "…" : pc + "%"}</span><i style="width:${j.status === "queued" ? 0 : pc}%"></i></div>`; }).join("")
+  el.classList.toggle("mini", !!E.jobsMini);
+  if (pref.x !== undefined && pref.y !== undefined && !phone) { el.style.left = pref.x + "px"; el.style.top = pref.y + "px"; el.style.right = "auto"; }
+  if (E.jobsMini) {
+    const j0 = act[0]; const pc = j0 ? Math.max(0, Math.min(100, Math.round(+j0.progress || 0))) : 0;
+    el.innerHTML = `<button class="jpill" id="jobs-open" title="काम देखें">⏳ ${act.length} काम${j0 && j0.status === "running" ? ` · ${pc}%` : ""}</button>`;
+    $("#jobs-open", el).onclick = () => { E.jobsMini = false; saveJobsPref({ mini: false }); renderJobs(); };
+    return;
+  }
+  el.innerHTML = `<div class="jhead" id="jobs-grip"><span class="small muted">⠿ काम चल रहे हैं</span><button class="ibtn" id="jobs-min" title="छोटा करें">—</button></div>` + ap + act.slice(0, 4).map((j) => { const pc = Math.max(0, Math.min(100, Math.round(+j.progress || 0)));
+    return `<div class="jobrow" title="${esc(j.message || E.p.status_note || "")}"><span class="spin"></span><span class="jl"><b>${esc(jobLabel(j))}</b><span class="muted">${esc(jobSub(j))}</span></span><span class="jp">${j.status === "queued" ? "…" : pc + "%"}</span>${E.canEdit || E.ctx.S.user.role !== "viewer" ? `<button class="ibtn jx" data-jcancel="${j.id}" title="रद्द करें">✕</button>` : ""}<i style="width:${j.status === "queued" ? 0 : pc}%"></i></div>`; }).join("")
     + (act.length > 4 ? `<div class="small muted">+${act.length - 4} और</div>` : "") + (E.locked ? `<div class="small jlock">🔒 transcript/कट बन रहे हैं — तब तक editing बंद</div>` : "");
   PRO.bindAutopilot(el);
+  $("#jobs-min", el).onclick = () => { E.jobsMini = true; saveJobsPref({ mini: true }); renderJobs(); };
+  $$("[data-jcancel]", el).forEach((b) => (b.onclick = () => cancelJob(b.dataset.jcancel, b)));
+  // drag the card anywhere over the stage (mouse + touch); the place is remembered
+  const grip = $("#jobs-grip", el);
+  grip.onpointerdown = (e) => { if (e.target.closest("button")) return; e.preventDefault(); const st = $(".ed-stage", E.root).getBoundingClientRect(); const r = el.getBoundingClientRect();
+    const ox = e.clientX - r.left, oy = e.clientY - r.top; grip.setPointerCapture(e.pointerId);
+    const mv = (ev) => { const x = Math.max(0, Math.min(st.width - r.width, ev.clientX - st.left - ox)); const y = Math.max(0, Math.min(st.height - 40, ev.clientY - st.top - oy)); el.style.left = x + "px"; el.style.top = y + "px"; el.style.right = "auto"; };
+    const up = () => { grip.onpointermove = null; grip.onpointerup = null; saveJobsPref({ x: parseFloat(el.style.left), y: parseFloat(el.style.top) }); };
+    grip.onpointermove = mv; grip.onpointerup = up; };
+}
+async function cancelJob(id, btn) {
+  const j = (E.p.jobs || []).find((x) => x.id === id); if (!j) return;
+  if (!confirm(`${jobLabel(j)} रद्द करें?`)) return;
+  if (btn) btn.disabled = true;
+  try { const r = await E.ctx.api("POST", `/projects/${E.pid}/jobs/${id}/cancel`); E.ctx.toast(`${jobLabel(j)} रद्द किया`); if (r.project && E) { E.ctx.S.project = r.project; update(r.project); } }
+  catch (e) { E.ctx.toast(e.message); if (btn) btn.disabled = false; }
 }
 // a "re-listen one line" job: payload.core = [start, end] in recording seconds (older builds: payload.range)
 function jobRange(j) { if (j.kind !== "transcribe") return null; const c = j.payload?.core; if (Array.isArray(c) && c.length === 2) return { start: +c[0], end: +c[1] }; const r = j.payload?.range; return r && r.end > r.start ? { start: +r.start, end: +r.end } : null; }
@@ -2227,7 +2263,7 @@ function renderExport() {
     ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए</label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
     <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>
     ${exportAdvHtml()}`}
-    ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="small muted">${esc(job?.message || "queue में")}</p>` : ""}
+    ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="small muted row between"><span>${esc(job ? jobSub(job) : "queue में")}</span>${job && E.canEdit ? `<button class="btn small quiet" data-jcancel="${job.id}">✕ रद्द करें</button>` : ""}</p>` : ""}
     ${outs.length ? `<h3>तैयार वीडियो</h3><div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
       return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(a.label?.startsWith("short-") ? (a.meta.title || a.label) : pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}${a.meta.height ? ` · ${a.meta.height > a.meta.width ? a.meta.width : a.meta.height}p` : ""}${a.meta.codec && a.meta.codec !== "h264" ? ` · ${a.meta.codec.toUpperCase()}` : ""}${a.size ? ` · ${mb(a.size)}` : ""}</span></div>${sigBadge(a)}<div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}${p.status === "approved" && E.canEdit && (E.conns?.connections || []).length ? `<button class="btn small primary" data-pub="${a.id}">Publish</button>` : ""}</div>
         ${(E.pubs || []).filter((x) => x.asset_id === a.id).map((x) => `<div class="small pubrow ${x.status}">${PLAT[x.platform] || x.platform}: ${x.status === "done" ? `<a href="${x.url}" target="_blank" rel="noopener">${esc(x.url || "हो गया")}</a>` : x.status === "failed" ? `<span class="muted">असफल — ${esc((x.error || "").slice(0, 120))}</span>` : "upload हो रहा…"}</div>`).join("")}</div>`; }).join("")}</div>` : ""}
@@ -2239,6 +2275,7 @@ function renderExport() {
     <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? `मंज़ूर ✓ ${p.meta?.archived_at ? `· archived (${esc(p.meta.archive || "")}) <button class="btn small quiet" id="restore">raw वापस लाएँ</button>` : E.canEdit ? `<button class="btn small quiet" id="archive" title="raw files को Drive/archive पर भेजें, server खाली">☁ archive</button>` : ""}` : ""}</span>
       <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit && !E.montage ? `<button class="btn primary" id="go-render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा…" : allFresh(outs) ? "दोबारा render (बदलाव नहीं)" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };
+  $$("[data-jcancel]", m).forEach((b) => (b.onclick = () => cancelJob(b.dataset.jcancel, b)));
   $$("[data-pub]", m).forEach((b) => (b.onclick = () => { const a = p.assets.find((x) => x.id === b.dataset.pub); E.pubFor = { asset: a, title: "", description: "", tags: "", conn: "", privacy: "private", when: "" }; renderExport(); $("#pubform", m)?.scrollIntoView({ behavior: "smooth" }); }));
   bindPublishForm(m);
   const pfr = $("#pf-run", m); if (pfr) pfr.onclick = async () => { await flush(); try { E.pf = await api("GET", `/projects/${E.pid}/preflight?presets=${encodeURIComponent((E.rs.presets || []).join(","))}`); $("#pf-list", m).innerHTML = pfHtml(); bindPf(m); } catch (e) { toast(e.message); } };

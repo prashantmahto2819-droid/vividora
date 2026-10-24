@@ -298,6 +298,15 @@ kbd { font: inherit; font-size: .78rem; padding: .05rem .4rem; border: 1px solid
 .pc-dur { position: absolute; right: 8px; bottom: 8px; z-index: 2; font-size: .72rem; padding: .05rem .4rem; border-radius: 5px; background: rgba(0,0,0,.75); color: #fff; font-variant-numeric: tabular-nums; pointer-events: none; transition: opacity .15s; }
 .pc-ap { position: absolute; right: 8px; top: 8px; z-index: 2; background: var(--amber); color: var(--amber-ink); font-size: .68rem; padding: .05rem .45rem; border-radius: 999px; font-weight: 700; pointer-events: none; }
 .pc-prog { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.1); z-index: 2; overflow: hidden; } .pc-prog i { display: block; height: 100%; background: var(--amber); }
+.pc-prog.ap { height: 14px; background: rgba(0,0,0,.55); } .pc-prog.ap i { opacity: .85; transition: width .4s; }
+.pc-prog.ap span { position: absolute; right: 6px; top: 0; font-size: .62rem; line-height: 14px; color: #fff; font-weight: 700; }
+/* autopilot strip + stale outputs on the project page (same look as the editor's) */
+.apstrip { padding: .45rem .6rem .5rem; background: var(--panel, #171C25); border: 1px solid var(--line, #2A3340); border-radius: 10px; font-size: .75rem; margin: .4rem 0 .6rem; }
+.apstrip.fail { border-color: #6b2b2e; background: rgba(40,20,24,.95); } .apstrip .row { align-items: center; }
+.apsteps { display: flex; gap: 3px; margin: .35rem 0; } .apsteps i { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,.12); }
+.apsteps i.done { background: var(--green, #4caf7d); } .apsteps i.cur { background: var(--amber); animation: appulse 1.2s infinite; } .apsteps i.failed { background: var(--rose, #d86b6b); }
+@keyframes appulse { 50% { opacity: .45; } }
+.output.stale video { opacity: .55; } .stalebadge { color: var(--amber); margin: .15rem 0; font-size: .78rem; }
 .pc-check { position: absolute; left: 8px; top: 8px; z-index: 3; width: 26px; height: 26px; border-radius: 7px; background: rgba(10,13,18,.7); display: grid; place-items: center; opacity: 0; transition: opacity .15s; cursor: pointer; }
 .pc-check input { width: 16px; height: 16px; accent-color: var(--amber); cursor: pointer; margin: 0; }
 .pc:hover .pc-check, .pc.picked .pc-check, .pc-check:focus-within { opacity: 1; }

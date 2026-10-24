@@ -207,7 +207,7 @@ function pcard(p, opts = {}) {
     <div class="pc-thumb"><a class="pc-link" href="${href}" aria-label="${esc(p.title)}"></a>
       ${p.thumb_url ? `<img src="${p.thumb_url}" alt="" loading="lazy">` : `<div class="ph">${ic(p.kind === "montage" ? "music" : "film")}</div>`}
       <span class="pc-status ${cls}">${label}</span>${p.meta?.duration ? `<span class="pc-dur">${fmtDur(p.meta.duration)}</span>` : ""}${p.settings?.autopilot ? `<span class="pc-ap">✈ Autopilot</span>` : ""}
-      ${WORKING.includes(p.status) ? `<div class="pc-prog"><i class="indet"></i></div>` : ""}
+      ${WORKING.includes(p.status) ? (p.meta?.autopilot?.total && p.settings?.autopilot ? `<div class="pc-prog ap" title="${esc(p.meta.autopilot.label || "")}"><i style="width:${Math.max(4, +p.meta.autopilot.percent || 0)}%"></i><span>${p.meta.autopilot.step}/${p.meta.autopilot.total}</span></div>` : `<div class="pc-prog"><i class="indet"></i></div>`) : ""}
       ${canEdit ? `<label class="pc-check" title="चुनें"><input type="checkbox" data-sel="${p.id}" ${S.sel.has(p.id) ? "checked" : ""}></label>` : ""}
       ${opts.hover !== false ? `<div class="pc-hover"><a class="btn small" href="#/projects/${p.id}">खोलें</a>${S.user.role !== "viewer" ? `<a class="btn small quiet" href="#/thumbs/${p.id}">Thumbnail</a>` : ""}</div>` : ""}</div>
     <div class="pc-body"><div class="pc-title"><a href="${href}" title="${esc(p.title)}">${esc(p.title)}</a>${opts.menu !== false ? `<button class="ibtn pc-more" data-menu="${p.id}" aria-label="और विकल्प">${ic("dots")}</button>` : ""}</div>
@@ -560,10 +560,25 @@ function projectView(p) {
     ${p.meta.duration ? `<p class="muted small">${fmt(p.meta.duration)} · ${p.meta.width}×${p.meta.height} · ${p.meta.fps} fps · भाषा ${{hi:"हिंदी",en:"English",auto:"पहचान बाकी"}[p.language] || p.language} · आवाज़ ${p.meta.denoise === "deepfilternet" ? "DeepFilterNet से साफ़" : p.meta.denoise === "ffmpeg" ? "साफ़ की गई" : "जैसी थी"}</p>` : ""}
     ${body}`;
 }
+// the 11-step autopilot strip as the dashboard draws it (the editor has its own in pro.js)
+function apStrip(p) {
+  const st = p.meta?.autopilot; if (!p.settings?.autopilot || !st?.stage || !st.total) return "";
+  const total = +st.total || 11; const step = +st.step || 1; const failed = !!st.failed;
+  return `<div class="apstrip ${failed ? "fail" : ""}"><div class="row between"><b class="small">✈ Autopilot · ${step}/${total}</b>${failed && S.user.role !== "viewer" ? `<button class="btn small primary" id="ap-resume">↻ Autopilot फिर चलाएँ</button>` : ""}</div>
+    <div class="apsteps">${Array.from({ length: total }, (_, i) => `<i class="${i + 1 < step ? "done" : i + 1 === step ? (failed ? "failed" : "cur") : ""}"></i>`).join("")}</div>
+    <div class="small muted">${esc(failed ? (p.status_note || "").slice(0, 160) : st.label || "")}</div></div>`;
+}
+function jobSub(j) {
+  if (!j) return "";
+  if (j.status === "queued") return j.queue_pos ? `कतार में ${j.queue_pos}/${Math.max(j.queue_len || 0, j.queue_pos)}` : "कतार में";
+  return [(+j.attempts || 0) > 1 ? `कोशिश ${j.attempts}/3` : "", j.message || ""].filter(Boolean).join(" · ");
+}
+function cancelBtn(j) { return j && S.user.role !== "viewer" ? `<button class="btn small quiet" data-jcancel="${j.id}" title="यह काम रोकें">✕ रद्द करें</button>` : ""; }
 function workingView(p, job) {
-  return `<div class="section"><h2>${(STATUS[p.status] || [])[0]}</h2>
-    <div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div>
-    <p class="muted small" style="margin-top:.5rem">${esc(job ? (job.message || "") : "")}${p.status === "transcribing" ? " — इसके लिए GPU worker चाहिए (Status पेज देखें)" : ""}</p></div>`;
+  const act = (p.jobs || []).find((j) => ["queued", "running"].includes(j.status)) || job;
+  return `<div class="section"><h2>${(STATUS[p.status] || [])[0]}</h2>${apStrip(p)}
+    <div class="progress"><i style="width:${act ? act.progress : 0}%"></i></div>
+    <p class="muted small row between" style="margin-top:.5rem"><span>${esc(jobSub(act))}${p.status === "transcribing" ? " — इसके लिए GPU worker चाहिए (Status पेज देखें)" : ""}</span>${cancelBtn(act)}</p></div>`;
 }
 function reviewView(p, proxy, canEdit) {
   const edl = p.edl || { cuts: [], duration: p.meta.duration || 0, stats: {} };
@@ -615,10 +630,10 @@ function outputsSection(p, canEdit) {
   const job = p.jobs.find((j) => j.kind === "render" && ["running", "queued"].includes(j.status));
   return `<div class="section"><div class="row between"><h2>तैयार वीडियो</h2>
       ${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn primary" id="approve">मंज़ूरी दें</button>` : p.status === "approved" ? `<span class="status approved">मंज़ूर</span>` : ""}</div>
-    ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="muted small" style="margin-top:.4rem">${esc(job?.message || "")}</p>` : ""}
-    <div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
-      return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video>
-        <div class="row between" style="margin-top:.4rem"><b>${esc(pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)} · ${gb(a.size)}</span></div>
+    ${p.status === "rendering" ? `${apStrip(p)}<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="muted small row between" style="margin-top:.4rem"><span>${esc(jobSub(job))}</span>${cancelBtn(job)}</p>` : ""}
+    <div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label); const stale = a.meta?.edit_sig && p.edit_sig && a.meta.edit_sig !== p.edit_sig;
+      return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""} ${stale ? "stale" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video>
+        <div class="row between" style="margin-top:.4rem"><b>${esc(pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)} · ${gb(a.size)}</span></div>${stale ? `<div class="small stalebadge">⚠ पुराना — बदलाव के बाद दोबारा render करें</div>` : ""}
         <div class="row"><a class="btn small" href="${a.url}&download=1">Download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}</div></div>`; }).join("")}</div>
     ${p.status === "review_output" && S.user.role !== "admin" ? `<p class="muted small" style="margin-top:.75rem">मंज़ूरी admin देंगे।</p>` : ""}</div>`;
 }
@@ -627,6 +642,9 @@ function bindProject(p) {
   const title = $("#title");
   if (title && title.isContentEditable) title.onblur = async () => { const t = title.textContent.trim(); if (t && t !== p.title) { await api("PATCH", `/projects/${p.id}`, { title: t }); toast("नाम बदल दिया"); load().then(render); } };
   const del = $("#del"); if (del) del.onclick = () => deleteProject(p, () => go("/projects"));
+  document.querySelectorAll("[data-jcancel]").forEach((b) => (b.onclick = async () => { if (!confirm("यह काम रद्द करें?")) return; b.disabled = true;
+    try { await api("POST", `/projects/${p.id}/jobs/${b.dataset.jcancel}/cancel`); toast("रद्द किया"); load().then(render); } catch (e) { toast(e.message); b.disabled = false; } }));
+  const apr = $("#ap-resume"); if (apr) apr.onclick = async () => { apr.disabled = true; try { const r = await api("POST", `/projects/${p.id}/autopilot/resume`); toast(`✈ Autopilot step ${r.step || ""} से फिर चला`); load().then(render); } catch (e) { toast(e.message); apr.disabled = false; } };
   const retry = $("#retry-cuts"); if (retry) retry.onclick = () => api("POST", `/projects/${p.id}/recut`, {}).then(() => load().then(render));
   const video = $("#preview"), track = $("#track"), play = $("#play");
   const dur = p.edl?.duration || p.meta.duration || 1;

@@ -38,7 +38,8 @@ def _fetch(client: ApiClient, assets: list[dict], kind: str, tmp: Path, required
 def _progress(client: ApiClient, job_id: str):
     def cb(frac: float, msg: str) -> None:
         if not client.heartbeat(job_id, frac * 100, msg):
-            raise RuntimeError("job cancelled")
+            ffmpeg.cancel_all()  # the creator pressed ✕: stop every child process and unwind
+            raise ffmpeg.Cancelled("रद्द किया")
     return cb
 
 

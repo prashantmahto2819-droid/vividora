@@ -110,26 +110,44 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
         log.info("job %s %s (project %s)", job["id"], job["kind"], job["project_id"])
         import threading
         stop = threading.Event()
+        try:
+            from ..engine import ffmpeg as _ff  # cancel registry (CPU worker); the GPU worker has no engine package
+        except Exception:  # noqa: BLE001
+            _ff = None
+        if _ff:
+            _ff.reset_cancel()
 
-        def _keepalive():  # long steps (Whisper, TTS, big renders) may not report progress for minutes
-            while not stop.wait(45):
+        def _keepalive():  # long steps (Whisper, TTS, big renders) may not report progress for minutes;
+            # the heartbeat also brings back "cancelled" — then every child process is killed at once
+            while not stop.wait(10 if _ff else 45):
                 try:
-                    client.heartbeat(job["id"])
+                    alive = client.heartbeat(job["id"])
                 except Exception:  # noqa: BLE001
-                    pass
+                    continue
+                if not alive and _ff and not _ff.CANCEL.is_set():
+                    n = _ff.cancel_all()
+                    log.info("job %s cancelled by the creator — %d process(es) stopped", job["id"], n)
         threading.Thread(target=_keepalive, daemon=True).start()
         try:
             result = handler(client, job, claimed["project"], claimed["assets"])
-            client.done(job["id"], result)
-            log.info("job %s done", job["id"])
+            if _ff and _ff.CANCEL.is_set():
+                log.info("job %s was cancelled — result dropped", job["id"])
+            else:
+                client.done(job["id"], result)
+                log.info("job %s done", job["id"])
         except Exception as e:
-            import traceback
-            err = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-1500:]}"
-            log.error("job %s failed: %s", job["id"], e)
-            try:
-                client.failed(job["id"], err, retry=not isinstance(e, ValueError) and not getattr(e, "no_retry", False))
-            except Exception as e2:
-                log.error("could not report failure: %s", e2)
+            if _ff and _ff.CANCEL.is_set():
+                log.info("job %s cancelled (%s)", job["id"], type(e).__name__)
+            else:
+                import traceback
+                err = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-1500:]}"
+                log.error("job %s failed: %s", job["id"], e)
+                try:
+                    client.failed(job["id"], err, retry=not isinstance(e, ValueError) and not getattr(e, "no_retry", False))
+                except Exception as e2:
+                    log.error("could not report failure: %s", e2)
         stop.set()
+        if _ff:
+            _ff.reset_cancel()
         if once:
             return
