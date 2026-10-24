@@ -171,11 +171,15 @@ def write_video(frame_fn, W: int, H: int, dur: float, fps: float, path: Path) ->
                             "-r", f"{fps:.4f}", "-i", "-", "-c:v", "ffv1", "-pix_fmt", "gray", str(path)],
                            stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     assert enc.stdin is not None
+    from . import ffmpeg as _ff
+    _ff.track(enc)
     try:
         for i in range(n):
+            _ff.check_cancel()
             enc.stdin.write(np.clip(frame_fn(i / fps) * 255 + 0.5, 0, 255).astype(np.uint8).tobytes())
     finally:
         enc.stdin.close()
+        _ff.untrack(enc)
     if enc.wait() != 0:
         raise RuntimeError("mask video failed: " + (enc.stderr.read().decode(errors="ignore")[-300:] if enc.stderr else ""))
     return path

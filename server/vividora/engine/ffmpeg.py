@@ -14,6 +14,57 @@ class FFmpegError(RuntimeError):
     pass
 
 
+class Cancelled(RuntimeError):
+    """The job was cancelled while a child process ran; the worker reports nothing for it."""
+    no_retry = True
+
+
+# ---- cancel support: every long child process the worker starts is tracked here, so a cancel from the
+# editor (seen on the next heartbeat) kills the running ffmpeg/decoder at once instead of after the render.
+import threading as _threading  # noqa: E402
+
+_PROCS: set = set()
+_LOCK = _threading.Lock()
+CANCEL = _threading.Event()
+
+
+def track(proc) -> None:
+    with _LOCK:
+        _PROCS.add(proc)
+
+
+def untrack(proc) -> None:
+    with _LOCK:
+        _PROCS.discard(proc)
+
+
+def cancel_all() -> int:
+    """Set the cancel flag and terminate every tracked child. Returns how many were killed."""
+    CANCEL.set()
+    with _LOCK:
+        procs = list(_PROCS)
+    n = 0
+    for pr in procs:
+        try:
+            if pr.poll() is None:
+                pr.kill()
+                n += 1
+        except Exception:  # noqa: BLE001
+            pass
+    return n
+
+
+def reset_cancel() -> None:
+    CANCEL.clear()
+    with _LOCK:
+        _PROCS.clear()
+
+
+def check_cancel() -> None:
+    if CANCEL.is_set():
+        raise Cancelled("रद्द किया")
+
+
 def have(binary: str) -> bool:
     return shutil.which(binary) is not None
 
@@ -59,22 +110,38 @@ def probe(path: str | Path) -> dict:
 def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressFn | None = None,
         label: str = "ffmpeg") -> None:
     """Run ffmpeg, reporting progress (0..1) from its -progress output."""
+    check_cancel()
     full = ["ffmpeg", "-hide_banner", "-y", "-nostats", "-progress", "pipe:1", *cmd]
     proc = subprocess.Popen(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    track(proc)
     last = -1.0
     assert proc.stdout is not None
-    for line in proc.stdout:
-        if on_progress and duration and line.startswith("out_time_ms="):
-            try:
-                t = int(line.split("=", 1)[1]) / 1_000_000
-            except ValueError:
-                continue
-            frac = max(0.0, min(1.0, t / duration))
-            if frac - last >= 0.02:
-                last = frac
-                on_progress(frac, label)
-    err = proc.stderr.read() if proc.stderr else ""
-    if proc.wait() != 0:
+    try:
+        for line in proc.stdout:
+            if on_progress and duration and line.startswith("out_time_ms="):
+                try:
+                    t = int(line.split("=", 1)[1]) / 1_000_000
+                except ValueError:
+                    continue
+                frac = max(0.0, min(1.0, t / duration))
+                if frac - last >= 0.02:
+                    last = frac
+                    on_progress(frac, label)
+        err = proc.stderr.read() if proc.stderr else ""
+        rc = proc.wait()
+    except BaseException:
+        # a cancel raised from the progress callback (or anything else): never leave ffmpeg running on its own
+        try:
+            proc.kill()
+            proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+    finally:
+        untrack(proc)
+    if CANCEL.is_set():
+        raise Cancelled("रद्द किया")
+    if rc != 0:
         tail = "\n".join(err.strip().splitlines()[-15:])
         raise FFmpegError(f"{label} failed:\n{tail}")
 

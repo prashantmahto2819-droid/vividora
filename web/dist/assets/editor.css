@@ -356,6 +356,13 @@ body.dragging, body.dragging * { user-select: none !important; }
 .jobrow .jp { font-weight: 700; color: var(--amber); }
 .jobrow i { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--amber); transition: width .4s; }
 .jlock { background: rgba(23,28,37,.94); border-radius: 8px; padding: .3rem .5rem; }
+.jhead { display: flex; align-items: center; justify-content: space-between; background: rgba(23,28,37,.94); border: 1px solid var(--ed-line); border-radius: 8px; padding: .1rem .2rem .1rem .5rem; cursor: grab; touch-action: none; user-select: none; }
+.jhead:active { cursor: grabbing; } .jhead .ibtn { width: 24px; height: 22px; }
+.jobrow .jx { width: 22px; height: 22px; flex: none; color: var(--muted); } .jobrow .jx:hover { color: var(--rose); background: rgba(216,107,107,.15); }
+.ed-jobs.mini { width: auto; }
+.jpill { background: rgba(23,28,37,.94); border: 1px solid var(--ed-line); border-radius: 999px; color: var(--text); padding: .25rem .7rem; font-size: .75rem; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.jpill:hover { border-color: var(--amber); }
+.output.stale video { opacity: .55; } .stalebadge { color: var(--amber); margin: .15rem 0; }
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--amber); border-radius: 50%; animation: edspin .8s linear infinite; flex: none; vertical-align: middle; }
 @keyframes edspin { to { transform: rotate(360deg); } }
 

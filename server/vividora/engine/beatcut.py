@@ -139,11 +139,13 @@ def clip(path: Path, kind: str = "video", fps: float = 4.0, max_seconds: float =
     cmd = ["ffmpeg", "-v", "error", "-t", f"{min(dur, max_seconds):.2f}", "-i", str(path), "-vf", f"fps={fps},scale={sw}:{sh}",
            "-pix_fmt", "gray", "-f", "rawvideo", "-"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    ffmpeg.track(proc)
     ts, mot, sharp, bright, fxs, fys, faces = [], [], [], [], [], [], []
     prev = None
     n = 0
     assert proc.stdout is not None
     while True:
+        ffmpeg.check_cancel()
         buf = proc.stdout.read(sw * sh)
         if len(buf) < sw * sh:
             break

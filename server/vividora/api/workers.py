@@ -56,6 +56,8 @@ async def heartbeat(request: Request):
 @require_worker
 async def done(request: Request):
     job = _job(request)
+    if job["status"] == "cancelled":
+        return ok({"cancelled": True})  # the creator stopped it meanwhile — the result is thrown away
     if job["status"] != "running":
         raise ApiError(409, f"job is {job['status']}")
     data = await body(request)
@@ -72,6 +74,8 @@ async def failed(request: Request):
     job = _job(request)
     data = await body(request)
     err = str(data.get("error") or "unknown error")
+    if job["status"] == "cancelled":
+        return ok({"cancelled": True})  # a cancelled job must not come back as "queued"
     with db.tx() as c:
         if job["attempts"] < service.settings.max_job_attempts and data.get("retry", True):
             db.update(c, "jobs", job["id"], {"status": "queued", "worker": None, "error": err[:4000],

@@ -207,6 +207,7 @@ def matte(video: Path, out: Path, *, width: int, height: int, fps: float, durati
                             "-s", f"{ow}x{oh}", "-r", f"{fps:.4f}", "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
                             "-crf", str(crf), "-g", str(gop), "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv",
                             "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    ffmpeg.track(dec); ffmpeg.track(enc)
     chroma = bytes([128]) * ((ow // 2) * (oh // 2) * 2)
     import cv2
     zero = np.zeros([1, 1, 1, 1], np.float32)
@@ -222,6 +223,7 @@ def matte(video: Path, out: Path, *, width: int, height: int, fps: float, durati
     assert dec.stdout is not None and enc.stdin is not None
     try:
         while True:
+            ffmpeg.check_cancel()
             buf = dec.stdout.read(frame_bytes)
             if len(buf) < frame_bytes:
                 break
@@ -270,6 +272,8 @@ def matte(video: Path, out: Path, *, width: int, height: int, fps: float, durati
         dec.wait()
         err = enc.stderr.read().decode(errors="ignore") if enc.stderr else ""
         enc.wait()
+        ffmpeg.untrack(dec); ffmpeg.untrack(enc)
+    ffmpeg.check_cancel()
     if enc.returncode != 0 or not out.exists() or n == 0:
         raise ffmpeg.FFmpegError(f"alpha encode failed: {err[-300:]}")
     wall = time.time() - t0

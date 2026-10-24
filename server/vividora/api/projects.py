@@ -632,6 +632,22 @@ async def shorts_render(request: Request, user: dict):
     return ok({"jobs": jobs})
 
 
+@require("editor")
+async def job_cancel(request: Request, user: dict):
+    """Stop one job (queued: gone now; running: the worker stops ffmpeg on its next heartbeat)."""
+    p = own_project(request, user)
+    job = db.get("jobs", request.path_params["job_id"])
+    if not job or job["project_id"] != p["id"]:
+        raise ApiError(404, "job नहीं मिला")
+    if job["status"] not in ("queued", "running"):
+        raise ApiError(409, f"job पहले ही {job['status']} है")
+    with db.tx() as c:
+        job = service.cancel_job(c, job, by=user.get("name"))
+        service.log(c, user["workspace_id"], "job.cancel", user_id=user["id"], project_id=p["id"],
+                    detail={"job_id": job["id"], "kind": job["kind"]})
+    return ok({"job": job, "project": _with_urls(service.project_view(db.get("projects", p["id"])))})
+
+
 @require("admin")
 async def approve(request: Request, user: dict):
     p = own_project(request, user)
@@ -773,6 +789,7 @@ routes = [
     Route("/projects/{project_id}/audio-preview", audio_preview, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
+    Route("/projects/{project_id}/jobs/{job_id}/cancel", job_cancel, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
     Route("/projects/{project_id}/matte", matte_now, methods=["POST"]),

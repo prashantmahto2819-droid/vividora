@@ -40,11 +40,14 @@ def track(video: Path, duration: float, width: int, height: int, *, step: float 
     cmd = ["ffmpeg", "-v", "error", "-i", str(video), "-t", f"{min(duration, max_seconds):.2f}",
            "-vf", f"fps={fps:.4f},scale={sw}:{sh}", "-pix_fmt", "gray", "-f", "rawvideo", "-"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    from . import ffmpeg as _ff
+    _ff.track(proc)
     raw: list[tuple[float, float | None]] = []
     n = 0
     frame_bytes = sw * sh
     assert proc.stdout is not None
     while True:
+        _ff.check_cancel()
         buf = proc.stdout.read(frame_bytes)
         if len(buf) < frame_bytes:
             break
