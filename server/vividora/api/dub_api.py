@@ -39,6 +39,9 @@ async def create_dub(request: Request, user: dict):
         voice = dub.resolve_voice(data.get("voice"), data.get("description"), pl["language"])
     except ValueError as e:
         raise ApiError(422, str(e))
+    from .. import saas
+    from ..engine import tts as _tts
+    saas.check_voice(p["workspace_id"], _tts.is_premium(voice))
     payload = {**pl, "voice": voice, "speed": speed}
     with db.tx() as c:
         job = queue.enqueue(c, p["id"], "dub", payload)

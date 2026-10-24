@@ -77,6 +77,41 @@ def ensure_parent(rel: str | Path) -> Path:
     return p
 
 
+_IMAGE_MAGIC = (b"\x89PNG", b"\xff\xd8\xff", b"RIFF", b"GIF8")
+_FONT_MAGIC = (b"\x00\x01\x00\x00", b"OTTO", b"true", b"wOFF", b"wOF2")
+
+
+def validate_media(path: str | Path, kind: str) -> None:
+    """Refuse files whose bytes are not the media the name says (upload validation).
+    video/music/sfx/broll → ffprobe must find a stream; images → magic bytes; font → sfnt/woff header."""
+    from .api.deps import ApiError
+    p = Path(path)
+    if not p.exists() or p.stat().st_size == 0:
+        raise ApiError(422, "फ़ाइल खाली है")
+    if kind in ("video", "music", "sfx", "broll", "audio", "clip"):
+        import json as _json
+        import subprocess
+        try:
+            out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", str(p)],
+                                 capture_output=True, text=True, timeout=60).stdout
+            types = {s.get("codec_type") for s in (_json.loads(out or "{}").get("streams") or [])}
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            types = set()
+        need = {"video", "audio"} if kind in ("video", "broll", "clip", "music") else {"audio"}
+        if not types & need:
+            raise ApiError(422, "यह video/audio फ़ाइल नहीं है या टूटी हुई है — दूसरी फ़ाइल चुनें")
+    elif kind in ("image", "logo", "frame", "sticker"):
+        with p.open("rb") as f:
+            head = f.read(16)
+        if not head.startswith(_IMAGE_MAGIC) and not head.lstrip().startswith((b"<svg", b"<?xml")):
+            raise ApiError(422, "यह image फ़ाइल नहीं है")
+    elif kind == "font":
+        with p.open("rb") as f:
+            head = f.read(4)
+        if head not in _FONT_MAGIC:
+            raise ApiError(422, "यह font फ़ाइल नहीं है (ttf/otf/woff)")
+
+
 def guess_mime(path: str | Path) -> str:
     return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 

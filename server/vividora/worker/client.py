@@ -22,6 +22,8 @@ class ApiClient:
              timeout: float = 60) -> Any:
         url = f"{self.base}/api{path}"
         headers = {"X-Worker-Token": self.token}
+        if getattr(self, "job_id", None):
+            headers["X-Job"] = self.job_id
         body: bytes | Any = None
         if raw is not None:
             headers["Content-Type"] = "application/octet-stream"
@@ -59,7 +61,7 @@ class ApiClient:
     def download(self, asset_id: str, dest: Path) -> Path:
         dest.parent.mkdir(parents=True, exist_ok=True)
         req = urllib.request.Request(f"{self.base}/api/worker/files/{asset_id}",
-                                     headers={"X-Worker-Token": self.token})
+                                     headers={"X-Worker-Token": self.token, **({"X-Job": self.job_id} if getattr(self, "job_id", None) else {})})
         with urllib.request.urlopen(req, timeout=600) as r, dest.open("wb") as f:
             shutil.copyfileobj(r, f, 1024 * 1024)
         return dest
@@ -67,7 +69,7 @@ class ApiClient:
     def download_library(self, item_id: str, dest: Path) -> Path:
         dest.parent.mkdir(parents=True, exist_ok=True)
         req = urllib.request.Request(f"{self.base}/api/worker/library/{item_id}",
-                                     headers={"X-Worker-Token": self.token})
+                                     headers={"X-Worker-Token": self.token, **({"X-Job": self.job_id} if getattr(self, "job_id", None) else {})})
         with urllib.request.urlopen(req, timeout=600) as r, dest.open("wb") as f:
             shutil.copyfileobj(r, f, 1024 * 1024)
         return dest
@@ -108,6 +110,14 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
             continue
         job = claimed["job"]
         log.info("job %s %s (project %s)", job["id"], job["kind"], job["project_id"])
+        client.job_id = job["id"]  # file downloads are scoped to this job's workspace on the server
+        llm_before = 0
+        try:  # plan quota: the worker's own AI calls stop when the workspace's credits are gone
+            from ..engine import llm as _llm
+            _llm.BUDGET = int((claimed.get("quota") or {}).get("ai_credits", 10**9))
+            llm_before = _llm.stats().get("calls", 0)
+        except Exception:  # noqa: BLE001
+            _llm = None
         import threading
         stop = threading.Event()
         try:
@@ -130,6 +140,11 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
         threading.Thread(target=_keepalive, daemon=True).start()
         try:
             result = handler(client, job, claimed["project"], claimed["assets"])
+            if _llm is not None and isinstance(result, dict):
+                try:
+                    result["llm_calls"] = max(0, _llm.stats().get("calls", 0) - llm_before)
+                except Exception:  # noqa: BLE001
+                    pass
             if _ff and _ff.CANCEL.is_set():
                 log.info("job %s was cancelled — result dropped", job["id"])
             else:
@@ -147,6 +162,7 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
                 except Exception as e2:
                     log.error("could not report failure: %s", e2)
         stop.set()
+        client.job_id = None
         if _ff:
             _ff.reset_cancel()
         if once:

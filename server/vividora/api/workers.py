@@ -30,10 +30,11 @@ async def claim(request: Request):
     project = db.get("projects", job["project_id"])
     assets = db.rows(db.conn().execute("SELECT id, kind, label, path, mime, meta FROM assets "
                                        "WHERE project_id = ? AND archived = 0", (project["id"],)))
+    from .. import saas
     return ok({"job": job, "project": {k: project[k] for k in
                                        ("id", "workspace_id", "title", "language", "meta", "transcript",
                                         "edl", "settings")},
-               "assets": assets})
+               "assets": assets, "quota": {"ai_credits": saas.ai_credits_left(project["workspace_id"])}})
 
 
 def _job(request: Request) -> dict:
@@ -41,6 +42,19 @@ def _job(request: Request) -> dict:
     if not job:
         raise ApiError(404, "job not found")
     return job
+
+
+def job_workspace(request: Request) -> str | None:
+    """The workspace of the job a worker is working on (X-Job header, set by worker/client.py).
+    Old workers without the header are not scoped (None) — a warning is logged once per worker."""
+    jid = request.headers.get("x-job")
+    if not jid:
+        return None
+    job = db.get("jobs", jid)
+    if not job:
+        raise ApiError(403, "job not found")
+    p = db.get("projects", job["project_id"])
+    return p["workspace_id"] if p else None
 
 
 @require_worker
@@ -65,6 +79,11 @@ async def done(request: Request):
     with db.tx() as c:
         db.update(c, "jobs", job["id"], {"status": "done", "result": result, "progress": 100,
                                          "message": "पूरा", "finished_at": db.now()})
+        if result.get("llm_calls") and job["kind"] != "render":  # render counts its own calls in after_job
+            from .. import saas
+            p = db.get("projects", job["project_id"])
+            if p:
+                saas.add_usage(c, p["workspace_id"], ai_calls=int(result["llm_calls"]))
         service.after_job(c, job, result)
     return ok()
 
@@ -91,6 +110,11 @@ async def file(request: Request):
     a = db.get("assets", request.path_params["asset_id"])
     if not a:
         raise ApiError(404, "asset not found")
+    ws = job_workspace(request)
+    if ws is not None:
+        p = db.get("projects", a["project_id"])
+        if not p or p["workspace_id"] != ws:
+            raise ApiError(404, "asset not found")
     path = storage.abs_path(a["path"])
     if not path.exists():
         raise ApiError(404, "file missing")

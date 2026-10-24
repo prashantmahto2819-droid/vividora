@@ -1,0 +1,14 @@
+[
+  {"id": "free", "name": "Free (trial)", "order": 0,
+   "price_inr": {"monthly": 0, "quarterly": 0, "annual": 0},
+   "limits": {"ai_credits": 30, "render_minutes": 30, "storage_gb": 5, "max_export_height": 1080,
+              "concurrent_jobs": 1, "premium_voices": false, "music_gen": false, "templates": 10}},
+  {"id": "creator", "name": "Creator", "order": 1,
+   "price_inr": {"monthly": 0, "quarterly": 0, "annual": 0},
+   "limits": {"ai_credits": 300, "render_minutes": 300, "storage_gb": 50, "max_export_height": 1080,
+              "concurrent_jobs": 1, "premium_voices": true, "music_gen": false, "templates": 100}},
+  {"id": "studio", "name": "Studio", "order": 2,
+   "price_inr": {"monthly": 0, "quarterly": 0, "annual": 0},
+   "limits": {"ai_credits": 1500, "render_minutes": 1500, "storage_gb": 250, "max_export_height": 2160,
+              "concurrent_jobs": 2, "premium_voices": true, "music_gen": true, "templates": 1000}}
+]

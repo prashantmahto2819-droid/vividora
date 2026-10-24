@@ -56,7 +56,22 @@ def current_user(request: Request) -> dict:
     user = db.get("users", data["sub"])
     if not user or not user["active"]:
         raise ApiError(401, "account disabled")
+    if int(data.get("tv", 0)) != int(user.get("token_version") or 0):
+        raise ApiError(401, "session खत्म — फिर login करें")
     return user
+
+
+def client_ip(request: Request) -> str:
+    # behind the Cloudflare tunnel the real address is in CF-Connecting-IP
+    return (request.headers.get("cf-connecting-ip") or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+            or (request.client.host if request.client else "?"))
+
+
+def rate_limit(request: Request, bucket: str, per_minute: int, burst: int | None = None) -> None:
+    """Per-IP token bucket; raises 429 in Hindi. Always on (cheap, in-memory)."""
+    from .. import saas
+    if not saas.rate_ok(f"{bucket}:{client_ip(request)}", per_minute, burst):
+        raise ApiError(429, "बहुत जल्दी-जल्दी कोशिश — एक मिनट रुककर फिर करें")
 
 
 def require(role: str = "viewer"):
@@ -68,7 +83,14 @@ def require(role: str = "viewer"):
             user = current_user(request)
             if ROLE_RANK[user["role"]] < ROLE_RANK[role]:
                 raise ApiError(403, f"{role} की अनुमति चाहिए")
-            return await fn(request, *a, user=user, **kw)
+            from .. import saas
+            saas.set_workspace(user["workspace_id"])  # AI credits are counted against this workspace
+            try:
+                return await fn(request, *a, user=user, **kw)
+            except saas.QuotaError as e:
+                raise ApiError(402, str(e), quota=e.code)
+            finally:
+                saas.set_workspace(None)
 
         return wrapper
 

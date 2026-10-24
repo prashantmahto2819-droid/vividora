@@ -534,6 +534,9 @@ def after_job(c, job: dict, result: dict) -> None:
 
     elif kind == "render":
         sig = (job.get("payload") or {}).get("edit_sig")
+        from . import saas
+        saas.add_usage(c, project["workspace_id"], render_seconds=sum(float((f.get("meta") or {}).get("duration") or 0) for f in result.get("files", [])),
+                       ai_calls=int(result.get("llm_calls") or 0))
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], f.get("label"), keep_path=f["path"])
             add_asset(c, pid, f["kind"], f["path"], label=f.get("label"), mime=f.get("mime"),
@@ -618,6 +621,16 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
     if opts["caption_style"] not in caption_styles():
         raise ValueError("unknown caption style")
     opts["export"] = encode.normalize(opts.get("export"))
+    # plan limits (SAAS_MODE): export height + render minutes of the period
+    from . import saas
+    out_h = max([int(platforms()[p].get("height") or 0) for p in opts["presets"]] + [int(opts["export"].get("height") or 0)])
+    if opts["export"].get("resolution") not in (None, "", "source", "custom"):
+        try:
+            out_h = max(out_h, int(str(opts["export"]["resolution"]).rstrip("p")))
+        except ValueError:
+            pass
+    out_sec = float(((project.get("edl") or {}).get("stats") or {}).get("output_seconds") or (project.get("meta") or {}).get("duration") or 0)
+    saas.check_export(project["workspace_id"], out_h, out_sec * len(opts["presets"]))
     new_settings = {**project.get("settings", {}), "render": opts}
     db.update(c, "projects", pid, {"settings": new_settings, "updated_at": db.now()})
     body = (opts.get("effects") or {}).get("body") or {}

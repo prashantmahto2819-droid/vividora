@@ -49,6 +49,9 @@ async def _scheduler():
             await run_in_threadpool(radar_job.tick)
             from . import retention_job  # YouTube retention/CTR cache: daily for recent videos (≥ 6 h apart)
             await run_in_threadpool(retention_job.tick)
+            from . import backup  # one SQLite backup per day (DATA_ROOT/backups, pushed to the archive remote)
+            if backup.due():
+                await run_in_threadpool(backup.run)
         except Exception as e:  # noqa: BLE001
             log.warning("scheduler: %s", e)
         await asyncio.sleep(3600)
@@ -73,6 +76,13 @@ def create_app() -> Starlette:
     logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings.media_root.mkdir(parents=True, exist_ok=True)
+    from .security import default_secrets_in_use
+    weak = default_secrets_in_use()
+    if weak and settings.saas_mode:
+        raise SystemExit(f"SAAS_MODE=1 के साथ default/छोटे {', '.join(weak)} नहीं चल सकते — .env में 32+ अक्षर के random values डालें "
+                         "(python3 -c \"import secrets;print(secrets.token_urlsafe(48))\")")
+    if weak:
+        log.warning("⚠ %s default/कमज़ोर है — public करने से पहले .env में बदलें", ", ".join(weak))
     db.init()
     ensure_admin()
     from .bootstrap import ensure_starter
@@ -87,6 +97,8 @@ def create_app() -> Starlette:
     api_routes += compress_api.routes  # standalone video compressor
     from .api import themes_api
     api_routes += themes_api.routes  # one-click themes
+    from .api import saas_api
+    api_routes += saas_api.routes  # plans / usage / Razorpay / admin (inert without SAAS_MODE)
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))
@@ -114,7 +126,29 @@ def create_app() -> Starlette:
                 await send(msg)
             return await self.app(scope, receive, send2)
 
-    middleware = [Middleware(_Revalidate)]
+    class _RateLimit:
+        """Per-IP token buckets for the abuse-prone routes (auth, uploads, hooks). Always on, in-memory."""
+        BUCKETS = (("/api/auth/", 60, 90), ("/api/uploads", 600, 900), ("/api/library", 300, 400), ("/api/hooks/", 120, 120))
+
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http":
+                path = scope.get("path", "")
+                for prefix, per_min, burst in self.BUCKETS:
+                    if path.startswith(prefix):
+                        from . import saas
+                        hdrs = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+                        ip = hdrs.get("cf-connecting-ip") or (hdrs.get("x-forwarded-for") or "").split(",")[0].strip() \
+                            or (scope.get("client") or ("?",))[0]
+                        if not saas.rate_ok(f"mw:{prefix}:{ip}", per_min, burst):
+                            resp = JSONResponse({"error": "बहुत जल्दी-जल्दी request — एक मिनट रुकें"}, status_code=429)
+                            return await resp(scope, receive, send)
+                        break
+            return await self.app(scope, receive, send)
+
+    middleware = [Middleware(_Revalidate), Middleware(_RateLimit)]
     if settings.cors_origins:
         middleware.append(Middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                                      allow_methods=["*"], allow_headers=["*"], allow_credentials=True))

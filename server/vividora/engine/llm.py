@@ -83,8 +83,11 @@ def ask_json(prompt: str, *, system: str = "", max_tokens: int = 2048, timeout: 
             return json.loads(cf.read_text())
         except ValueError:
             pass
+    if not _gate():
+        return None
     res = _ask(which, prompt, system=system, max_tokens=max_tokens, timeout=timeout)
     _stat("calls")
+    _count()
     if use_cache and res is not None:
         try:
             cf.write_text(json.dumps(res, ensure_ascii=False))
@@ -94,6 +97,32 @@ def ask_json(prompt: str, *, system: str = "", max_tokens: int = 2048, timeout: 
 
 
 LAST_ERROR = ""   # shown in the UI when AI falls back to templates
+BUDGET = 10**9    # worker: AI calls allowed for the current job's workspace (set from the claim); API: via saas
+
+
+def _gate() -> bool:
+    global LAST_ERROR
+    try:
+        from .. import saas
+        if not saas.llm_gate():
+            LAST_ERROR = "AI credits इस महीने के पूरे हो गए — plan बढ़ाएँ"
+            return False
+    except Exception:  # noqa: BLE001 — worker process without DB access: use the claim-time budget
+        pass
+    if BUDGET <= 0:
+        LAST_ERROR = "AI credits इस महीने के पूरे हो गए — plan बढ़ाएँ"
+        return False
+    return True
+
+
+def _count() -> None:
+    global BUDGET
+    BUDGET -= 1
+    try:
+        from .. import saas
+        saas.llm_count(1)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _gemini_models_auto() -> str | None:

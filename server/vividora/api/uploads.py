@@ -21,6 +21,8 @@ async def start(request: Request, user: dict):
     size = int(data["size"])
     if size <= 0 or size > MAX_UPLOAD:
         raise ApiError(422, "file size out of range")
+    from .. import saas
+    saas.check_storage(db.conn(), p["workspace_id"], size)
     name = storage.safe_name(data["filename"], "recording.mp4")
     if "." + name.rsplit(".", 1)[-1].lower() not in ALLOWED_EXT:
         raise ApiError(422, "सिर्फ़ वीडियो/ऑडियो फ़ाइलें (mp4, mov, mkv, webm, wav, mp3…)")
@@ -105,6 +107,14 @@ async def finish(request: Request, user: dict):
     received = path.stat().st_size if path.exists() else 0
     if received != up["size"]:
         raise ApiError(409, "file incomplete", received=received)
+    # the bytes must be a real media file (a renamed .exe/.html is refused and deleted)
+    try:
+        storage.validate_media(path, "video")
+    except ApiError:
+        path.unlink(missing_ok=True)
+        with db.tx() as c:
+            c.execute("DELETE FROM uploads WHERE id = ?", (up["id"],))
+        raise
     data = await body(request)
     is_clip = up["filename"].startswith("clip")
     with db.tx() as c:

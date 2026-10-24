@@ -19,7 +19,8 @@ from typing import Any, Iterator
 from .config import settings
 
 JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info", "secrets", "extra",
-             "metrics", "retention", "dropinfo"}
+             "metrics", "retention", "dropinfo", "limits", "price_inr"}
+ENCRYPTED = {("connections", "secrets")}  # JSON columns kept encrypted at rest (crypto.py)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -108,6 +109,30 @@ CREATE TABLE IF NOT EXISTS yt_analytics (
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, price_inr TEXT NOT NULL DEFAULT '{}', limits TEXT NOT NULL DEFAULT '{}',
+  active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  plan_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'trialing', cycle TEXT NOT NULL DEFAULT 'monthly',
+  period_start TEXT, period_end TEXT, trial_end TEXT, razorpay_subscription_id TEXT, razorpay_customer_id TEXT,
+  meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS subscriptions_ws ON subscriptions(workspace_id, created_at);
+CREATE TABLE IF NOT EXISTS usage (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  period TEXT NOT NULL, ai_calls INTEGER NOT NULL DEFAULT 0, render_seconds INTEGER NOT NULL DEFAULT 0,
+  storage_bytes INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, UNIQUE(workspace_id, period));
+CREATE TABLE IF NOT EXISTS invoices (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  subscription_id TEXT, plan_id TEXT, amount_inr REAL NOT NULL DEFAULT 0, gst_inr REAL NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'INR', status TEXT NOT NULL DEFAULT 'paid', razorpay_payment_id TEXT UNIQUE,
+  period_start TEXT, period_end TEXT, meta TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS invites (
+  code TEXT PRIMARY KEY, workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE, role TEXT NOT NULL DEFAULT 'editor',
+  email TEXT, created_by TEXT, uses_left INTEGER NOT NULL DEFAULT 1, expires_at TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS billing_events (
+  id TEXT PRIMARY KEY, provider TEXT NOT NULL, event TEXT NOT NULL, external_id TEXT, workspace_id TEXT,
+  payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS themes (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL, settings TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -159,6 +184,10 @@ MIGRATIONS = [
     ("library", "source", "TEXT"),
     ("library", "license", "TEXT"),
     ("jobs", "run_after", "TEXT"),
+    ("users", "token_version", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "verified", "INTEGER NOT NULL DEFAULT 1"),
+    ("users", "verify_token", "TEXT"),
+    ("workspaces", "owner_id", "TEXT"),
 ]
 
 
@@ -183,6 +212,14 @@ def init() -> None:
                 ch = (cid,)
             for t in ("projects", "connections", "ideas", "refs", "library"):
                 c.execute(f"UPDATE {t} SET channel_id = ? WHERE workspace_id = ? AND channel_id IS NULL", (ch[0], ws[0]))
+        # secrets at rest: plaintext rows from older versions are encrypted once
+        from . import crypto
+        if crypto.available():
+            for r in c.execute("SELECT id, secrets FROM connections").fetchall():
+                if not crypto.is_encrypted(r[1]):
+                    c.execute("UPDATE connections SET secrets = ? WHERE id = ?", (crypto.encrypt_json(json.loads(r[1] or "{}")), r[0]))
+        from . import saas
+        saas.seed_plans(c)
 
 
 @contextmanager
@@ -204,6 +241,10 @@ def row(r: sqlite3.Row | None) -> dict[str, Any] | None:
     d = dict(r)
     for k in JSON_COLS & d.keys():
         v = d[k]
+        if k == "secrets" and isinstance(v, str) and v.startswith("enc:"):
+            from . import crypto
+            d[k] = crypto.decrypt_json(v)
+            continue
         d[k] = json.loads(v) if isinstance(v, str) else v
     for k in ("active", "done", "archived"):
         if k in d:
@@ -223,11 +264,18 @@ def enc(v: Any) -> Any:
     return v
 
 
+def _enc_col(table: str, col: str, v: Any) -> Any:
+    if (table, col) in ENCRYPTED and isinstance(v, (dict, list)):
+        from . import crypto
+        return crypto.encrypt_json(v)
+    return enc(v)
+
+
 def insert(c: sqlite3.Connection, table: str, data: dict[str, Any]) -> dict[str, Any]:
     cols = list(data)
     c.execute(
         f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
-        [enc(data[k]) for k in cols],
+        [_enc_col(table, k, data[k]) for k in cols],
     )
     return data
 
@@ -236,7 +284,7 @@ def update(c: sqlite3.Connection, table: str, id_: str, data: dict[str, Any], ke
     if not data:
         return 0
     sets = ", ".join(f"{k} = ?" for k in data)
-    cur = c.execute(f"UPDATE {table} SET {sets} WHERE {key} = ?", [*(enc(v) for v in data.values()), id_])
+    cur = c.execute(f"UPDATE {table} SET {sets} WHERE {key} = ?", [*(_enc_col(table, k, v) for k, v in data.items()), id_])
     return cur.rowcount
 
 

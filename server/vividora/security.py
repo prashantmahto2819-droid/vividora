@@ -53,8 +53,32 @@ def read_token(token: str, *, kind: str) -> dict | None:
     return data if data.get("kind") == kind else None
 
 
-def access_token(user_id: str) -> str:
-    return make_token(user_id, kind="access", hours=settings.access_token_hours)
+def access_token(user_id: str, version: int = 0) -> str:
+    """`tv` = the user's token_version: "logout everywhere" bumps it and every older token dies."""
+    return make_token(user_id, kind="access", hours=settings.access_token_hours, extra={"tv": int(version or 0)})
+
+
+PASSWORD_MIN = 8
+
+
+def password_problem(pw: str) -> str | None:
+    """Hindi reason why a password is too weak, or None."""
+    if len(pw or "") < PASSWORD_MIN:
+        return f"password कम से कम {PASSWORD_MIN} अक्षर का हो"
+    if pw.lower() in {"password", "12345678", "qwertyui", "11111111", "vividora"}:
+        return "यह password बहुत आम है"
+    if not any(ch.isdigit() for ch in pw) or not any(ch.isalpha() for ch in pw):
+        return "password में अक्षर और अंक दोनों हों"
+    return None
+
+
+def default_secrets_in_use() -> list[str]:
+    bad = []
+    if settings.secret_key == "dev-only-change-me" or len(settings.secret_key) < 32:
+        bad.append("SECRET_KEY")
+    if settings.worker_token == "dev-worker-token" or len(settings.worker_token) < 16:
+        bad.append("WORKER_TOKEN")
+    return bad
 
 
 def media_token(asset_id: str, hours: float = 6) -> str:
