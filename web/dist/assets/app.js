@@ -3,6 +3,8 @@ import * as ED from "./editor.js";
 import * as REC from "./record.js";
 import * as TH from "./thumbs.js";
 import * as VO from "./voice.js";
+import * as CHS from "./chars.js";
+import * as SCN from "./scenes.js";
 
 const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null, channels: [], channel: localStorage.getItem("vividora_channel") || "",
             route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null,
@@ -36,6 +38,8 @@ const IC = {
   upload: '<path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
   zip: '<path d="M4 20V8l4-4h12v16z"/><path d="M8 4v4H4"/><path d="M15 20v-5h-4v5"/><path d="M9 9h2M9 12h2"/>',
+  person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  clap: '<path d="M4 9h16v11H4z"/><path d="M4 9l2-5 14 2-2 3"/><path d="M8 4l2 5M13 4.5l2 4.5"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
   bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
   trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
@@ -71,7 +75,7 @@ function toast(msg, ms = 2600) { const t = document.createElement("div"); t.clas
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress|characters|scenes)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -112,12 +116,12 @@ function schedulePoll() {
   if (busy || anyBusy || compBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy ? 2500 : 6000);
 }
 // a background poll must never wipe a form someone is filling in: the upload/montage page keeps chosen files in memory
-function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
+function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "characters", "scenes"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
 
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
-  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["compress", "#/compress", "zip", "Compress", 1]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1]]],
   ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
@@ -189,13 +193,13 @@ function render() {
     return;
   }
   app.dataset.mode = "shell"; ED.unmount();
-  const views = { compress: compressView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
+  const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
                   thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }) };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 

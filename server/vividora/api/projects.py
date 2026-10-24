@@ -52,6 +52,16 @@ async def list_projects(request: Request, user: dict):
 async def create_project(request: Request, user: dict):
     data = await body(request)
     need(data, "title")
+    p = new_project_row(user, data)
+    with db.tx() as c:
+        db.insert(c, "projects", p)
+        service.log(c, user["workspace_id"], "project.create", user_id=user["id"], project_id=p["id"],
+                    detail={"title": p["title"]})
+    return ok(service.project_view(p), 201)
+
+
+def new_project_row(user: dict, data: dict) -> dict:
+    """A project row with the channel's brand kit / render defaults applied (not yet inserted)."""
     channel = get_channel(user["workspace_id"], data.get("channel_id"))
     ws_settings = channel_settings(user["workspace_id"], channel["id"] if channel else None)
     brand = ws_settings.get("brand", {}) or {}
@@ -83,11 +93,7 @@ async def create_project(request: Request, user: dict):
                       # one-click theme (presets/themes or a saved one) — autopilot applies it at the plan stage
                       "theme_id": str(data.get("theme_id") or "")[:40]},
          "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
-    with db.tx() as c:
-        db.insert(c, "projects", p)
-        service.log(c, user["workspace_id"], "project.create", user_id=user["id"], project_id=p["id"],
-                    detail={"title": p["title"]})
-    return ok(service.project_view(p), 201)
+    return p
 
 
 def _with_urls(view: dict) -> dict:

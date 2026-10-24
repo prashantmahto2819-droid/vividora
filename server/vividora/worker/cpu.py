@@ -304,6 +304,26 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 qa_warn = qa_warn + [f"{len(effects['_cutout_missing'])} overlay का cutout अभी नहीं बना — वह पूरा clip दिखा"]
             return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn + qa_warn}
 
+        if kind == "explainer":
+            # Character Studio: storyboard → voices + scene backgrounds (the main video) + lip-synced
+            # character clips (overlays); then the same prepare step every upload gets
+            from ..engine.chars import storyboard
+            prog = _progress(client, job["id"])
+            r = storyboard.build(job["payload"].get("storyboard") or {}, tmp / "story", on_progress=lambda f, m: prog(f * 0.8, m))
+            raw_up = client.upload(job["id"], r["bg_video"], "raw")
+            files = [{"kind": "raw", "path": raw_up["path"], "mime": "video/mp4", "meta": {"explainer": True}}]
+            out = prepare.prepare(r["bg_video"], tmp / "prep", denoise=False, on_progress=lambda f, m: prog(0.8 + f * 0.15, m))
+            for f in out["files"]:
+                up = client.upload(job["id"], f["path"], f["kind"])
+                files.append({"kind": f["kind"], "path": up["path"], "mime": f.get("mime"), "meta": f.get("meta", {})})
+            overlays = []
+            for i, ov in enumerate(r["overlays"]):
+                prog(0.95 + 0.04 * i / max(1, len(r["overlays"])), f"upload {ov['label']}")
+                up = client.upload(job["id"], Path(ov["path"]), "charclip", ov["label"])
+                overlays.append({**{k: v for k, v in ov.items() if k != "path"}, "path": up["path"]})
+            return {"meta": {**out["meta"], "explainer": True, "scenes": r["scenes"], "storyboard": r["spec"]}, "files": files,
+                    "overlays": overlays, "transcript": r["transcript"], "duration": r["duration"]}
+
         if kind == "compress":
             from ..engine import compress as cmp
             pl = job["payload"] or {}
@@ -541,7 +561,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan", "compress"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan", "compress", "explainer"]
     try:
         if not os.getenv("VIVIDORA_MATTE_MOCK"):
             import onnxruntime  # noqa: F401
