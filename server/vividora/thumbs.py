@@ -149,7 +149,7 @@ def _paths(project: dict, s: dict) -> dict:
 # ---------------------------------------------------------------- render / save
 def clean_settings(s: dict | None) -> dict:
     s = dict(s or {})
-    s["size"] = s.get("size") if s.get("size") in T.SIZES else "yt"
+    s["size"] = s.get("size") if s.get("size") in T.FORMATS else "yt"
     if s.get("template") not in T.TEMPLATE_IDS:
         s["template"] = "face_right"
     s["text"] = str(s.get("text") or "")[:160]
@@ -179,7 +179,7 @@ def clean_settings(s: dict | None) -> dict:
     if not isinstance(s.get("bg"), dict):
         s["bg"] = {}
     lay = s.get("layout")
-    s["layout"] = {k: v for k, v in lay.items() if k in T.SIZES and isinstance(v, dict)} if isinstance(lay, dict) else {}
+    s["layout"] = {k: v for k, v in lay.items() if k in T.FORMATS and isinstance(v, dict)} if isinstance(lay, dict) else {}
     s.setdefault("cutout", True)
     return s
 
@@ -237,6 +237,10 @@ def render_layers(project: dict, settings: dict, have: list | None = None) -> di
     `have` = sprite hashes the browser already holds (those come back without pixels)."""
     have = set(str(h) for h in (have or [])[:400])
     img, info, warnings = _render(project, settings, layers=True)
+    return _pack_layers(img, info, warnings, have)
+
+
+def _pack_layers(img, info: dict, warnings: list, have: set) -> dict:
     pack = info.pop("_layers")
     W, H = info["width"], info["height"]
     base = pack["base"]
@@ -250,7 +254,7 @@ def render_layers(project: dict, settings: dict, have: list | None = None) -> di
                "box": [ly["x"] / W, ly["y"] / H, im.width / W, im.height / H],
                "frame": [float(cx) / W, float(cy) / H, w / W, h / H, float(rot)],
                "anchor": [float(ly["anchor"][0]) / W, float(ly["anchor"][1]) / H], "s": float(ly.get("s", 1.0))}
-        for k in ("uid", "edit"):
+        for k in ("uid", "edit", "op"):
             if ly.get(k) is not None:
                 row[k] = ly[k]
         if hh not in have:
@@ -259,6 +263,70 @@ def render_layers(project: dict, settings: dict, have: list | None = None) -> di
     return {"w": W, "h": H, "base": {"hash": bh, **({} if bh in have else {"src": _data_url(base, "jpeg")})},
             "layers": out_layers, "hidden": pack["hidden"], "warnings": warnings,
             "info": {k: info.get(k) for k in ("font_px", "contrast", "cutout", "t", "words", "template", "size")}}
+
+
+# ---------------------------------------------------------------- template studio (designs without a project)
+def _design_project(workspace_id: str, settings: dict) -> dict:
+    """A project-shaped dict so the library/brand helpers work for a standalone design.
+    settings.src = {"project_id": …, "t": …} borrows a frame (and the cutout) from a real project."""
+    src = settings.get("src") if isinstance(settings.get("src"), dict) else {}
+    if src.get("project_id"):
+        p = db.get("projects", str(src["project_id"]))
+        if p and p["workspace_id"] == workspace_id:
+            return p
+    return {"id": "", "workspace_id": workspace_id, "channel_id": settings.get("channel_id"), "meta": {}, "settings": {}}
+
+
+def _render_design(workspace_id: str, settings: dict, layers: bool = False):
+    s = clean_settings(settings)
+    proj = _design_project(workspace_id, s)
+    frame = alpha = face = None
+    src = s.get("src") if isinstance(s.get("src"), dict) else {}
+    if proj.get("id") and source_video(proj) is not None:
+        try:
+            s["t"] = max(0.0, float(src.get("t") or s.get("t") or 0))
+        except (TypeError, ValueError):
+            s["t"] = 0.0
+        frame = frame_image(proj, s["t"])
+        tmpl = T.template(s["template"], s["size"])
+        if not s.get("no_person") and s.get("cutout", True) and tmpl.get("person") is not None:
+            alpha = _alpha(proj, frame, s["t"])
+        face = _face(proj, frame, s["t"])
+    elif (s.get("bg") or {}).get("frame_id"):  # a library image as the "frame" (person cutout via RVM on it)
+        p = _lib_path(workspace_id, s["bg"]["frame_id"])
+        if p:
+            try:
+                from PIL import Image
+                frame = Image.open(p).convert("RGB")
+                if not s.get("no_person") and s.get("cutout", True):
+                    alpha = T.rvm_alpha(frame)
+                face = T.detect_face(frame)
+            except Exception:  # noqa: BLE001
+                frame = None
+    if frame is None:
+        s["no_person"] = True
+    if s.get("logo") is None and brand(proj).get("logo_id"):
+        s["logo"] = True
+    img, info = T.render(frame, s, alpha=alpha, face=face, paths=_paths(proj, s), layers=layers)
+    warnings = T.lint(s, info, "")
+    return img, {**info, "t": s.get("t", 0)}, warnings
+
+
+def render_design(workspace_id: str, settings: dict, fmt: str = "png") -> tuple[bytes, dict, list[dict]]:
+    img, info, warnings = _render_design(workspace_id, settings)
+    from io import BytesIO
+    buf = BytesIO()
+    if fmt == "jpg":
+        img.save(buf, "JPEG", quality=92, optimize=True)
+    else:
+        img.save(buf, "PNG", optimize=True)
+    return buf.getvalue(), info, warnings
+
+
+def design_layers(workspace_id: str, settings: dict, have: list | None = None) -> dict:
+    have = set(str(h) for h in (have or [])[:400])
+    img, info, warnings = _render_design(workspace_id, settings, layers=True)
+    return _pack_layers(img, info, warnings, have)
 
 
 def asset_view(a: dict, selected: dict | None = None) -> dict:

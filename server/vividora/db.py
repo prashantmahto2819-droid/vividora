@@ -19,7 +19,7 @@ from typing import Any, Iterator
 from .config import settings
 
 JSON_COLS = {"settings", "meta", "transcript", "edl", "payload", "result", "detail", "kinds", "info", "secrets", "extra",
-             "metrics", "retention", "dropinfo"}
+             "metrics", "retention", "dropinfo", "fields", "defaults", "stats"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -111,6 +111,18 @@ CREATE TABLE IF NOT EXISTS workers (
 CREATE TABLE IF NOT EXISTS themes (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL, settings TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS templates (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, format TEXT NOT NULL DEFAULT 'square', industry TEXT, tags TEXT NOT NULL DEFAULT '[]',
+  settings TEXT NOT NULL DEFAULT '{}', fields TEXT NOT NULL DEFAULT '[]', defaults TEXT NOT NULL DEFAULT '{}',
+  preview TEXT, source TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS templates_ws ON templates(workspace_id);
+CREATE TABLE IF NOT EXISTS trend_templates (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  source TEXT NOT NULL DEFAULT 'youtube', source_url TEXT, video_id TEXT, title TEXT, channel TEXT, query TEXT,
+  fetched_at TEXT NOT NULL, stats TEXT NOT NULL DEFAULT '{}', hash TEXT, status TEXT NOT NULL DEFAULT 'draft',
+  note TEXT, template_id TEXT, licence TEXT);
+CREATE INDEX IF NOT EXISTS trend_templates_ws ON trend_templates(workspace_id, fetched_at);
 """
 
 _lock = threading.Lock()

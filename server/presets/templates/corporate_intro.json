@@ -1,0 +1,137 @@
+{
+ "id": "corporate_intro",
+ "name": "Corporate — Intro",
+ "industry": "corporate",
+ "format": "fb",
+ "tags": [
+  "corporate",
+  "ad",
+  "fb"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "address",
+  "cta",
+  "product"
+ ],
+ "defaults": {
+  "business": "आपका business",
+  "price": "₹ 999 से",
+  "phone": "98765 43210",
+  "address": "मुख्य बाज़ार, आपका शहर",
+  "cta": "आज ही call करें",
+  "offer": "हम बनाते हैं *भरोसा*",
+  "tagline": "Professional services"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "fb",
+  "no_person": true,
+  "accent": "#00E5FF",
+  "font": "Inter",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#00E5FF",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0A0F1E",
+   "color2": "#15213B",
+   "angle": 135
+  },
+  "vignette": 0.25,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.34,
+    "y": 0.1,
+    "size": 0.05,
+    "color": "#00E5FF",
+    "font": "Inter"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "pill",
+    "x": 0.8,
+    "y": 0.38,
+    "w": 0.36,
+    "h": 0.22,
+    "fill": 1,
+    "color": "accent",
+    "shadow": 1,
+    "stroke": "#FFFFFF",
+    "stroke_w": 0.012
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.8,
+    "y": 0.38,
+    "size": 0.07,
+    "color": "#111111",
+    "font": "Poppins",
+    "stroke_w": 0
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.8,
+    "y": 0.62,
+    "size": 0.042,
+    "color": "#FFFFFF",
+    "font": "Inter",
+    "bg": "#111111"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.34,
+    "y": 0.84,
+    "size": 0.038,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   },
+   {
+    "uid": "address",
+    "txt": "{{address}}",
+    "x": 0.34,
+    "y": 0.93,
+    "size": 0.028,
+    "color": "#FFFFFF",
+    "font": "Inter"
+   },
+   {
+    "uid": "product",
+    "role": "product",
+    "x": 0.78,
+    "y": 0.42,
+    "w": 0.3,
+    "id": null
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "fb": {
+    "text": {
+     "x": 0.34,
+     "y": 0.45,
+     "s": 0.95
+    },
+    "_order": [
+     "text",
+     "s:pricebox",
+     "s:price",
+     "s:product",
+     "s:business",
+     "s:cta",
+     "s:phone",
+     "s:address"
+    ]
+   }
+  }
+ }
+}

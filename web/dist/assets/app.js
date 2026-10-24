@@ -71,7 +71,7 @@ function toast(msg, ms = 2600) { const t = document.createElement("div"); t.clas
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -98,6 +98,7 @@ async function load() {
   if (r.kind === "trends") { S.trends = await api("GET", "/trends").catch(() => ({ trends: [], setup: {} })); S.radar = S.channel ? await api("GET", `/radar?channel=${S.channel}`).catch(() => null) : null; }
   if (r.kind === "publish") { const [o, p] = await Promise.all([api("GET", "/overview" + ovQ).catch(() => null), api("GET", "/publications" + ovQ).catch(() => [])]); S.overview = o; S.pubs = p; }
   if (r.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
+  if (r.kind === "templates" && !r.id) { const q = S.tplFilter || {}; S.tpls = await api("GET", `/templates?${new URLSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v)))}`).catch(() => ({ templates: [], formats: {}, industries: {}, fields: {} })); if (S.tplTab === "trends") S.trendTpl = await api("GET", "/trends/templates").catch(() => null); }
   if (r.kind === "compress") { const [c, src] = await Promise.all([api("GET", "/compress").catch(() => ({ jobs: [], presets: {} })), api("GET", "/compress/sources").catch(() => [])]); S.comp = c; S.compSrc = src; }
   if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
   if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; S.notify = await api("GET", "/notify").catch(() => null); }
@@ -112,12 +113,12 @@ function schedulePoll() {
   if (busy || anyBusy || compBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy ? 2500 : 6000);
 }
 // a background poll must never wipe a form someone is filling in: the upload/montage page keeps chosen files in memory
-function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
+function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "templates"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
 
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
-  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["compress", "#/compress", "zip", "Compress", 1]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1]]],
   ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
@@ -176,7 +177,14 @@ function render() {
     TH.mount($("#throot"), r.id, { S, api, esc, toast, go });
     return;
   }
-  if ((app.dataset.mode || "").startsWith("thumbs:")) TH.unmount();
+  if (r.kind === "templates" && r.id) {
+    const key = "template:" + r.id;
+    if (app.dataset.mode === key) return;
+    ED.unmount(); app.dataset.mode = key; app.innerHTML = shellHTML(`<div id="throot"></div>`, true); bindShell();
+    TH.mount($("#throot"), null, { S, api, esc, toast, go }, { template: r.id });
+    return;
+  }
+  if ((app.dataset.mode || "").startsWith("thumbs:") || (app.dataset.mode || "").startsWith("template:")) TH.unmount();
   const edKey = S.project ? "editor:" + S.project.id : "";
   // a re-transcribe / re-cut of a project that is already open keeps the editor (it shows the progress and locks editing)
   const reworking = S.project && ["transcribing", "cutting"].includes(S.project.status) && S.project.edl && app.dataset.mode === edKey;
@@ -189,13 +197,13 @@ function render() {
     return;
   }
   app.dataset.mode = "shell"; ED.unmount();
-  const views = { compress: compressView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
+  const views = { compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
                   thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
-  app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends"].includes(r.kind) && !detail);
+  app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
@@ -1054,6 +1062,97 @@ function bindAnalytics() {
 }
 
 // ---------- thumbnails: pick a project ----------
+// ---------- Template studio: gallery, fill form, bulk, trend research ----------
+const TPL_FMT_ICON = { yt: "▭", vertical: "▯", story: "▯", wa: "▯", square: "▢", portrait: "▯", fb: "▭", custom: "⬚" };
+function templatesView() {
+  const d = S.tpls || { templates: [], formats: {}, industries: {}, fields: {} }; const f = S.tplFilter || (S.tplFilter = {}); const canEdit = S.user.role !== "viewer";
+  const tab = S.tplTab || "gallery";
+  const list = d.templates.filter((t) => !f.q || (t.name + " " + (t.tags || []).join(" ")).toLowerCase().includes(f.q.toLowerCase()));
+  const card = (t) => `<div class="tplcard" data-tid="${esc(t.id)}">
+      <a class="tplpv ${t.format}" href="#/templates/${esc(t.id)}" title="खोलें">${t.preview_url ? `<img src="${t.preview_url}" loading="lazy" alt="">` : `<i class="tplph" style="background:${tplSwatch(t)}"><b>${esc((t.settings?.text || "").replace(/[*_{}]/g, "").slice(0, 28) || t.name)}</b></i>`}</a>
+      <div class="tplmeta"><b>${esc(t.name)}</b><span class="small muted">${TPL_FMT_ICON[t.format] || ""} ${esc(d.formats[t.format]?.label || t.format)}${t.industry ? ` · ${esc(d.industries[t.industry] || t.industry)}` : ""}${t.builtin ? " · built-in" : ""}</span></div>
+      <div class="row tplacts"><a class="btn small" href="#/templates/${esc(t.id)}">✎ खोलें</a>${(t.fields || []).length ? `<button class="btn small primary" data-tfill="${esc(t.id)}">✍ भरें</button>` : ""}${canEdit ? `<button class="btn small quiet" data-tcopy="${esc(t.id)}" title="copy बनाएँ">⧉</button>${t.builtin ? "" : `<button class="btn small quiet danger" data-tdel="${esc(t.id)}" title="हटाएँ">🗑</button>`}` : ""}</div></div>`;
+  return `<div class="pghead"><div><h1>Templates</h1><p class="muted small">Thumbnails, posts, stories, ads — एक design हर format में। Built-in industry ad templates को form से भरें, 3 variations लें या CSV से bulk बनाएँ।</p></div>
+      ${canEdit ? `<span class="row"><select id="tpl-newfmt" class="small">${Object.entries(d.formats).map(([k, v]) => `<option value="${k}" ${k === "square" ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select><button class="btn primary" id="tpl-new">+ नया template</button></span>` : ""}</div>
+    <div class="libtabs"><button class="${tab === "gallery" ? "on" : ""}" data-ttab="gallery">Gallery (${d.templates.length})</button><button class="${tab === "trends" ? "on" : ""}" data-ttab="trends">📈 Trend research</button></div>
+    ${tab === "trends" ? trendTplView() : `<div class="libbar"><input id="tpl-q" placeholder="खोजें — clinic, sale, admission…" value="${esc(f.q || "")}">
+      <select id="tpl-fmt"><option value="">सभी formats</option>${Object.entries(d.formats).map(([k, v]) => `<option value="${k}" ${f.format === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
+      <select id="tpl-ind"><option value="">सभी industries</option>${Object.entries(d.industries).map(([k, v]) => `<option value="${k}" ${f.industry === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>
+      <label class="chk small"><input type="checkbox" id="tpl-mine" ${f.mine ? "checked" : ""}> सिर्फ़ मेरे</label></div>
+    <div class="tplgrid2">${list.map(card).join("") || `<p class="muted">कुछ नहीं मिला — filter बदलें या “+ नया template”।</p>`}</div>
+    <div id="tpl-modal"></div>`}`;
+}
+function tplSwatch(t) { const bg = t.settings?.bg || {}; return bg.type === "gradient" ? `linear-gradient(${(bg.angle ?? 90) + 90}deg, ${bg.color || "#223"}, ${bg.color2 || "#446"})` : bg.type === "solid" ? (bg.color || "#223") : "linear-gradient(135deg,#1f2633,#3b4660)"; }
+function trendTplView() {
+  const tr = S.trendTpl; const canEdit = S.user.role !== "viewer";
+  if (!tr) return `<p class="muted small">लोड हो रहा…</p>`;
+  const rp = tr.report || {};
+  return `<div class="box"><div class="row between"><div><b>Niche के winning thumbnails का अध्ययन</b><p class="small muted">YouTube Data API से आपके niche की top videos के thumbnails नापे जाते हैं (text कहाँ, चेहरा, रंग, contrast)। Image copy नहीं होती — सिर्फ़ नाप और link। “original template बनाओ” उसी style का नया design बनाता है।</p></div>
+      ${canEdit ? `<span class="row"><input id="tr-q" placeholder="queries (comma से अलग) — खाली = channel radar की" style="min-width:260px"><button class="btn primary" id="tr-refresh">⟳ Refresh</button></span>` : ""}</div>
+      ${rp.count ? `<div class="stats2 small"><div class="stat"><b>${rp.count}</b><span>thumbnails</span></div><div class="stat"><b>${Math.round(rp.face_share * 100)}%</b><span>चेहरे के साथ</span></div><div class="stat"><b>${Math.round(rp.text_area_avg * 100)}%</b><span>text/busy area</span></div><div class="stat"><b>${rp.text_side}/${rp.text_band}</b><span>text कहाँ</span></div><div class="stat"><b>${Math.round(rp.warm_share * 100)}%</b><span>warm रंग</span></div><div class="stat"><span class="row">${(rp.top_colors || []).map((c) => `<i style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${c}" title="${c}"></i>`).join("")}</span><span>top रंग</span></div></div>` : `<p class="small muted">अभी कोई entry नहीं — Refresh दबाएँ (YT_API_KEY चाहिए)।</p>`}
+      <p class="small muted">${esc(tr.licence || "")}</p></div>
+    ${(tr.entries || []).length ? `<table class="tbl small trtbl"><thead><tr><th>Video</th><th>नाप</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${tr.entries.map((e) => { const st = e.stats || {}; return `<tr>
+      <td><a href="${esc(e.source_url)}" target="_blank" rel="noopener">${esc(e.title || e.video_id)}</a><div class="muted">${esc(e.channel || "")} · ${esc((e.fetched_at || "").slice(0, 10))}${st.views_per_day ? ` · ${st.views_per_day}/दिन` : ""}</div></td>
+      <td>${st.face ? "🙂 चेहरा" : "— चेहरा नहीं"} · text ${esc(st.text_side || "")}/${esc(st.text_band || "")} · ${Math.round((st.text_area || 0) * 100)}% busy · contrast ${st.contrast}<div class="row">${(st.colors || []).map((c) => `<i style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${c}"></i>`).join("")}</div></td>
+      <td><select data-trst="${e.id}" ${canEdit ? "" : "disabled"}>${tr.statuses.map((x) => `<option ${e.status === x ? "selected" : ""}>${x}</option>`).join("")}</select></td>
+      <td><input data-trnote="${e.id}" value="${esc(e.note || "")}" placeholder="note" ${canEdit ? "" : "disabled"}></td>
+      <td>${e.template_id ? `<a class="btn small" href="#/templates/${e.template_id}">template खोलें</a>` : canEdit ? `<button class="btn small primary" data-trmake="${e.id}">✨ original template बनाओ</button>` : ""}</td></tr>`; }).join("")}</tbody></table>` : ""}`;
+}
+function bindTemplates() {
+  const f = S.tplFilter || (S.tplFilter = {}); const canEdit = S.user.role !== "viewer";
+  $$("[data-ttab]").forEach((b) => (b.onclick = () => { S.tplTab = b.dataset.ttab; load().then(render); }));
+  const q = $("#tpl-q"); if (q) q.oninput = () => { f.q = q.value; $(".tplgrid2").innerHTML = ""; render(); const q2 = $("#tpl-q"); if (q2) { q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); } };
+  const fm = $("#tpl-fmt"); if (fm) fm.onchange = () => { f.format = fm.value; load().then(render); };
+  const ind = $("#tpl-ind"); if (ind) ind.onchange = () => { f.industry = ind.value; load().then(render); };
+  const mine = $("#tpl-mine"); if (mine) mine.onchange = () => { f.mine = mine.checked ? "1" : ""; load().then(render); };
+  const nw = $("#tpl-new"); if (nw) nw.onclick = async () => { const size = $("#tpl-newfmt").value; try { const r = await api("POST", "/templates", { name: "नया template", settings: { template: "headline", size, no_person: true, text: "आपका *text* यहाँ", bg: { type: "gradient", color: "#1F2633", color2: "#3B4660", angle: 120 }, cutout: false, stickers: [] } }); go(`/templates/${r.id}`); } catch (e) { toast(e.message); } };
+  $$("[data-tcopy]").forEach((b) => (b.onclick = async () => { try { const r = await api("POST", `/templates/${b.dataset.tcopy}/duplicate`, {}); toast("copy बनी"); go(`/templates/${r.id}`); } catch (e) { toast(e.message); } }));
+  $$("[data-tdel]").forEach((b) => (b.onclick = async () => { if (!confirm("यह template हटाएँ?")) return; try { await api("DELETE", `/templates/${b.dataset.tdel}`); await load(); render(); } catch (e) { toast(e.message); } }));
+  $$("[data-tfill]").forEach((b) => (b.onclick = () => openFill(b.dataset.tfill)));
+  // trend research
+  const tr = $("#tr-refresh"); if (tr) tr.onclick = async () => { tr.disabled = true; tr.textContent = "ढूँढ रहा…"; try { const qs = ($("#tr-q").value || "").split(",").map((x) => x.trim()).filter(Boolean); const r = await api("POST", "/trends/templates/refresh", { queries: qs, channel_id: S.channel }); toast(r.error ? r.error : `${r.added} नई entries (${r.seen} देखीं, ${r.duplicates || 0} duplicate)`); await load(); render(); } catch (e) { toast(e.message); tr.disabled = false; tr.textContent = "⟳ Refresh"; } };
+  $$("[data-trst]").forEach((sel) => (sel.onchange = () => api("PATCH", `/trends/templates/${sel.dataset.trst}`, { status: sel.value }).then(() => toast("status: " + sel.value)).catch((e) => toast(e.message))));
+  $$("[data-trnote]").forEach((i) => (i.onchange = () => api("PATCH", `/trends/templates/${i.dataset.trnote}`, { note: i.value }).catch((e) => toast(e.message))));
+  $$("[data-trmake]").forEach((b) => (b.onclick = async () => { b.disabled = true; try { const r = await api("POST", `/trends/templates/${b.dataset.trmake}/make`, {}); toast("original template बना"); go(`/templates/${r.id}`); } catch (e) { toast(e.message); b.disabled = false; } }));
+  if (!canEdit) return;
+}
+async function openFill(tid) {
+  const d = S.tpls; const t = d.templates.find((x) => x.id === tid); if (!t) return;
+  const host = $("#tpl-modal"); const lib = (S.lib && S.lib.length ? S.lib : await api("GET", "/library").catch(() => [])); S.lib = lib;
+  const imgs = lib.filter((x) => ["image", "logo", "sticker", "frame"].includes(x.kind) && (x.mime || "").startsWith("image/"));
+  const fields = (t.fields || []).filter((k) => k !== "product"); const hasProduct = (t.fields || []).includes("product");
+  const st = { fields: Object.fromEntries(fields.map((k) => [k, (t.defaults || {})[k] || ""])), product: "", results: [], to: "" };
+  const paint = () => {
+    host.innerHTML = `<div class="ed-modal" id="fill-modal"><div class="modal"><div class="row between"><h2>${esc(t.name)} — भरें</h2><button class="ibtn" id="fill-x">✕</button></div>
+      <div class="irow fillform">${fields.map((k) => `<div class="ifield"><label>${esc(d.fields[k] || k)}</label>${k === "offer" || k === "address" ? `<textarea data-ff="${k}" rows="2">${esc(st.fields[k])}</textarea>` : `<input data-ff="${k}" value="${esc(st.fields[k])}">`}</div>`).join("")}
+        ${hasProduct ? `<div class="ifield"><label>Product / logo image (library)</label><select data-ff="product"><option value="">— कोई नहीं —</option>${imgs.map((x) => `<option value="${x.id}" ${st.product === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>` : ""}
+        <div class="ifield"><label>Format</label><select id="fill-to"><option value="">template जैसा (${esc(d.formats[t.format]?.label || t.format)})</option>${Object.entries(d.formats).filter(([k]) => k !== "custom").map(([k, v]) => `<option value="${k}" ${st.to === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select></div></div>
+      <p class="small muted">*शब्द* = highlight रंग। Offer में Enter = नई लाइन।</p>
+      <div class="row"><button class="btn primary" id="fill-prev">👁 Preview</button><button class="btn" id="fill-var">✨ 3 variations</button><button class="btn quiet" id="fill-edit">✎ Studio में खोलें</button></div>
+      <div class="fillres" id="fill-res">${st.results.map((r, i) => `<div class="fillcard"><img src="${r.url}" alt=""><div class="row"><a class="btn small" href="${r.url}" download="${esc(t.id)}-${i + 1}.png">⬇ PNG</a><button class="btn small quiet" data-fsave="${i}">💾 मेरा template</button></div></div>`).join("")}</div>
+      <h3>Bulk (CSV)</h3><p class="small muted">पहली पंक्ति column नाम: ${fields.map((k) => `<code>${k}</code>`).join(", ")} — हर पंक्ति से एक PNG, सब एक zip में।</p>
+      <div class="row"><textarea id="fill-csv" rows="4" style="flex:1" placeholder="business,offer,phone\nराम किराना,20% छूट,9000000001"></textarea></div>
+      <div class="row" style="margin-top:.4rem"><label class="btn small">⬆ CSV file<input type="file" id="fill-csvf" accept=".csv,text/csv" hidden></label><button class="btn small primary" id="fill-bulk">⬇ Zip बनाएँ</button><span class="small muted" id="fill-bulkmsg"></span></div></div></div>`;
+    $("#fill-x").onclick = () => { host.innerHTML = ""; st.results.forEach((r) => URL.revokeObjectURL(r.url)); };
+    $$("[data-ff]", host).forEach((i) => (i.oninput = i.onchange = () => { if (i.dataset.ff === "product") st.product = i.value; else st.fields[i.dataset.ff] = i.value; }));
+    $("#fill-to").onchange = (e) => { st.to = e.target.value; };
+    const filled = async (n) => { const r = await api("POST", `/templates/${t.id}/fill`, { fields: { ...st.fields, product: st.product }, variations: n }); let out = r.settings; if (st.to) out = await Promise.all(out.map((x) => api("POST", "/templates/adapt", { settings: x, to: st.to }).then((a) => a.settings))); return out; };
+    const renderAll = async (n) => { const b = n ? $("#fill-var") : $("#fill-prev"); b.disabled = true; const old = b.textContent; b.textContent = "बन रहा…";
+      try { const sets = await filled(n); st.results.forEach((r) => URL.revokeObjectURL(r.url)); st.results = [];
+        for (const sset of sets) { const res = await fetch("/api/templates/render", { method: "POST", headers: { authorization: "Bearer " + S.token, "content-type": "application/json" }, body: JSON.stringify({ settings: sset, fmt: "png" }) }); if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText); st.results.push({ url: URL.createObjectURL(await res.blob()), settings: sset }); }
+        paint(); } catch (e) { toast(e.message); b.disabled = false; b.textContent = old; } };
+    $("#fill-prev").onclick = () => renderAll(0); $("#fill-var").onclick = () => renderAll(3);
+    $("#fill-edit").onclick = async () => { try { const sets = await filled(0); const r = await api("POST", "/templates", { name: `${t.name} — ${st.fields.business || "भरा हुआ"}`, settings: sets[0], industry: t.industry, tags: t.tags, source: "fill:" + t.id }); go(`/templates/${r.id}`); } catch (e) { toast(e.message); } };
+    $$("[data-fsave]", host).forEach((b) => (b.onclick = async () => { const r = st.results[+b.dataset.fsave]; try { const x = await api("POST", "/templates", { name: `${t.name} — ${st.fields.business || "variant"} ${+b.dataset.fsave + 1}`, settings: r.settings, industry: t.industry, tags: t.tags, source: "fill:" + t.id }); toast("template save हुआ"); go(`/templates/${x.id}`); } catch (e) { toast(e.message); } }));
+    $("#fill-csvf").onchange = async (e) => { const f = e.target.files[0]; if (f) $("#fill-csv").value = await f.text(); };
+    $("#fill-bulk").onclick = async () => { const csv = $("#fill-csv").value.trim(); if (!csv) return toast("CSV लिखें या file चुनें"); const m = $("#fill-bulkmsg"); m.textContent = "बन रहा… (हर पंक्ति ~1 s)";
+      try { const res = await fetch(`/api/templates/${t.id}/bulk`, { method: "POST", headers: { authorization: "Bearer " + S.token, "content-type": "application/json" }, body: JSON.stringify({ csv, fmt: "png", to: st.to || null }) }); if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+        const u = URL.createObjectURL(await res.blob()); const a = document.createElement("a"); a.href = u; a.download = `${t.id}_bulk.zip`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); m.textContent = "zip download हुआ ✓"; }
+      catch (e) { m.textContent = ""; toast(e.message); } };
+  };
+  paint();
+}
+
 function thumbsPickView() {
   const list = S.projects.filter((p) => p.status !== "uploading");
   return `<div class="pghead"><div><h1>Thumbnails</h1><p class="muted small">किस वीडियो का thumbnail बनाएँ? Publish के समय ★ वाला thumbnail लगता है।</p></div></div>

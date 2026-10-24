@@ -28,6 +28,12 @@ const BADGES = [
   { txt: "नया text", bg: "", color: "#FFFFFF" }];
 const EMOJI = ["🔥", "😱", "😭", "🤯", "💰", "❤️", "👉", "👀", "✅", "❌", "⚡", "💯", "😡", "🙏", "🏆", "⏰", "💔", "🚀"];
 const SNAP_PX = 7;
+// template-studio formats (mirrors server FORMATS; the live list comes from /api/templates)
+const FORMATS = { yt: [1280, 720, "YouTube thumbnail 16:9"], vertical: [1080, 1920, "Shorts / Reels cover 9:16"], story: [1080, 1920, "Story / Reel 9:16"],
+  wa: [1080, 1920, "WhatsApp status 9:16"], square: [1080, 1080, "Instagram post 1:1"], portrait: [1080, 1350, "Instagram portrait 4:5"], fb: [1200, 628, "Facebook post 1.91:1"], custom: [1080, 1080, "Custom size"] };
+function fmtPx(s) { const k = s?.size in FORMATS ? s.size : "yt"; if (k === "custom") { const c = s.custom_size || [1080, 1080]; return [+c[0] || 1080, +c[1] || 1080]; } return FORMATS[k].slice(0, 2); }
+const isTall = () => { const [w, h] = fmtPx(T.s); return w / h < 1.2; };
+const tplMode = () => T?.mode === "tpl";
 
 async function authBlob(path, body, signal) {
   const r = await fetch("/api" + path, { method: body ? "POST" : "GET", headers: { authorization: "Bearer " + T.ctx.S.token, ...(body ? { "content-type": "application/json" } : {}) },
@@ -42,26 +48,38 @@ async function postJSON(path, body, signal) {
   return d;
 }
 
-export async function mount(root, pid, ctx) {
+export async function mount(root, pid, ctx, opts = {}) {
   unmount();
-  T = { root, pid, ctx, p: null, ov: null, frames: [], frameUrls: {}, lib: [], sugg: null, s: null, lint: [], info: {}, timer: null, abort: null,
+  const tpl = opts.template || null;
+  T = { root, pid, ctx, tpl, mode: tpl ? "tpl" : "project", t: null, p: null, ov: null, frames: [], frameUrls: {}, lib: [], sugg: null, s: null, lint: [], info: {}, timer: null, abort: null,
         canEdit: ctx.S.user.role !== "viewer", panel: localStorage.getItem("vividora_thpanel") || "text",
-        view: null, sprites: {}, sel: null, hist: [], hi: -1, drag: null, pend: null, editing: null, pdrag: null };
-  root.innerHTML = `<div class="th-loading"><div class="spin"></div><p class="muted">Thumbnail studio खुल रहा है…</p></div>`;
+        view: null, sprites: {}, sel: null, hist: [], hi: -1, drag: null, pend: null, editing: null, pdrag: null, dirty: false };
+  root.innerHTML = `<div class="th-loading"><div class="spin"></div><p class="muted">${tpl ? "Template studio" : "Thumbnail studio"} खुल रहा है…</p></div>`;
   try {
-    const [p, ov, tp] = await Promise.all([ctx.api("GET", `/projects/${pid}`), ctx.api("GET", `/projects/${pid}/thumbnails`), TPLS ? Promise.resolve(TPLS) : ctx.api("GET", "/thumbnails/templates")]);
-    if (!T || T.pid !== pid) return;
-    TPLS = tp; T.p = p; T.ov = ov; T.frames = ov.frames || [];
-  } catch (e) { root.innerHTML = `<div class="note err">${ctx.esc(e.message)}</div><a class="btn" href="#/thumbs">← वापस</a>`; return; }
-  const sel = T.ov.saved.find((a) => a.selected && a.label === "yt") || T.ov.saved[0];
-  T.s = sel?.meta?.settings ? JSON.parse(JSON.stringify(sel.meta.settings)) : { template: "face_right", size: "yt", t: T.frames[0]?.t || 0, text: "", cutout: true, logo: T.ov.brand_logo };
+    if (tpl) {
+      const [t, tp, lst] = await Promise.all([ctx.api("GET", `/templates/${tpl}`), TPLS ? Promise.resolve(TPLS) : ctx.api("GET", "/thumbnails/templates"), ctx.api("GET", "/templates?mine=1")]);
+      if (!T || T.tpl !== tpl) return;
+      TPLS = tp; T.t = t; T.formats = lst.formats || null; T.p = { title: t.name };
+      T.ov = { saved: [], selected: {}, frames: [], duration: 0, has_video: true, has_alpha: false, brand_logo: false };
+      T.s = JSON.parse(JSON.stringify(t.settings || {})); if (!(T.s.size in FORMATS)) T.s.size = t.format in FORMATS ? t.format : "square";
+      if (T.s.no_person === undefined) T.s.no_person = !(T.s.src?.project_id || T.s.bg?.frame_id);
+    } else {
+      const [p, ov, tp] = await Promise.all([ctx.api("GET", `/projects/${pid}`), ctx.api("GET", `/projects/${pid}/thumbnails`), TPLS ? Promise.resolve(TPLS) : ctx.api("GET", "/thumbnails/templates")]);
+      if (!T || T.pid !== pid) return;
+      TPLS = tp; T.p = p; T.ov = ov; T.frames = ov.frames || [];
+      const sel = T.ov.saved.find((a) => a.selected && a.label === "yt") || T.ov.saved[0];
+      T.s = sel?.meta?.settings ? JSON.parse(JSON.stringify(sel.meta.settings)) : { template: "face_right", size: "yt", t: T.frames[0]?.t || 0, text: "", cutout: true, logo: T.ov.brand_logo };
+    }
+  } catch (e) { root.innerHTML = `<div class="note err">${ctx.esc(e.message)}</div><a class="btn" href="${tpl ? "#/templates" : "#/thumbs"}">← वापस</a>`; return; }
   T.hist = [JSON.stringify(T.s)]; T.hi = 0;
   shell();
   T.onKey = (e) => onKey(e); document.addEventListener("keydown", T.onKey);
   T.onResize = () => drawSel(); window.addEventListener("resize", T.onResize);
-  if (!T.ov.has_video) { $("#th-stage-msg", root).innerHTML = `<div class="note">इस project में अभी वीडियो नहीं है — upload / preview बनने के बाद thumbnail बनेगा।</div>`; return; }
-  loadFrames(false);
-  if (!T.s.text) suggest(true);
+  if (!tpl) {
+    if (!T.ov.has_video) { $("#th-stage-msg", root).innerHTML = `<div class="note">इस project में अभी वीडियो नहीं है — upload / preview बनने के बाद thumbnail बनेगा।</div>`; return; }
+    loadFrames(false);
+    if (!T.s.text) suggest(true);
+  }
   loadLib();
   refresh(0);
 }
@@ -78,20 +96,32 @@ function loadLib() { T.ctx.api("GET", "/library").then((l) => { if (!T) return; 
 // ---------- layout ----------
 function shell() {
   const { esc } = T.ctx; const s = T.s;
-  T.root.innerHTML = `<div class="th">
-    <div class="th-head">
+  const fm = T.formats || Object.fromEntries(Object.entries(FORMATS).map(([k, v]) => [k, { w: v[0], h: v[1], label: v[2] }]));
+  const cs = s.custom_size || fmtPx(s);
+  const head = tplMode() ? `<div class="th-head">
+      <a class="btn quiet small" href="#/templates">← Templates</a>
+      <div class="th-title"><input id="th-name" class="th-name" value="${esc(T.t.name || "")}" maxlength="80" ${T.canEdit ? "" : "disabled"} title="template का नाम"><span class="muted small">${T.t.builtin ? "built-in — save करने पर आपकी copy बनेगी" : esc(T.t.industry || "आपका template")}</span></div>
+      <label class="th-fmt small">Format <select id="th-format" ${T.canEdit ? "" : "disabled"}>${Object.entries(fm).map(([k, v]) => `<option value="${k}" ${(s.size || "yt") === k ? "selected" : ""}>${esc(v.label)} · ${v.w}×${v.h}</option>`).join("")}</select></label>
+      <span id="th-custom" class="row small" style="${s.size === "custom" ? "" : "display:none"}"><input type="number" id="th-cw" value="${cs[0]}" min="200" max="4096" style="width:5.5em"> × <input type="number" id="th-ch" value="${cs[1]}" min="200" max="4096" style="width:5.5em"></span>
+      <span class="grow"></span>
+      ${T.canEdit ? `<button class="btn quiet" id="th-brand" title="Channel का brand kit (रंग, font, logo, @handle) लगाएँ">🎨 Brand</button><button class="btn quiet" id="th-tovideo" title="PNG library में जाएगा और किसी video पर overlay की तरह लग सकता है">🎬 video में</button><button class="btn primary" id="th-save">✓ Save</button>` : ""}
+      <button class="btn quiet" id="th-dl" title="PNG download (पूरे size में)">⬇ PNG</button>
+    </div>` : `<div class="th-head">
       <a class="btn quiet small" href="#/projects/${T.pid}">← project</a>
       <div class="th-title"><h1>Thumbnail studio</h1><span class="muted small">${esc(T.p.title)}</span></div>
       <div class="seg th-size" role="tablist"><button data-size="yt" class="${s.size !== "vertical" ? "on" : ""}">▭ YouTube 16:9</button><button data-size="vertical" class="${s.size === "vertical" ? "on" : ""}">▯ Shorts / Reels 9:16</button></div>
       <span class="grow"></span>
       ${T.canEdit ? `<button class="btn" id="th-var">✨ 3 variants बनाएँ</button><button class="btn primary" id="th-save">✓ Save + चुनें</button>` : ""}
       <button class="btn quiet" id="th-dl" title="अभी का thumbnail (JPG) download करें">⬇</button>
-    </div>
+    </div>`;
+  const [fw, fh] = fmtPx(s);
+  T.root.innerHTML = `<div class="th">
+    ${head}
     <div class="th-grid">
       <section class="th-stage">
         <div id="th-stage-msg"></div>
         <div class="thx-bar" id="thx-bar"></div>
-        <div class="th-canvas thx-stage ${s.size === "vertical" ? "vertical" : ""}" id="thx-stage" tabindex="0" aria-label="thumbnail canvas — क्लिक करके चुनें, खींचकर हिलाएँ">
+        <div class="th-canvas thx-stage ${isTall() ? "vertical" : ""}" id="thx-stage" tabindex="0" aria-label="thumbnail canvas — क्लिक करके चुनें, खींचकर हिलाएँ" style="aspect-ratio:${fw}/${fh}">
           <div class="thx-layers" id="thx-layers"></div>
           <div class="thx-guides" id="thx-guides"></div>
           <div class="thx-sel" id="thx-sel" hidden><i class="h nw" data-h="nw"></i><i class="h ne" data-h="ne"></i><i class="h sw" data-h="sw"></i><i class="h se" data-h="se"></i><i class="rot" data-h="rot" title="घुमाएँ"></i></div>
@@ -101,25 +131,53 @@ function shell() {
         </div>
         <div class="small muted thx-hint">क्लिक = चुनें · खींचें = हिलाएँ · कोने = बड़ा/छोटा · ⟳ = घुमाएँ · double-click = text लिखें · ←↑→↓ / Delete / Ctrl+Z · <b>Alt</b> = snapping बंद</div>
         <div id="th-lint" class="th-lint"></div>
-        <div class="th-block"><div class="row between"><h3>Frame चुनें</h3><span class="row"><span class="small muted">sharpness · चेहरा · आँखें · रोशनी से चुने गए</span><button class="btn quiet small" id="th-fr-refresh" title="दोबारा ढूँढें">⟳</button></span></div>
+        ${tplMode() ? `<div class="th-block"><div class="row between"><h3>Placeholders</h3><span class="small muted">{{business}} जैसे शब्द form से भरते हैं · Templates page पर “भरें” / bulk CSV</span></div><div id="th-fields" class="small muted">${(T.t.fields || []).length ? (T.t.fields || []).map((f) => `<code>{{${esc(f)}}}</code>`).join(" ") : "इस template में placeholder नहीं हैं — text सीधे लिखें"}</div></div>` : `<div class="th-block"><div class="row between"><h3>Frame चुनें</h3><span class="row"><span class="small muted">sharpness · चेहरा · आँखें · रोशनी से चुने गए</span><button class="btn quiet small" id="th-fr-refresh" title="दोबारा ढूँढें">⟳</button></span></div>
           <div class="th-frames" id="th-frames"><div class="small muted">best frames ढूँढे जा रहे हैं…</div></div>
           <div class="th-scrub"><span class="small muted">कोई भी समय</span><input type="range" id="th-t" min="0" max="${Math.max(0.1, T.ov.duration || 0).toFixed(2)}" step="0.05" value="${s.t || 0}"><b class="small" id="th-tl">${fmtT(s.t)}</b></div></div>
-        <div class="th-block"><div class="row between"><h3>Saved · A/B candidates</h3><span class="small muted">★ = publish पर यही जाएगा</span></div><div class="th-saved" id="th-saved"></div></div>
+        <div class="th-block"><div class="row between"><h3>Saved · A/B candidates</h3><span class="small muted">★ = publish पर यही जाएगा</span></div><div class="th-saved" id="th-saved"></div></div>`}
       </section>
       <aside class="th-side">
         <nav class="th-tabs">${[["text", "Text"], ["layout", "Layout"], ["bg", "Background"], ["person", "Person"], ["extras", "Elements"], ["layers", "Layers"]].map(([k, l]) => `<button data-panel="${k}" class="${T.panel === k ? "on" : ""}">${l}</button>`).join("")}</nav>
         <div id="th-panel" class="th-panel"></div>
       </aside>
     </div></div>`;
-  $$("[data-size]", T.root).forEach((b) => (b.onclick = () => { T.s.size = b.dataset.size; $$("[data-size]", T.root).forEach((x) => x.classList.toggle("on", x === b)); $(".th-canvas", T.root).classList.toggle("vertical", T.s.size === "vertical"); select(null); T.view = null; paint(); renderPanel(); refresh(0); renderSaved(); }));
+  $$("[data-size]", T.root).forEach((b) => (b.onclick = () => { T.s.size = b.dataset.size; $$("[data-size]", T.root).forEach((x) => x.classList.toggle("on", x === b)); applyCanvasSize(); select(null); T.view = null; paint(); renderPanel(); refresh(0); renderSaved(); }));
   $$("[data-panel]", T.root).forEach((b) => (b.onclick = () => openPanel(b.dataset.panel)));
-  const tr = $("#th-t", T.root); tr.oninput = () => { $("#th-tl", T.root).textContent = fmtT(+tr.value); }; tr.onchange = () => { T.s.t = +tr.value; markFrames(); refresh(0); };
-  $("#th-fr-refresh", T.root).onclick = () => loadFrames(true);
+  const tr = $("#th-t", T.root); if (tr) { tr.oninput = () => { $("#th-tl", T.root).textContent = fmtT(+tr.value); }; tr.onchange = () => { T.s.t = +tr.value; markFrames(); refresh(0); }; }
+  const fr = $("#th-fr-refresh", T.root); if (fr) fr.onclick = () => loadFrames(true);
   const sv = $("#th-save", T.root); if (sv) sv.onclick = save;
   const vb = $("#th-var", T.root); if (vb) vb.onclick = variants;
   $("#th-dl", T.root).onclick = download;
+  const fsel = $("#th-format", T.root); if (fsel) fsel.onchange = () => changeFormat(fsel.value);
+  const cw = $("#th-cw", T.root), ch = $("#th-ch", T.root); if (cw && ch) cw.onchange = ch.onchange = () => { T.s.custom_size = [Math.max(200, Math.min(4096, +cw.value || 1080)), Math.max(200, Math.min(4096, +ch.value || 1080))]; applyCanvasSize(); T.view = null; paint(); refresh(0); };
+  const nm = $("#th-name", T.root); if (nm) nm.oninput = () => { T.t.name = nm.value; T.dirty = true; };
+  const br = $("#th-brand", T.root); if (br) br.onclick = applyBrand;
+  const tv = $("#th-tovideo", T.root); if (tv) tv.onclick = toVideo;
   bindStage();
   renderBar(); renderPanel(); renderSaved();
+}
+function applyCanvasSize() { const c = $(".th-canvas", T.root); if (!c) return; const [w, h] = fmtPx(T.s); c.classList.toggle("vertical", w / h < 1.2); c.style.aspectRatio = `${w}/${h}`; }
+async function changeFormat(to) {
+  if (!(to in FORMATS)) return;
+  const was = T.s.size;
+  try { const r = await T.ctx.api("POST", "/templates/adapt", { settings: T.s, to }); if (!T) return; T.s = r.settings; }
+  catch (e) { T.ctx.toast(e.message); T.s.size = to; }
+  const cust = $("#th-custom", T.root); if (cust) cust.style.display = to === "custom" ? "" : "none";
+  if (to === "custom" && !T.s.custom_size) T.s.custom_size = fmtPx({ size: was });
+  applyCanvasSize(); select(null); T.view = null; paint(); renderPanel(); refresh(0);
+  T.ctx.toast(`${FORMATS[to][2]} — layers जगह के हिसाब से फिर से जमे; ज़रूरत हो तो खींचकर ठीक करें`);
+}
+async function applyBrand() {
+  try { const r = await T.ctx.api("POST", "/templates/brand", { settings: T.s, channel_id: T.ctx.S.channel }); if (!T) return; T.s = r.settings; renderPanel(); refresh(0); T.ctx.toast(r.brand?.primary ? "brand kit लगा — रंग, font, logo, @handle" : "Channels & Brand में brand kit (रंग / logo) पहले भरें"); }
+  catch (e) { T.ctx.toast(e.message); }
+}
+async function toVideo() {
+  const projects = (T.ctx.S.projects || []).filter((p) => p.status !== "uploading");
+  const pick = projects.length ? prompt(`किस video पर लगाएँ? नंबर लिखें (खाली = सिर्फ़ library में PNG):\n${projects.slice(0, 15).map((p, i) => `${i + 1}. ${p.title}`).join("\n")}`) : "";
+  const pr = pick && projects[+pick - 1] ? projects[+pick - 1] : null;
+  try { const r = await T.ctx.api("POST", "/templates/to-project", { settings: T.s, name: T.t?.name || "design", project_id: pr?.id || null, channel_id: T.ctx.S.channel }); if (!T) return;
+    T.ctx.toast(pr ? `PNG library में गया और “${pr.title}” पर overlay (0–5 s) लगा — editor में जगह/समय बदलें` : "PNG library (images) में save हुआ — editor के Media tab से लगाएँ"); }
+  catch (e) { T.ctx.toast(e.message); }
 }
 function openPanel(k) {
   T.panel = k; try { localStorage.setItem("vividora_thpanel", k); } catch {}
@@ -133,8 +191,8 @@ function swatches(key, cur, opts = {}) {
 function range(key, label, min, max, step, val, fmt = (v) => v) { return field(`${label} <b>${fmt(val)}</b>`, `<input type="range" data-k="${key}" data-fmt="${key}" min="${min}" max="${max}" step="${step}" value="${val}" ${T.canEdit ? "" : "disabled"}>`); }
 function selectBox(key, label, entries, cur, def) { return field(label, `<select data-k="${key}" ${T.canEdit ? "" : "disabled"}>${def != null ? `<option value="">${def}</option>` : ""}${entries.map(([k, v]) => `<option value="${k}" ${String(cur ?? "") === String(k) ? "selected" : ""}>${v}</option>`).join("")}</select>`); }
 function tplOf(id) { return TPLS.templates.find((t) => t.id === id) || TPLS.templates[0]; }
-function tplText(tp) { const v = T.s.size === "vertical"; return { ...(tp.text || {}), ...((v && tp.vertical?.text) || {}) }; }
-function fmtFor(k, v) { v = +v; return k === "bg.dim" || k === "vignette" ? Math.round(v * 100) + "%" : k === "bg.angle" || k === "skew" ? v + "°" : /scale|adj/.test(k) ? v.toFixed(2) + "×" : /_w$/.test(k) && !k.startsWith("person") ? Math.round(v * 100) + "%" : k === "spacing" ? v.toFixed(2) + "em" : k === "line_h" ? v.toFixed(2) + "×" : v; }
+function tplText(tp) { const v = isTall(); return { ...(tp.text || {}), ...((v && tp.vertical?.text) || {}) }; }
+function fmtFor(k, v) { v = +v; if (k.startsWith("@") || k.startsWith("#")) return ["@h"].includes(k) ? v.toFixed(2) : Math.round(v * 100) + "%"; return k === "bg.dim" || k === "vignette" ? Math.round(v * 100) + "%" : k === "bg.angle" || k === "skew" ? v + "°" : /scale|adj/.test(k) ? v.toFixed(2) + "×" : /_w$/.test(k) && !k.startsWith("person") ? Math.round(v * 100) + "%" : k === "spacing" ? v.toFixed(2) + "em" : k === "line_h" ? v.toFixed(2) + "×" : v; }
 
 function renderPanel() {
   const { esc } = T.ctx; const s = T.s; const el = $("#th-panel", T.root); if (!el) return;
@@ -144,8 +202,8 @@ function renderPanel() {
   let html = "";
   if (T.panel === "text") {
     html = `${field("Thumbnail text <span class='muted'>(2–5 शब्द · <b>*शब्द*</b> = highlight · <b>_शब्द_</b> = दूसरा रंग · Enter = नई लाइन · emoji चलेंगे)</span>", `<textarea id="th-text" rows="3" placeholder="3 *बड़ी* गलतियाँ" ${dis}>${esc(s.text || "")}</textarea>`)}
-      <div class="row between"><span class="small muted">AI / title से सुझाव · canvas पर double-click करके भी लिखें</span><button class="btn small" id="th-sugg">✨ सुझाव</button></div>
-      <div class="th-chips" id="th-chips">${(T.sugg?.options || []).map((o, i) => `<button class="chip" data-sg="${i}">${esc(o).replace(/\*([^*]+)\*/g, "<b>$1</b>").replace(/\n/g, " / ")}</button>`).join("") || `<span class="small muted">“सुझाव” दबाएँ</span>`}</div>
+      ${tplMode() ? `<p class="small muted">canvas पर double-click करके भी लिखें · {{offer}} जैसा placeholder रखें तो form से भरेगा</p>` : `<div class="row between"><span class="small muted">AI / title से सुझाव · canvas पर double-click करके भी लिखें</span><button class="btn small" id="th-sugg">✨ सुझाव</button></div>
+      <div class="th-chips" id="th-chips">${(T.sugg?.options || []).map((o, i) => `<button class="chip" data-sg="${i}">${esc(o).replace(/\*([^*]+)\*/g, "<b>$1</b>").replace(/\n/g, " / ")}</button>`).join("") || `<span class="small muted">“सुझाव” दबाएँ</span>`}</div>`}
       <div class="th-row2">${field("Font", `<select data-k="font" ${dis}><option value="">template (${esc(tt.font || "")})</option>${TPLS.fonts.map((f) => `<option ${s.font === f ? "selected" : ""} style="font-family:${FONT_CSS[f] || f}">${f}</option>`).join("")}</select>`)}
         ${field("Style preset", `<select data-k="style" ${dis}><option value="">template (${esc(TPLS.styles[tt.style] || "")})</option>${Object.entries(TPLS.styles).map(([k, v]) => `<option value="${k}" ${s.style === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>`)}</div>
       <div class="thx-align">${[["left", "⯇ बाएँ"], ["center", "≡ बीच"], ["right", "दाएँ ⯈"]].map(([k, l]) => `<button class="btn small ${eff("align", tt.align || "left") === k ? "on" : ""}" data-align="${k}" ${dis}>${l}</button>`).join("")}</div>
@@ -172,7 +230,7 @@ function renderPanel() {
       <label class="chk small"><input type="checkbox" data-k="upper" ${s.upper ? "checked" : ""} ${dis}> English CAPITAL letters</label>
       ${["color", "hl", "accent", "font", "style", ...TEXT_STYLE_KEYS].some((k) => s[k] !== undefined && s[k] !== "") ? `<button class="btn quiet small" id="th-reset-text">↺ template का text style</button>` : ""}`;
   } else if (T.panel === "layout") {
-    html = `<p class="small muted">Layout चुनें — हर चीज़ बाद में canvas पर खींचकर बदल सकते हैं। हर layout 16:9 और 9:16 दोनों में बनता है।</p>
+    html = `<p class="small muted">Layout चुनें — हर चीज़ बाद में canvas पर खींचकर बदल सकते हैं। ${tplMode() ? "चौड़े formats 16:9 वाला layout, खड़े/square 9:16 वाला लेते हैं।" : "हर layout 16:9 और 9:16 दोनों में बनता है।"}</p>
       <div class="th-tpls">${TPLS.templates.map((t) => tplCard(t)).join("")}</div>
       <label class="chk small" style="margin-top:.6rem"><input type="checkbox" data-k="flip" ${s.flip ? "checked" : ""} ${dis}> ⇆ उल्टा करें (चेहरा दूसरी तरफ़)</label>
       ${tp.labels?.length ? field("Labels", `<div class="th-row2">${tp.labels.map((l, i) => `<input data-label="${i}" value="${esc((s.labels || [])[i] || l.text)}" ${dis}>`).join("")}</div>`) : ""}
@@ -186,6 +244,9 @@ function renderPanel() {
       ${bg.type === "blur" ? range("bg.blur", "धुँधलापन", 4, 60, 2, bg.blur ?? 22) + range("bg.dim", "अंधेरा", 0, 0.85, 0.05, bg.dim ?? 0.4, (v) => Math.round(v * 100) + "%") : ""}
       ${bg.type === "image" ? `<div class="th-libgrid">${imgs.slice(0, 60).map((x) => `<button class="${bg.image_id === x.id ? "on" : ""}" data-bgimg="${x.id}" title="${esc(x.name)}"><img src="${x.url}" loading="lazy" alt="" draggable="false"></button>`).join("") || `<p class="small muted">Library में image upload करें।</p>`}</div>` : ""}
       <div class="row"><label class="btn small">⬆ अपनी image<input type="file" accept="image/png,image/jpeg,image/webp" id="thx-bgup" hidden></label><button class="btn small" id="thx-aibg">✨ AI background prompt</button></div>
+      ${tplMode() ? `<h4>Photo / person</h4><p class="small muted">Library की किसी photo को “frame” बनाएँ — layout के person cutout और blur/photo backgrounds उसी से बनेंगे।</p>
+        <div class="th-libgrid">${imgs.slice(0, 40).map((x) => `<button class="${bg.frame_id === x.id ? "on" : ""}" data-frameimg="${x.id}" title="${esc(x.name)}"><img src="${x.url}" loading="lazy" alt="" draggable="false"></button>`).join("") || `<p class="small muted">Library में photo upload करें।</p>`}</div>
+        ${bg.frame_id ? `<div class="row"><label class="chk small"><input type="checkbox" id="thx-noperson" ${s.no_person ? "checked" : ""}> बिना person cutout (सिर्फ़ background)</label><button class="btn small quiet" id="thx-frameoff">✕ photo हटाएँ</button></div>` : ""}` : ""}
       <div id="thx-aiprompt"></div>
       ${selectBox("overlay", "रोशनी / texture", Object.entries(TPLS.overlays || {}).filter(([k]) => k), s.overlay ?? "", `template जैसा${tp.overlay ? ` (${esc(TPLS.overlays?.[tp.overlay] || tp.overlay)})` : ""}`)}
       ${selectBox("grade", "Colour grade", Object.entries(TPLS.grades || {}), s.grade, `template जैसा${tp.grade ? ` (${esc(TPLS.grades?.[tp.grade] || tp.grade)})` : ""}`)}
@@ -217,16 +278,25 @@ function elementsPanel() {
   const { esc } = T.ctx; const s = T.s; const dis = T.canEdit ? "" : "disabled";
   const stk = T.lib.filter((x) => x.kind === "sticker" && /(shape|emoji|arrow|social)/.test(x.tags || ""));
   const mine = T.lib.filter((x) => ["sticker", "image", "logo"].includes(x.kind) && !/(shape|emoji|arrow|social)/.test(x.tags || "")).slice(0, 30);
-  const st = selSticker();
-  const selHtml = st ? `<div class="thx-selprops"><b class="small">चुना हुआ: ${esc(selLayer()?.name || "")}</b>
-      ${st.shape || st.txt != null ? field("रंग", swatches("@color", st.color || "")) : ""}
-      ${st.txt != null && !isEmoji(st.txt) ? field("पीछे पट्टी", swatches("@bg", st.bg || "", { none: true })) + field("Font", `<select id="thx-stfont">${TPLS.fonts.map((f) => `<option ${(st.font || "Mukta") === f ? "selected" : ""}>${f}</option>`).join("")}</select>`) : ""}
-      ${["rect", "burst", "circle"].includes(st.shape) && st.shape !== "circle" ? `<label class="chk small"><input type="checkbox" id="thx-stfill" ${st.fill ? "checked" : ""}> भरा हुआ (fill)</label>` : ""}</div>` : "";
+  const st = selSticker(); const L = selLayer(); const ov = L ? (T.s.layout?.[sizeKey()]?.[L.id] || {}) : {};
+  const simple = st && ["rrect", "disc", "line", "pill"].includes(st.shape);
+  const selHtml = L ? `<div class="thx-selprops"><b class="small">चुना हुआ: ${esc(L.name || "")}</b>
+      ${st && (st.shape || st.txt != null) ? field("रंग", swatches("@color", st.color || "")) : ""}
+      ${st && st.txt != null && !isEmoji(st.txt) ? field("पीछे पट्टी", swatches("@bg", st.bg || "", { none: true })) + field("Font", `<select id="thx-stfont">${TPLS.fonts.map((f) => `<option ${(st.font || "Mukta") === f ? "selected" : ""}>${f}</option>`).join("")}</select>`) : ""}
+      ${st && ["rect", "burst"].includes(st.shape) ? `<label class="chk small"><input type="checkbox" id="thx-stfill" ${st.fill ? "checked" : ""}> भरा हुआ (fill)</label>` : ""}
+      ${simple ? field("किनारा (stroke)", swatches("@stroke", st.stroke || "", { none: true })) + (st.stroke ? range("@stroke_w", "किनारे की मोटाई", 0, 0.1, 0.005, st.stroke_w ?? 0.02, (v) => Math.round(v * 100) + "%") : "")
+        + (st.shape !== "disc" && st.shape !== "line" ? range("@radius", "कोने गोल", 0, 0.5, 0.02, st.radius ?? (st.shape === "pill" ? 0.5 : 0.06), (v) => Math.round(v * 100) + "%") : "")
+        + (st.shape !== "disc" ? range("@h", "ऊँचाई / चौड़ाई", 0.02, 2, 0.02, st.h ?? (st.shape === "rrect" ? 0.62 : st.shape === "pill" ? 0.3 : 0.04), (v) => (+v).toFixed(2)) : "")
+        + `<label class="chk small"><input type="checkbox" id="thx-stshadow" ${st.shadow ? "checked" : ""}> shadow</label>` : ""}
+      ${st && st.qr != null ? field("QR का link / text", `<input id="thx-qr" value="${esc(st.qr)}" maxlength="400">`) : ""}
+      ${range("#op", "पारदर्शिता (opacity)", 0.05, 1, 0.05, ov.op ?? 1, (v) => Math.round(v * 100) + "%")}
+      <label class="chk small"><input type="checkbox" id="thx-lock" ${ov.locked ? "checked" : ""}> 🔒 lock (खींचने से बचाएँ)</label>
+      <div class="thx-align"><span class="small muted">Align:</span>${[["l", "⇤"], ["cx", "⇔"], ["r", "⇥"], ["t", "⤒"], ["cy", "⇕"], ["b", "⤓"]].map(([k, l]) => `<button class="btn small" data-alignl="${k}" title="${{ l: "बाएँ", cx: "बीच (आड़ा)", r: "दाएँ", t: "ऊपर", cy: "बीच (खड़ा)", b: "नीचे" }[k]}">${l}</button>`).join("")}</div></div>` : "";
   return `${selHtml}
     <p class="small muted">खींचकर canvas पर छोड़ें (या क्लिक = बीच में)। अपनी PNG / JPG फ़ाइल सीधे canvas पर भी छोड़ सकते हैं।</p>
     <h4>Text badges</h4><div class="thx-items">${BADGES.map((b, i) => `<button class="thx-badge" data-drag="badge:${i}" style="--bg:${b.bg || "transparent"};--fg:${b.color};font-family:${FONT_CSS[b.font || "Mukta"]}">${esc(b.txt)}</button>`).join("")}</div>
     ${TPLS.emoji ? `<h4>Emoji</h4><div class="thx-items emoji">${EMOJI.map((e) => `<button data-drag="emoji:${e}">${e}</button>`).join("")}</div>` : ""}
-    <h4>Shapes</h4><div class="thx-items">${Object.entries(TPLS.shapes).map(([k, v]) => `<button class="btn small" data-drag="shape:${k}">${esc(v)}</button>`).join("")}</div>
+    <h4>Shapes</h4><div class="thx-items">${Object.entries(TPLS.shapes).map(([k, v]) => `<button class="btn small" data-drag="shape:${k}">${esc(v)}</button>`).join("")}${tplMode() ? `<button class="btn small" data-drag="qr:">▦ QR code</button>` : ""}</div>
     <h4>Stickers <span class="small muted">(library)</span></h4>
     <div class="th-libgrid small">${stk.slice(0, 80).map((x) => `<button data-drag="lib:${x.id}" title="${esc(x.name)}"><img src="${x.url}" loading="lazy" alt="" draggable="false"></button>`).join("") || `<span class="small muted">library लोड हो रही है…</span>`}</div>
     ${mine.length ? `<h4>आपकी images</h4><div class="th-libgrid small">${mine.map((x) => `<button data-drag="lib:${x.id}" title="${esc(x.name)}"><img src="${x.url}" loading="lazy" alt="" draggable="false"></button>`).join("")}</div>` : ""}
@@ -245,13 +315,13 @@ function layersPanel() {
   return `<p class="small muted">ऊपर वाली layer सबसे आगे। क्लिक = चुनें · ↑↓ = आगे / पीछे · 👁 = छुपाएँ।</p>
     <div class="thx-layerlist">${rows.map((l) => `<div class="thx-li ${T.sel === l.id ? "on" : ""} ${l.locked ? "locked" : ""}" data-li="${esc(l.id)}">
       <span class="ico">${icon[l.kind] || "▢"}</span><span class="nm">${esc(l.name)}</span>
-      ${l.locked ? `<span class="small muted">effect</span>` : `<button class="btn quiet small" data-lz="${esc(l.id)}:1" title="आगे">↑</button><button class="btn quiet small" data-lz="${esc(l.id)}:-1" title="पीछे">↓</button>${l.uid ? "" : `<button class="btn quiet small" data-lhide="${esc(l.id)}" title="छुपाएँ">👁</button>`}`}</div>`).join("")}
+      ${l.kind === "fx" ? `<span class="small muted">effect</span>` : `<button class="btn quiet small" data-lz="${esc(l.id)}:1" title="आगे">↑</button><button class="btn quiet small" data-lz="${esc(l.id)}:-1" title="पीछे">↓</button><button class="btn quiet small" data-llock="${esc(l.id)}" title="${l.locked ? "unlock" : "lock"}">${l.locked ? "🔒" : "🔓"}</button>${l.uid ? "" : `<button class="btn quiet small" data-lhide="${esc(l.id)}" title="छुपाएँ">👁</button>`}${l.op != null && l.op < 1 ? `<span class="small muted">${Math.round(l.op * 100)}%</span>` : ""}`}</div>`).join("")}
       ${(v.hidden || []).map((h) => `<div class="thx-li hidden"><span class="ico">⦸</span><span class="nm">${esc(h.name)}</span><button class="btn quiet small" data-lshow="${esc(h.id)}">दिखाएँ</button></div>`).join("")}
       <div class="thx-li locked"><span class="ico">▦</span><span class="nm">Background</span><button class="btn quiet small" data-goto="bg">बदलें</button></div></div>`;
 }
 
 function tplCard(t) {
-  const v = T.s.size === "vertical"; const tt = v ? { ...t, ...(t.vertical || {}), person: t.person ? { ...t.person, ...(t.vertical?.person || {}) } : null, text: { ...t.text, ...(t.vertical?.text || {}) } } : t;
+  const v = isTall(); const tt = v ? { ...t, ...(t.vertical || {}), person: t.person ? { ...t.person, ...(t.vertical?.person || {}) } : null, text: { ...t.text, ...(t.vertical?.text || {}) } } : t;
   const acc = t.accent || "#FFD400"; const col = (c) => (c === "accent" ? acc : c);
   const bg = t.bg || {}; const fr = T.frameUrls[(T.frames[0] || {}).t];
   const bgCss = bg.type === "gradient" ? `linear-gradient(${(bg.angle ?? 90) + 90}deg, ${bg.color}, ${bg.color2})` : bg.type === "solid" ? bg.color : fr ? `center/cover url(${fr})` : "#3b4a5e";
@@ -276,7 +346,8 @@ function bindPanel(el) {
     const ev = i.type === "range" ? "input" : i.tagName === "TEXTAREA" || i.type === "text" || (i.tagName === "INPUT" && !i.type.match(/checkbox|color/)) ? "input" : "change";
     i.addEventListener(ev, () => {
       const k = i.dataset.k; let v = i.type === "checkbox" ? i.checked : i.type === "range" ? +i.value : i.value;
-      if (k.startsWith("@")) { const st = selSticker(); if (st) { st[k.slice(1)] = v; refresh(); } return; }
+      if (k.startsWith("@")) { const st = selSticker(); if (st) { st[k.slice(1)] = v; if (i.type === "range") { const b = i.closest(".th-f")?.querySelector("label b"); if (b) b.textContent = fmtFor(k, v); } refresh(); } return; }
+      if (k.startsWith("#")) { const L = selLayer(); if (L) { const o = ovOf(L.id); if (k === "#op" && v >= 1) delete o.op; else o[k.slice(1)] = v; const b = i.closest(".th-f")?.querySelector("label b"); if (b) b.textContent = fmtFor(k, v); refresh(); } return; }
       if (k === "flip") mirrorPlacement();
       setPath(s, k, v);
       if (i.type === "range") { const b = i.closest(".th-f")?.querySelector("label b"); if (b) b.textContent = fmtFor(k, v); }
@@ -287,7 +358,7 @@ function bindPanel(el) {
   });
   $$("[data-sw]", el).forEach((b) => (b.onclick = () => {
     const k = b.dataset.sw; const c = b.dataset.c;
-    if (k.startsWith("@")) { const st = selSticker(); if (st) { st[k.slice(1)] = c; renderPanel(); refresh(0); } return; }
+    if (k.startsWith("@")) { const st = selSticker(); if (st) { if (c) st[k.slice(1)] = c; else delete st[k.slice(1)]; renderPanel(); refresh(0); } return; }
     setPath(s, k, c); b.parentElement.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); const ci = b.parentElement.querySelector("input[type=color]"); if (ci && c) ci.value = c; refresh();
   }));
   const tx = $("#th-text", el); if (tx) tx.oninput = () => { s.text = tx.value.split("\n").slice(0, 3).join("\n"); refresh(); };
@@ -307,6 +378,9 @@ function bindPanel(el) {
   $$("[data-bgimg]", el).forEach((b) => (b.onclick = () => { s.bg = { ...(s.bg || {}), type: "image", image_id: b.dataset.bgimg }; renderPanel(); refresh(0); }));
   const bu = $("#thx-bgup", el); if (bu) bu.onchange = async () => { const f = bu.files[0]; if (!f) return; try { const it = await uploadLib(f, "image"); s.bg = { ...(s.bg || {}), type: "image", image_id: it.id }; loadLib(); renderPanel(); refresh(0); } catch (e) { T.ctx.toast(e.message); } };
   const ai = $("#thx-aibg", el); if (ai) ai.onclick = () => aiPrompt();
+  $$("[data-frameimg]", el).forEach((b) => (b.onclick = () => { s.bg = { ...(s.bg || {}), frame_id: b.dataset.frameimg }; s.no_person = false; s.cutout = true; renderPanel(); refresh(0); }));
+  const np = $("#thx-noperson", el); if (np) np.onchange = () => { s.no_person = np.checked; refresh(0); };
+  const fo = $("#thx-frameoff", el); if (fo) fo.onclick = () => { delete s.bg.frame_id; s.no_person = true; renderPanel(); refresh(0); };
   const pst = $("#th-pst", el); if (pst) pst.onchange = () => { s.person_stroke = pst.checked ? "#FFFFFF" : ""; renderPanel(); refresh(0); };
   const pgl = $("#th-pgl", el); if (pgl) pgl.onchange = () => { s.person_glow = pgl.checked ? (s.accent || tplOf(s.template).accent) : ""; renderPanel(); refresh(0); };
   $$("[data-adjp]", el).forEach((b) => (b.onclick = () => { const k = b.dataset.adjp; s.person_adj = k === "reset" ? undefined : k === "pop" ? { sat: 1.18, contrast: 1.12, sharp: 1.5, bright: 1.03 } : { ...(s.person_adj || {}), bright: 1.14, contrast: 1.05 }; if (!s.person_adj) delete s.person_adj; renderPanel(); refresh(0); }));
@@ -316,16 +390,23 @@ function bindPanel(el) {
   const up = $("#thx-up", el); if (up) up.onchange = async () => { for (const f of up.files) await addFile(f, 0.5, 0.5); };
   const sf = $("#thx-stfont", el); if (sf) sf.onchange = () => { const st = selSticker(); if (st) { st.font = sf.value; refresh(0); } };
   const sfl = $("#thx-stfill", el); if (sfl) sfl.onchange = () => { const st = selSticker(); if (st) { st.fill = sfl.checked; refresh(0); } };
+  const ssh = $("#thx-stshadow", el); if (ssh) ssh.onchange = () => { const st = selSticker(); if (st) { st.shadow = ssh.checked; refresh(0); } };
+  const qr = $("#thx-qr", el); if (qr) qr.onchange = () => { const st = selSticker(); if (st) { st.qr = qr.value; refresh(0); } };
+  const lk = $("#thx-lock", el); if (lk) lk.onchange = () => { const L = selLayer(); if (L) { const o = ovOf(L.id); if (lk.checked) o.locked = true; else delete o.locked; refresh(0); } };
+  $$("[data-alignl]", el).forEach((b) => (b.onclick = () => { const L = selLayer(); if (!L) return; const [cx, cy, w, h] = L.frame; const m = 0.04; const k = b.dataset.alignl;
+    const d = { dx: 0, dy: 0 }; if (k === "l") d.dx = m + w / 2 - cx; if (k === "cx") d.dx = 0.5 - cx; if (k === "r") d.dx = 1 - m - w / 2 - cx; if (k === "t") d.dy = m + h / 2 - cy; if (k === "cy") d.dy = 0.5 - cy; if (k === "b") d.dy = 1 - m - h / 2 - cy;
+    commit(L, d); refresh(0); }));
   // layers panel
   $$("[data-li]", el).forEach((r) => (r.onclick = (e) => { if (e.target.closest("button")) return; const l = layerById(r.dataset.li); if (l && !l.locked) select(l.id); }));
   $$("[data-lz]", el).forEach((b) => (b.onclick = () => { const [id, d] = b.dataset.lz.split(/:(?=-?1$)/); zorder(id, +d); }));
   $$("[data-lhide]", el).forEach((b) => (b.onclick = () => { setOv(b.dataset.lhide, { hidden: true }); if (T.sel === b.dataset.lhide) select(null); refresh(0); }));
+  $$("[data-llock]", el).forEach((b) => (b.onclick = () => { const o = ovOf(b.dataset.llock); if (o.locked) delete o.locked; else o.locked = true; refresh(0); }));
   $$("[data-lshow]", el).forEach((b) => (b.onclick = () => { const o = ovOf(b.dataset.lshow); delete o.hidden; refresh(0); }));
   $$("[data-goto]", el).forEach((b) => (b.onclick = () => openPanel(b.dataset.goto)));
 }
 
 function aiPrompt() {
-  const title = T.p.title || ""; const v = T.s.size === "vertical";
+  const title = T.p.title || ""; const v = isTall();
   const p = `YouTube thumbnail background, ${v ? "9:16 vertical" : "16:9"}, cinematic, dramatic lighting, rich colours, shallow depth of field, empty space on the ${(tplOf(T.s.template).person?.x ?? 0.7) > 0.5 ? "left" : "right"} side for big text, no text, no letters, no people, no watermark. Theme: ${title}`;
   const el = $("#thx-aiprompt", T.root); if (!el) return;
   el.innerHTML = `<div class="thx-ai"><p class="small muted">ये prompt Grok / ChatGPT / Gemini में डालें, बनी image ऊपर “⬆ अपनी image” से जोड़ें:</p><textarea rows="4" readonly>${T.ctx.esc(p)}</textarea><button class="btn small" id="thx-aicopy">📋 copy</button></div>`;
@@ -363,7 +444,7 @@ function undo(d) {
   const n = T.hi + d; if (n < 0 || n >= T.hist.length) return;
   T.hi = n; T.s = JSON.parse(T.hist[n]); T.pend = null;
   const r = $("#th-t", T.root); if (r) { r.value = T.s.t || 0; $("#th-tl", T.root).textContent = fmtT(T.s.t); }
-  $$("[data-size]", T.root).forEach((x) => x.classList.toggle("on", x.dataset.size === (T.s.size || "yt"))); $(".th-canvas", T.root).classList.toggle("vertical", T.s.size === "vertical");
+  $$("[data-size]", T.root).forEach((x) => x.classList.toggle("on", x.dataset.size === (T.s.size || "yt"))); applyCanvasSize();
   renderPanel(); renderBar(); refresh(0);
 }
 
@@ -378,10 +459,11 @@ function refresh(delay = 380) {
     $("#th-busy", T.root).hidden = false;
     const sent = JSON.stringify(T.s);
     try {
-      let r = await postJSON(`/projects/${T.pid}/thumbnails/layers`, { settings: T.s, have: Object.keys(T.sprites) }, ac.signal);
+      const ep = tplMode() ? "/templates/preview" : `/projects/${T.pid}/thumbnails/layers`;
+      let r = await postJSON(ep, { settings: T.s, have: Object.keys(T.sprites) }, ac.signal);
       if (!T || ac !== T.abort) return;
       if (JSON.stringify(T.s) !== sent) return; // changed meanwhile — the next (already scheduled) render wins
-      if ([r.base, ...r.layers].some((l) => !l.src && !T.sprites[l.hash])) r = await postJSON(`/projects/${T.pid}/thumbnails/layers`, { settings: T.s, have: [] }, ac.signal);
+      if ([r.base, ...r.layers].some((l) => !l.src && !T.sprites[l.hash])) r = await postJSON(ep, { settings: T.s, have: [] }, ac.signal);
       if (!T || ac !== T.abort) return;
       const keep = {};
       for (const l of [r.base, ...r.layers]) { keep[l.hash] = T.sprites[l.hash] || { src: l.src }; if (l.src) keep[l.hash] = { src: l.src }; }
@@ -392,6 +474,7 @@ function refresh(delay = 380) {
       if (T.sel && T.sel !== "bg" && !layerById(T.sel)) T.sel = null;
       paint(); renderLint(); renderBar();
       if (T.panel === "layers") renderPanel();
+      else if (T.panel === "extras" && selLayer() && !$(".thx-selprops", T.root)) renderPanel(); // a just-added element: show its props once its sprite exists
     } catch (e) { if (e.name !== "AbortError" && T) { $("#th-lint", T.root).innerHTML = `<div class="note err">${T.ctx.esc(e.message)}</div>`; } }
     if (T && ac === T.abort) $("#th-busy", T.root).hidden = true;
   }, delay);
@@ -401,8 +484,9 @@ function paint() {
   const box = $("#thx-layers", T.root); if (!box) return;
   const v = T.view;
   if (!v) { box.innerHTML = ""; drawSel(); return; }
+  if (v.w && v.h) { const c = $("#thx-stage", T.root); c.style.aspectRatio = `${v.w}/${v.h}`; c.classList.toggle("vertical", v.w / v.h < 1.2); }
   box.innerHTML = `<img class="thx-base" src="${T.sprites[v.base.hash]?.src || ""}" alt="" draggable="false">` +
-    v.layers.map((l) => `<img class="thx-spr ${l.locked ? "locked" : ""}" data-id="${T.ctx.esc(l.id)}" src="${T.sprites[l.hash]?.src || ""}" alt="" draggable="false" style="left:${pct(l.box[0])};top:${pct(l.box[1])};width:${pct(l.box[2])};height:${pct(l.box[3])}">`).join("");
+    v.layers.map((l) => `<img class="thx-spr ${l.locked ? "locked" : ""}" data-id="${T.ctx.esc(l.id)}" src="${T.sprites[l.hash]?.src || ""}" alt="" draggable="false" style="left:${pct(l.box[0])};top:${pct(l.box[1])};width:${pct(l.box[2])};height:${pct(l.box[3])}${l.op != null && l.op < 1 ? `;opacity:${l.op}` : ""}">`).join("");
   if (T.editing) { const sp = sprEl(T.editing.id); if (sp) sp.style.visibility = "hidden"; }
   drawSel();
 }
@@ -415,7 +499,7 @@ function renderLint() {
 }
 
 // ---------- layer model helpers ----------
-const sizeKey = () => (T.s.size === "vertical" ? "vertical" : "yt");
+const sizeKey = () => (T.s.size in FORMATS ? T.s.size : "yt");
 function layerById(id) { return T.view?.layers.find((l) => l.id === id) || null; }
 function selLayer() { return T.sel && T.sel !== "bg" ? layerById(T.sel) : null; }
 function stickerOf(l) { return l?.uid ? (T.s.stickers || []).find((st) => st.uid === l.uid) || null : null; }
@@ -489,8 +573,9 @@ function addSticker(st, fx, fy) {
 function addFromToken(tok, fx, fy) {
   const [kind, ...rest] = tok.split(":"); const val = rest.join(":");
   if (kind === "lib") return addSticker({ id: val, w: 0.16 }, fx, fy);
-  if (kind === "shape") return addSticker({ shape: val, w: val === "arrow" || val === "curve" ? 0.2 : 0.15 }, fx, fy);
+  if (kind === "shape") return addSticker({ shape: val, w: val === "arrow" || val === "curve" ? 0.2 : val === "line" ? 0.4 : val === "rrect" || val === "pill" ? 0.3 : 0.15, ...(["rrect", "disc", "line", "pill"].includes(val) ? { fill: true } : {}) }, fx, fy);
   if (kind === "emoji") return addSticker({ txt: val, size: 0.16 }, fx, fy);
+  if (kind === "qr") return addSticker({ qr: "https://", w: 0.18, color: "#111111", bg: "#FFFFFF" }, fx, fy);
   if (kind === "badge") { const b = BADGES[+val]; return addSticker({ txt: b.txt, size: b.bg ? 0.065 : 0.09, bg: b.bg, color: b.color, font: b.font || "Mukta" }, fx, fy); }
 }
 async function uploadLib(f, kind) {
@@ -572,6 +657,7 @@ function maskOf(l) {
   const d = g.getImageData(0, 0, cw, ch).data; const a = new Uint8Array(cw * ch); for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
   return (sp.mask = { w: cw, h: ch, a });
 }
+function lockedId(id) { return !!(T.s.layout?.[sizeKey()]?.[id]?.locked); }
 function hitLayer(fx, fy) {
   const v = T.view; if (!v) return null;
   for (const l of [...v.layers].reverse()) {
@@ -828,8 +914,8 @@ async function suggest(quiet) {
 
 // ---------- saved ----------
 function renderSaved() {
-  const el = $("#th-saved", T.root); if (!el) return; const { esc } = T.ctx;
-  const list = T.ov.saved.filter((a) => a.label === (T.s.size === "vertical" ? "vertical" : "yt"));
+  const el = $("#th-saved", T.root); if (!el || tplMode()) return; const { esc } = T.ctx;
+  const list = T.ov.saved.filter((a) => a.label === sizeKey());
   el.innerHTML = list.length ? list.map((a) => `<div class="th-sv ${a.selected ? "sel" : ""} ${a.label}">
       <img src="${a.url}" loading="lazy" alt="">${a.selected ? `<em>★ चुना हुआ</em>` : ""}
       <div class="th-svb"><span class="small" title="${esc(a.meta?.text || "")}">${esc(tplOf(a.meta?.template).label)}${a.meta?.source === "autopilot" ? " · ✈" : a.meta?.source === "variants" ? " · A/B" : ""}</span>
@@ -845,8 +931,15 @@ async function reloadSaved() { const ov = await T.ctx.api("GET", `/projects/${T.
 async function save() {
   if (T.editing) finishEdit(true);
   const b = $("#th-save", T.root); b.disabled = true; const old = b.textContent; b.textContent = "save हो रहा…";
-  try { await T.ctx.api("POST", `/projects/${T.pid}/thumbnails`, { settings: T.s, select: true }); await reloadSaved(); T.ctx.toast("save हुआ ★ — publish पर यही जाएगा"); }
-  catch (e) { T.ctx.toast(e.message); }
+  try {
+    if (tplMode()) {
+      const name = ($("#th-name", T.root)?.value || T.t.name || "template").trim();
+      if (T.t.builtin) {
+        const r = await T.ctx.api("POST", "/templates", { name: name === T.t.name ? name + " (मेरा)" : name, settings: T.s, industry: T.t.industry, tags: T.t.tags, fields: T.t.fields, defaults: T.t.defaults, source: "copy:" + T.t.id });
+        T.ctx.toast("आपकी copy बनी — अब यही खुलेगी"); T.ctx.go(`/templates/${r.id}`);
+      } else { const r = await T.ctx.api("PATCH", `/templates/${T.t.id}`, { name, settings: T.s }); if (T) { T.t = r; T.dirty = false; T.ctx.toast("template save हुआ"); } }
+    } else { await T.ctx.api("POST", `/projects/${T.pid}/thumbnails`, { settings: T.s, select: true }); await reloadSaved(); T.ctx.toast("save हुआ ★ — publish पर यही जाएगा"); }
+  } catch (e) { T.ctx.toast(e.message); }
   if (T) { b.disabled = false; b.textContent = old; }
 }
 async function variants() {
@@ -858,8 +951,8 @@ async function variants() {
 async function download() {
   const b = $("#th-dl", T.root); b.disabled = true;
   try {
-    const { blob } = await authBlob(`/projects/${T.pid}/thumbnails/preview`, { settings: T.s });
-    const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = `thumbnail-${T.s.size || "yt"}.jpg`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
+    const { blob } = tplMode() ? await authBlob("/templates/render", { settings: T.s, fmt: "png" }) : await authBlob(`/projects/${T.pid}/thumbnails/preview`, { settings: T.s });
+    const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = tplMode() ? `${(T.t.name || "design").replace(/[^\w\u0900-\u097F-]+/g, "_")}-${T.s.size}.png` : `thumbnail-${T.s.size || "yt"}.jpg`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
   } catch (e) { T.ctx.toast(e.message); }
   if (T) b.disabled = false;
 }
