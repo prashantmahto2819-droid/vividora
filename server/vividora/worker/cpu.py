@@ -379,7 +379,6 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             up = client.upload(job["id"], r["file"], "storyboard3d", "explainer")
             return {"duration": r["duration"], "scenes": r["scenes"], "transcript": r["transcript"],
                     "files": [{"kind": "storyboard3d", "path": up["path"], "mime": "video/mp4"}]}
->>>>>>> worktree-agent-a2aa88868c01ecadc
 
         if kind == "compress":
             from ..engine import compress as cmp
