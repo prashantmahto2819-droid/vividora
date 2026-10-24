@@ -83,14 +83,14 @@ def edit_sig(project: dict) -> str:
     return hashlib.sha1(json.dumps(body, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:12]
 
 
-def cancel_job(c, job: dict, by: str | None = None) -> dict:
+def cancel_job(c, job: dict, by: str | None = None, note: str | None = None) -> dict:
     """Stop a job the creator no longer wants. Queued → gone at once; running → the worker sees `cancelled`
     on its next heartbeat and kills ffmpeg. The project goes back to a sane editing state."""
     pid = job["project_id"]
     if job["status"] not in ("queued", "running"):
         return job
     db.update(c, "jobs", job["id"], {"status": "cancelled", "finished_at": db.now(),
-                                     "message": "रद्द किया" + (f" ({by})" if by else "")})
+                                     "message": (note or "रद्द किया") + (f" ({by})" if by else "")})
     kind = job["kind"]
     p = db.get("projects", pid) or {}
     others = c.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND status IN ('queued','running') AND id != ? "
@@ -110,7 +110,7 @@ def cancel_job(c, job: dict, by: str | None = None) -> dict:
         apf.fail(c, pid, apf.state(p).get("stage") or kind, "आपने रद्द किया", "“Autopilot फिर चलाएँ” दबाएँ, या खुद edit करें")
         return db.get("jobs", job["id"])
     if kind in ("render", "matte", "montage", "montage_plan") and p.get("edl"):
-        set_status(c, pid, "review_cuts", f"{'montage' if kind.startswith('montage') else kind} रद्द किया — editing वैसी ही है")
+        set_status(c, pid, "review_cuts", note or f"{'montage' if kind.startswith('montage') else kind} रद्द किया — editing वैसी ही है")
     elif kind in ("render", "montage", "montage_plan") and (p.get("meta") or {}).get("duration"):
         set_status(c, pid, "review_cuts", f"{kind} रद्द किया")
     elif kind in ("transcribe", "autocut") and p.get("transcript") and p.get("edl"):

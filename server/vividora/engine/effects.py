@@ -155,8 +155,8 @@ def zoom_expr(points: list[tuple[float, float]], ease: float = 0.3) -> str:
         prev_z = z
     # build from the last segment backwards so nesting stays shallow at the front
     for t0, t1, z0, z1 in reversed(segs):
-        ramp = f"({z0:.4f}+({z1:.4f}-{z0:.4f})*min(1\\,(t-{t0:.3f})/{ease}))"
-        expr = f"if(between(t\\,{t0:.3f}\\,{t1:.3f})\\,{ramp}\\,{expr})"
+        ramp = f"({z0:.4f}+({z1:.4f}-{z0:.4f})*min(1\\,(t-({t0:.3f}))/{ease}))"
+        expr = f"if(between(t\\,({t0:.3f})\\,{t1:.3f})\\,{ramp}\\,{expr})"
     return expr
 
 
@@ -166,8 +166,11 @@ def zoom_filter(points: list[tuple[float, float]], w: int, h: int, fx: float = 0
     z = zoom_expr(points)
     if bump:
         z = f"({z})+({bump})"
+    # the crop window is placed from the SAME z(t) (crop's own iw/ih are the size of its first frame, not of the
+    # current one — with them the punch-in drifted towards the top-left and depended on the first frame's zoom)
+    zw, zh = f"trunc({w}*({z})/2)*2", f"trunc({h}*({z})/2)*2"
     return (f"scale=w='trunc(iw*({z})/2)*2':h='trunc(ih*({z})/2)*2':eval=frame:flags=bicubic,"
-            f"crop={w}:{h}:x='(iw-{w})*{fx:.3f}':y='(ih-{h})*{fy:.3f}'")
+            f"crop={w}:{h}:x='({zw}-{w})*{fx:.3f}':y='({zh}-{h})*{fy:.3f}'")
 
 
 def look_filter(look: str | None, lut_path: Path | None = None, amount: float | None = None) -> str:
@@ -195,7 +198,7 @@ def lut_mix(lut: str, amount: float | None) -> str:
 
 def flash_filter(cut_times: list[float], color: str = "white", alpha: float = 0.55, frames: float = 0.045) -> str:
     """A brief flash at each cut point (whip-style transition without re-encoding segments)."""
-    times = [t for t in cut_times if t > 0.1]
+    times = [t for t in cut_times if t > 0.1 or t == 0.0]  # exactly 0.0 = a piece that starts on a cut (segrender)
     if not times:
         return ""
     enable = "+".join(f"between(t\\,{t - frames:.3f}\\,{t + frames:.3f})" for t in times[:200])

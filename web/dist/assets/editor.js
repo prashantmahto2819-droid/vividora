@@ -210,11 +210,12 @@ function renderJobs() {
     return;
   }
   el.innerHTML = `<div class="jhead" id="jobs-grip"><span class="small muted">⠿ काम चल रहे हैं</span><button class="ibtn" id="jobs-min" title="छोटा करें">—</button></div>` + ap + act.slice(0, 4).map((j) => { const pc = Math.max(0, Math.min(100, Math.round(+j.progress || 0)));
-    return `<div class="jobrow" title="${esc(j.message || E.p.status_note || "")}"><span class="spin"></span><span class="jl"><b>${esc(jobLabel(j))}</b><span class="muted">${esc(jobSub(j))}</span></span><span class="jp">${j.status === "queued" ? "…" : pc + "%"}</span>${E.canEdit || E.ctx.S.user.role !== "viewer" ? `<button class="ibtn jx" data-jcancel="${j.id}" title="रद्द करें">✕</button>` : ""}<i style="width:${j.status === "queued" ? 0 : pc}%"></i></div>`; }).join("")
+    return `<div class="jobrow" title="${esc(j.message || E.p.status_note || "")}"><span class="spin"></span><span class="jl"><b>${esc(jobLabel(j))}</b><span class="muted">${esc(jobSub(j))}</span></span><span class="jp">${j.status === "queued" ? "…" : pc + "%"}</span>${E.canEdit || E.ctx.S.user.role !== "viewer" ? `${j.kind === "render" && j.status === "running" ? `<button class="ibtn jx" data-jpause="${j.id}" title="रोकें — बने हुए टुकड़े अगले render में काम आएँगे">⏸</button>` : ""}<button class="ibtn jx" data-jcancel="${j.id}" title="रद्द करें">✕</button>` : ""}<i style="width:${j.status === "queued" ? 0 : pc}%"></i></div>`; }).join("")
     + (act.length > 4 ? `<div class="small muted">+${act.length - 4} और</div>` : "") + (E.locked ? `<div class="small jlock">🔒 transcript/कट बन रहे हैं — तब तक editing बंद</div>` : "");
   PRO.bindAutopilot(el);
   $("#jobs-min", el).onclick = () => { E.jobsMini = true; saveJobsPref({ mini: true }); renderJobs(); };
   $$("[data-jcancel]", el).forEach((b) => (b.onclick = () => cancelJob(b.dataset.jcancel, b)));
+  $$("[data-jpause]", el).forEach((b) => (b.onclick = () => cancelJob(b.dataset.jpause, b, true)));
   // drag the card anywhere over the stage (mouse + touch); the place is remembered
   const grip = $("#jobs-grip", el);
   grip.onpointerdown = (e) => { if (e.target.closest("button")) return; e.preventDefault(); const st = $(".ed-stage", E.root).getBoundingClientRect(); const r = el.getBoundingClientRect();
@@ -223,11 +224,11 @@ function renderJobs() {
     const up = () => { grip.onpointermove = null; grip.onpointerup = null; saveJobsPref({ x: parseFloat(el.style.left), y: parseFloat(el.style.top) }); };
     grip.onpointermove = mv; grip.onpointerup = up; };
 }
-async function cancelJob(id, btn) {
+async function cancelJob(id, btn, pause = false) {
   const j = (E.p.jobs || []).find((x) => x.id === id); if (!j) return;
-  if (!confirm(`${jobLabel(j)} रद्द करें?`)) return;
+  if (!confirm(pause ? `${jobLabel(j)} रोकें? बने हुए टुकड़े cache में रहेंगे — दोबारा render वहीं से आगे चलेगा।` : `${jobLabel(j)} रद्द करें?`)) return;
   if (btn) btn.disabled = true;
-  try { const r = await E.ctx.api("POST", `/projects/${E.pid}/jobs/${id}/cancel`); E.ctx.toast(`${jobLabel(j)} रद्द किया`); if (r.project && E) { E.ctx.S.project = r.project; update(r.project); } }
+  try { const r = await E.ctx.api("POST", `/projects/${E.pid}/jobs/${id}/${pause ? "pause" : "cancel"}`); E.ctx.toast(pause ? `${jobLabel(j)} रोका` : `${jobLabel(j)} रद्द किया`); if (r.project && E) { E.ctx.S.project = r.project; update(r.project); } }
   catch (e) { E.ctx.toast(e.message); if (btn) btn.disabled = false; }
 }
 // a "re-listen one line" job: payload.core = [start, end] in recording seconds (older builds: payload.range)
@@ -2594,7 +2595,7 @@ function renderExport() {
 }
 
 // ---- export options (resolution / fps / codec / quality / audio) — server: engine/encode.py
-const EXP_DEF = { resolution: "source", width: 0, height: 0, fps: "source", container: "mp4", codec: "h264", mode: "crf", crf: 0, bitrate_kbps: 0, two_pass: false, audio_codec: "aac", audio_kbps: 192, sample_rate: 48000, mono: false, upscale: false };
+const EXP_DEF = { resolution: "source", width: 0, height: 0, fps: "source", container: "mp4", codec: "h264", mode: "crf", crf: 0, bitrate_kbps: 0, two_pass: false, audio_codec: "aac", audio_kbps: 192, sample_rate: 48000, mono: false, upscale: false, quality: "final" };
 function expOpts() { if (!E.rs.export || typeof E.rs.export !== "object") E.rs.export = { ...EXP_DEF }; return E.rs.export; }
 function mb(bytes) { return bytes >= 1e9 ? (bytes / 1e9).toFixed(2) + " GB" : (bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0) + " MB"; }
 function sigBadge(a) {
@@ -2608,6 +2609,7 @@ function exportAdvHtml() {
   const isCustom = x.resolution === "custom"; const opt = (v, cur, l) => `<option value="${v}" ${String(cur) === String(v) ? "selected" : ""}>${l ?? v}</option>`;
   const open = E.expAdvOpen || Object.keys(x).some((k) => k !== "upscale" && JSON.stringify(x[k]) !== JSON.stringify(EXP_DEF[k]));
   return `<details class="insp" id="exp-adv" ${open ? "open" : ""}><summary>Advanced — resolution, fps, codec, quality <span class="muted small" id="exp-sum">${esc(expSummary())}</span></summary>
+    <div class="irow">${field("Mode", `<select id="x-q">${opt("final", x.quality || "final", "Final (पूरी quality)")}${opt("draft", x.quality || "final", "Fast draft — 720p, जल्दी देखने के लिए")}</select>`)}</div>
     <div class="irow">${field("Resolution", `<select id="x-res">${["source", "360p", "480p", "720p", "1080p", "1440p", "2160p", "custom"].map((r) => opt(r, x.resolution, r === "source" ? "platform की (default)" : r === "2160p" ? "2160p (4K)" : r === "custom" ? "custom" : r)).join("")}</select>`)}
       ${isCustom ? field("W × H", `<span class="row"><input type="number" id="x-w" value="${x.width || ""}" min="64" max="7680" step="2" style="width:80px"> × <input type="number" id="x-h" value="${x.height || ""}" min="64" max="4320" step="2" style="width:80px"></span>`) : ""}
       ${field("Frame rate", `<select id="x-fps">${["source", "23.976", "24", "25", "29.97", "30", "50", "59.94", "60"].map((f) => opt(f, x.fps, f === "source" ? "recording की" : f)).join("")}</select>`)}
@@ -2623,13 +2625,14 @@ function exportAdvHtml() {
       <button class="btn small quiet" id="x-reset" type="button">reset</button></div>
     <p class="small muted" id="x-est">अनुमानित size: …</p></details>`;
 }
-function expSummary() { const x = expOpts(); const parts = []; if (x.resolution !== "source") parts.push(x.resolution === "custom" ? `${x.width}×${x.height}` : x.resolution); if (x.fps !== "source") parts.push(x.fps + " fps"); if (x.codec !== "h264") parts.push(x.codec.toUpperCase()); if (x.container !== "mp4") parts.push(x.container); if (x.mode === "bitrate") parts.push(x.bitrate_kbps + " kbps" + (x.two_pass ? " 2-pass" : "")); else if (x.crf) parts.push("CRF " + x.crf); return parts.length ? "· " + parts.join(" · ") : "· default"; }
+function expSummary() { const x = expOpts(); const parts = []; if (x.quality === "draft") parts.push("draft"); if (x.resolution !== "source") parts.push(x.resolution === "custom" ? `${x.width}×${x.height}` : x.resolution); if (x.fps !== "source") parts.push(x.fps + " fps"); if (x.codec !== "h264") parts.push(x.codec.toUpperCase()); if (x.container !== "mp4") parts.push(x.container); if (x.mode === "bitrate") parts.push(x.bitrate_kbps + " kbps" + (x.two_pass ? " 2-pass" : "")); else if (x.crf) parts.push("CRF " + x.crf); return parts.length ? "· " + parts.join(" · ") : "· default"; }
 function bindExportAdv(m) {
   const d = $("#exp-adv", m); if (!d) return; const { api } = E.ctx; const x = expOpts();
   if (!E.encoders) api("GET", "/system/encoders").then((r) => { E.encoders = r; if (E.exportOpen) renderExport(); }).catch(() => {});
   d.ontoggle = () => { E.expAdvOpen = d.open; };
   const rerender = () => { E.expAdvOpen = true; E.dirty = true; renderExport(); };
   const set = (k, v) => { x[k] = v; E.dirty = true; $("#exp-sum", m).textContent = expSummary(); exportEstimate(m); };
+  $("#x-q", m) && ($("#x-q", m).onchange = (e) => { x.quality = e.target.value; rerender(); });
   $("#x-res", m).onchange = (e) => { x.resolution = e.target.value; if (x.resolution === "custom" && !x.width) { x.width = 1080; x.height = 1920; } rerender(); };
   $("#x-w", m) && ($("#x-w", m).onchange = (e) => set("width", +e.target.value | 0)); $("#x-h", m) && ($("#x-h", m).onchange = (e) => set("height", +e.target.value | 0));
   $("#x-fps", m).onchange = (e) => set("fps", e.target.value); $("#x-up", m).onchange = (e) => set("upscale", e.target.checked);
@@ -2643,13 +2646,22 @@ function bindExportAdv(m) {
   exportEstimate(m);
 }
 let _estT = 0;
+// "समय लगभग …" from the speed of this project's last render (render_seconds in the asset meta)
+function renderTimeEstimate(nOut) {
+  const last = (E.p.assets || []).filter((a) => a.kind === "render" && a.meta?.render_seconds && a.meta?.duration).sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))[0];
+  if (!last) return "";
+  const rate = last.meta.render_seconds / last.meta.duration; const draft = expOpts().quality === "draft";
+  const secs = outDur() * rate * (draft ? 0.45 : 1) * Math.max(1, nOut);
+  const m = Math.round(secs / 60);
+  return `समय लगभग <b>${m < 1 ? "1 मिनट से कम" : m + " मिनट"}</b>${draft ? " (draft)" : ""} · `;
+}
 function exportEstimate(m) {
   const el = $("#x-est", m); if (!el) return; const { api } = E.ctx; clearTimeout(_estT);
   _estT = setTimeout(async () => {
     const presets = $$("input[name=preset]:checked", m).map((i) => i.value); if (!presets.length) { el.textContent = "पहले platform चुनें"; return; }
     try { const r = await api("POST", `/projects/${E.pid}/export-estimate`, { export: expOpts(), presets, duration: outDur() });
       if (!$("#x-est", m)) return;
-      el.innerHTML = "अनुमानित size (लगभग): " + presets.map((pid) => { const e = r.estimate[pid]; const pl = E.ctx.S.presets?.platforms.find((x) => x.id === pid); return e ? `<b>${E.ctx.esc(pl?.label || pid)}</b> ${mb(e.bytes)} <span class="muted">(${e.width}×${e.height}, ${e.fps} fps, ${e.codec.toUpperCase()} ${e.container})</span>` : ""; }).filter(Boolean).join(" · ");
+      el.innerHTML = renderTimeEstimate(presets.length) + "अनुमानित size (लगभग): " + presets.map((pid) => { const e = r.estimate[pid]; const pl = E.ctx.S.presets?.platforms.find((x) => x.id === pid); return e ? `<b>${E.ctx.esc(pl?.label || pid)}</b> ${mb(e.bytes)} <span class="muted">(${e.width}×${e.height}, ${e.fps} fps, ${e.codec.toUpperCase()} ${e.container})</span>` : ""; }).filter(Boolean).join(" · ");
     } catch (e) { el.textContent = "अनुमान नहीं मिला: " + e.message; }
   }, 250);
 }
