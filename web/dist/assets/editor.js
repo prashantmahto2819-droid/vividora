@@ -1046,7 +1046,7 @@ function deleteSel() {
   else if (type === "caption") { const c = captionAt(id); if (!c) return; deleteWords(c.words); }
   else if (type === "fxclip") fx.fxclips = (fx.fxclips || []).filter((t) => t._id !== id);
   else if (type === "seg") { const s = segAt(id); if (!s) return; E.cuts.push({ id: uid(), start: +s.a.toFixed(3), end: +s.b.toFixed(3), reason: "manual", enabled: true, text: "" }); E.splits = E.splits.filter((x) => Math.abs(x - s.a) > 0.01 && Math.abs(x - s.b) > 0.01); }
-  else if (type === "fxglob") { if (id === "zoom") fx.zoom.enabled = false; else if (id === "transition") { fx.transition = "none"; fx.flash = false; } else if (id === "grade") { fx.grade = {}; fx.grade_preset = ""; } else if (id === "stack") fx.stack = []; layoutFrame(); }
+  else if (type === "fxglob") { if (id === "zoom") fx.zoom.enabled = false; else if (id === "transition") { fx.transition = "none"; fx.flash = false; } else if (id === "grade") { fx.grade = {}; fx.grade_preset = ""; fx.look = "none"; delete fx.grade_strength; delete fx.lut_amount; fx.fxclips = (fx.fxclips || []).filter((c) => c.kind !== "filter"); } else if (id === "stack") fx.stack = []; layoutFrame(); }
   else return;
   touch(); select(null); if (["caption", "fxclip", "fxglob"].includes(type)) renderPanel();
 }
@@ -1774,7 +1774,7 @@ function bindPanel() {
     b.onmouseleave = () => layoutFrame(); });
   $$("[data-gcat]", panel).forEach((b) => (b.onclick = () => { E.gCat = b.dataset.gcat; renderPanel(); }));
   on("#g-strength", "oninput", (e) => { fx.grade_strength = +e.target.value; $("#gs-v", panel).textContent = Math.round(fx.grade_strength * 100) + "%"; if (fx.grade_preset && S.presets.catalog.grade_presets[fx.grade_preset]) { fx.grade = scaledGrade(fx.grade_preset, fx.grade_strength); layoutFrame(); } touch(); });
-  on("#gr-reset", "onclick", () => { fx.grade = {}; fx.grade_preset = ""; touch(); layoutFrame(); renderPanel(); });
+  on("#gr-reset", "onclick", () => { fx.grade = {}; fx.grade_preset = ""; fx.look = "none"; delete fx.grade_strength; delete fx.lut_amount; fx.fxclips = (fx.fxclips || []).filter((c) => c.kind !== "filter"); touch(); layoutFrame(); renderPanel(); });
   on("#gr-copy", "onclick", () => { try { localStorage.setItem("vividora_grade", JSON.stringify(fx.grade || {})); toast("grade copy हुआ"); } catch {} });
   on("#gr-paste", "onclick", () => { try { const g = JSON.parse(localStorage.getItem("vividora_grade") || "{}"); fx.grade = g; fx.grade_preset = ""; touch(); layoutFrame(); renderPanel(); } catch {} });
   const ab = $("#gr-ab", panel); if (ab) { ab.onmousedown = () => { E.bypass = true; layoutFrame(); }; ab.onmouseup = ab.onmouseleave = () => { E.bypass = false; layoutFrame(); }; }
@@ -1833,7 +1833,7 @@ function autopilotBox() {
 }
 function apRemove(kind) {
   const fx = E.rs.effects; let n = 0;
-  if (kind === "zoom") fx.zoom.enabled = false; else if (kind === "tr") { fx.transition = "none"; fx.flash = false; } else if (kind === "grade") { fx.grade = {}; fx.grade_preset = ""; }
+  if (kind === "zoom") fx.zoom.enabled = false; else if (kind === "tr") { fx.transition = "none"; fx.flash = false; } else if (kind === "grade") { fx.grade = {}; fx.grade_preset = ""; fx.look = "none"; delete fx.grade_strength; delete fx.lut_amount; fx.fxclips = (fx.fxclips || []).filter((c) => c.kind !== "filter"); }
   else if (kind === "music") fx.music.id = ""; else if (kind === "hook") E.rs.hook.text = "";
   else { const g = apGroups().find(([k]) => k === kind); if (g) { const drop = new Set(g[2]); n = drop.size; for (const k of ["broll", "titles", "sfx"]) fx[k] = fx[k].filter((x) => !drop.has(x)); } }
   if (E.sel && !selItem()) E.sel = null;
