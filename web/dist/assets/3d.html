@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Vividora 3D render</title>
+<style>html,body{margin:0;background:transparent}canvas{display:block}</style></head>
+<body><canvas id="c"></canvas>
+<script type="module">
+// Headless frame renderer driven by the worker (engine/chars3d): setup3d(spec) → frame3d(i) → PNG data URL.
+import { buildShot } from "./chars3d.js";
+let shot = null, fps = 25, frames = 0;
+window.setup3d = (spec) => {
+  const c = document.getElementById("c");
+  fps = spec.fps || 25; frames = Math.max(1, Math.round((spec.duration || 5) * fps));
+  shot = buildShot(spec, c);
+  shot.update(0); shot.render();
+  return { frames, width: shot.W, height: shot.H, rigs: shot.rigs.length, bones: shot.rigs[0] ? Object.keys(shot.rigs[0].bones).length : 0,
+           morphs: shot.rigs[0] ? shot.rigs[0].head.morphTargetInfluences.length : 0 };
+};
+window.frame3d = (i, quality) => {
+  shot.update(i / fps); shot.render();
+  return document.getElementById("c").toDataURL(quality === "jpeg" ? "image/jpeg" : "image/png", quality === "jpeg" ? 0.85 : undefined);
+};
+window.__ready = true;
+</script></body></html>

@@ -368,8 +368,8 @@ def overlay_input_args(item: dict, path: Path) -> list[str]:
 
 
 def alpha_decoder(path: Path | str) -> list[str]:
-    """A transparent VP9 webm (character clips, stickers with alpha) only keeps its alpha through the
-    libvpx decoder — ffmpeg's native vp9 decoder drops it. Must go before that input's -i."""
+    """A transparent VP9 webm (character clips, stickers with alpha, 3D Studio renders) only keeps its alpha
+    through the libvpx decoder — ffmpeg's native vp9 decoder drops it. Must go before that input's -i."""
     return ["-c:v", "libvpx-vp9"] if is_webm(path) else []
 
 

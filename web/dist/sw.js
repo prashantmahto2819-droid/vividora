@@ -1,6 +1,6 @@
 // Vividora service worker: the app shell works offline; API calls always go to the network.
 const SHELL = "vividora-shell-v13";
-const FILES = ["/", "/assets/app.css", "/assets/app.js", "/assets/editor.css", "/assets/theme.css", "/assets/fonts/Mukta-Regular.woff", "/assets/fonts/Mukta-Medium.woff", "/assets/fonts/Mukta-SemiBold.woff", "/assets/fonts/Mukta-Bold.woff", "/assets/fonts/TiroDevanagariHindi-Regular.woff", "/assets/editor.js", "/assets/pro.js", "/assets/mix.js", "/assets/lut.js", "/assets/record.js", "/assets/thumbs.js", "/assets/voice.js", "/assets/chars.js", "/assets/scenes.js", "/assets/textfx.js", "/assets/cutout.js", "/manifest.webmanifest", "/icon.svg"];
+const FILES = ["/", "/assets/app.css", "/assets/app.js", "/assets/editor.css", "/assets/theme.css", "/assets/fonts/Mukta-Regular.woff", "/assets/fonts/Mukta-Medium.woff", "/assets/fonts/Mukta-SemiBold.woff", "/assets/fonts/Mukta-Bold.woff", "/assets/fonts/TiroDevanagariHindi-Regular.woff", "/assets/editor.js", "/assets/pro.js", "/assets/mix.js", "/assets/lut.js", "/assets/record.js", "/assets/thumbs.js", "/assets/voice.js", "/assets/chars.js", "/assets/scenes.js", "/assets/chars3d.js", "/assets/chars3d-ui.js", "/assets/scenes3d.js", "/assets/three.module.min.js", "/assets/textfx.js", "/assets/cutout.js", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));

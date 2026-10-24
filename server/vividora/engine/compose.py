@@ -324,7 +324,7 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
         # fast seek to ~1 s before trim_in, then a frame-exact trim in the graph
         seek = max(0.0, trim_in - 1.0)
         from .effects import alpha_decoder
-        alpha_dec = alpha_decoder(path)  # keep VP9 alpha (character clips)
+        alpha_dec = alpha_decoder(path)  # keep VP9 alpha (character clips, 3D renders)
         inputs.append([*alpha_dec, "-ss", f"{seek:.3f}", "-t", f"{trim_in - seek + span + 0.3:.3f}", "-i", str(path)])
         pre_v = f"trim=start={trim_in - seek:.4f},"
         pre_a = f"atrim=start={trim_in - seek:.4f},"
