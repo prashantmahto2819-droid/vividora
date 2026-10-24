@@ -338,7 +338,12 @@ function bindGutters() {
 function bindStatic() {
   const { api, toast, load } = E.ctx;
   layoutSizes(); bindGutters();
-  $$(".ed-tabs button", E.root).forEach((b) => (b.onclick = () => { E.tab = b.dataset.tab; $$(".ed-tabs button", E.root).forEach((x) => x.classList.toggle("on", x === b)); renderPanel(); }));
+  $$(".ed-tabs button", E.root).forEach((b) => (b.onclick = () => {
+    const pn = $("#ed-panel", E.root);
+    // phones: tapping the open tab again folds the panel away so the preview gets the room back
+    if (E.tab === b.dataset.tab && matchMedia("(max-width: 640px)").matches) { pn.classList.toggle("ed-panel-collapsed"); return; }
+    pn.classList.remove("ed-panel-collapsed");
+    E.tab = b.dataset.tab; $$(".ed-tabs button", E.root).forEach((x) => x.classList.toggle("on", x === b)); renderPanel(); }));
   const pp = $("#pv-plat", E.root); if (pp) { pp.value = E.pvPlat || "youtube"; pp.onchange = () => { E.pvPlat = pp.value; renderOverlay(); }; }
   $$("#ratio button", E.root).forEach((b) => (b.onclick = () => { E.ratio = b.dataset.r; $$("#ratio button", E.root).forEach((x) => x.classList.toggle("on", x === b)); layoutFrame(); renderOverlay(); }));
   $("#ed-export", E.root).onclick = () => { E.exportOpen = true; renderExport(); };
