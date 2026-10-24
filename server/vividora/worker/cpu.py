@@ -196,6 +196,16 @@ def _qa(project: dict, p: dict, preset: dict, vid: dict, out: dict) -> dict:
                     encoder_preset=os.getenv("X264_PRESET") or None)
 
 
+HEAVY_KINDS = {"render", "montage", "matte", "dub", "transcribe"}
+
+
+def _x264_preset(p: dict) -> str | None:
+    """Export "draft" mode encodes fast; otherwise the X264_PRESET env (or the platform preset's own)."""
+    if ((p.get("export") or {}).get("quality") == "draft"):
+        return "veryfast"
+    return os.getenv("X264_PRESET") or None
+
+
 def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> dict:
     with tempfile.TemporaryDirectory(prefix="vividora_") as td:
         tmp = Path(td)
@@ -269,7 +279,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 edl0 = {"duration": float(project["meta"].get("duration") or 0), "cuts": [], **(project.get("edl") or {})}
                 if dub.timeline_sig(edl0, p.get("effects")) != effects["voice_track_sig"]:
                     dub_warn.append("AI voice-over बनने के बाद कट/speed बदले हैं — आवाज़ खिसक सकती है, dub दोबारा बनाएँ")
-            out = render.render(
+            rkw = dict(
                 video=raw, audio=clean, meta=project["meta"], edl=project["edl"] or
                 autocut.build_edl({"segments": []}, float(project["meta"]["duration"])),
                 transcript=project.get("transcript"), preset=preset, style=style,
@@ -279,9 +289,35 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
                 effects={**effects, "font_paths": font_paths},
-                encoder_preset=os.getenv("X264_PRESET") or None, export=p.get("export"),
+                encoder_preset=_x264_preset(p), export=p.get("export"),
                 on_progress=lambda f, m, _cb=_progress(client, job["id"]): _cb(f * 0.92, m),
             )
+            out = None
+            import time as _time
+            _t0 = _time.time()
+            if os.getenv("SEGMENT_RENDER", "1") != "0":
+                # pieces cached by their inputs: after a small edit only the changed pieces render again
+                from ..engine import segrender
+                try:
+                    segrender.prune()
+                except Exception:  # noqa: BLE001
+                    pass
+                src_sig = "|".join(f"{a['id']}:{a.get('size')}" for a in assets if a["kind"] in ("raw", "audio_clean"))
+                try:
+                    out = segrender.render_segmented(project_id=project["id"], source_sig=src_sig, **rkw)
+                    seg = out.get("segmented") or {}
+                    log.info("segmented render: %s pieces, %s reused", seg.get("pieces"), seg.get("reused"))
+                except ValueError as ex:
+                    log.info("single-pass render (%s)", ex)
+                except ffmpeg.Cancelled:
+                    raise
+                except Exception as ex:  # noqa: BLE001 — never lose a render to the cache path
+                    log.warning("segmented render failed, rendering in one go: %s", ex)
+            if out is None:
+                out = render.render(**rkw)
+            for f in out["files"]:
+                if f.get("kind") == "render":
+                    f.setdefault("meta", {})["render_seconds"] = round(_time.time() - _t0, 1)
             # output QA before anyone is asked to approve: black start (cut off), loudness, captions
             qa_warn: list[str] = []
             qa_info: dict = {}
@@ -552,9 +588,16 @@ def main() -> None:
         kinds.append("transcribe")
     if os.getenv("TTS_LOCAL", "").lower() in ("1", "true", "yes"):
         kinds.append("dub")  # AI voice-over on CPU — works, but slow (normally the GPU worker does it)
+    # lanes: a "quick" worker only takes the short pipeline steps, so a new upload's transcript / cuts / plan
+    # never wait behind a long render running on the "heavy" worker (docker compose --profile quick up -d)
+    lane = (os.getenv("WORKER_LANE") or "all").lower()
+    if lane == "quick":
+        kinds = [k for k in kinds if k not in HEAVY_KINDS]
+    elif lane == "heavy":
+        kinds = [k for k in kinds if k in HEAVY_KINDS]
     client = ApiClient(base, token, name)
     run_loop(client, kinds, handle, poll=float(os.getenv("POLL_SECONDS", "3")),
-             info={"ffmpeg": ffmpeg.have("ffmpeg"), "deepfilter": ffmpeg.have("deep-filter")},
+             info={"ffmpeg": ffmpeg.have("ffmpeg"), "deepfilter": ffmpeg.have("deep-filter"), "lane": lane},
              once=os.getenv("ONCE") == "1")
 
 

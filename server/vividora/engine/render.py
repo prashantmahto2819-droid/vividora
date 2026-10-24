@@ -256,9 +256,23 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
            caption_overrides: dict | None = None, effects: dict | None = None,
            clip: dict | None = None, face_track: str = "auto",
            encoder_preset: str | None = None, on_progress: ProgressFn | None = None,
-           export: dict | None = None) -> dict:
+           export: dict | None = None, seek: float | None = None, video_only: bool = False,
+           audio_only: bool = False, boundary_cut: str | None = None, trailing_cut: str | None = None,
+           zoom_plan_override: list[tuple[float, float]] | None = None) -> dict:
+    """seek / video_only / audio_only / boundary_cut / trailing_cut / zoom_plan_override are used by
+    engine/segrender.py, which renders the video in cached ~15 s pieces: `seek` starts decoding the
+    source there (timestamps kept), `boundary_cut` is the transition of the cut this piece starts on,
+    `trailing_cut` the one it ends on, `zoom_plan_override` the slice of the full video's zoom plan."""
     out_dir.mkdir(parents=True, exist_ok=True)
     e = dict(effects or {})
+    if video_only:
+        # the sound is rendered once for the whole video — pieces carry no audio at all
+        audio = None
+        meta = {**meta, "has_audio": False}
+        for k in ("music", "sfx", "voice_track_path", "voice_track_words"):
+            e.pop(k, None)
+        e["voice_track"] = "original"
+        e["broll"] = [({**it, "volume": 0} if isinstance(it, dict) else it) for it in (e.get("broll") or [])]
     # items can be limited to some platforms (Subscribe popup only on YouTube, Follow on IG/FB…)
     pid = preset.get("id", "")
     family = "youtube" if pid.startswith("yt") else "instagram" if pid.startswith("ig") else "facebook" if pid.startswith("fb") else pid
@@ -281,6 +295,13 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     # user export overrides (resolution / fps / codec…) — see engine/encode.py
     enc = encode.plan(export, preset, meta, fps)
     w, h, fps = enc["width"], enc["height"], enc["fps"]
+    if enc["export"].get("quality") == "draft":
+        # the slow pro passes are for the final file
+        pro0 = dict(e.get("pro") or {})
+        for k in ("denoise", "stabilize", "face_refine"):
+            pro0.pop(k, None)
+        e["pro"] = pro0
+        encoder_preset = "veryfast"
 
     keep = [(_snap(a, fps), _snap(b, fps)) for a, b in keep_segments(edl)]
     dub_path = e.get("voice_track_path") if e.get("voice_track") not in (None, "", "original") else None
@@ -298,6 +319,20 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         # a Short (or a preview frame) starts somewhere inside it → move them to the Short's own clock
         full_out, _ = out_timeline(edl, fps, effects)
         _shift_items(e, full_out(keep[0][0]) or 0.0)
+    seek = _snap(float(seek), fps) if seek else 0.0
+    if seek > 0:
+        # the source inputs are opened with -ss: their clock starts at `seek`, so every source time used below
+        # (kept ranges, cut lookups, the face path) moves by the same amount
+        keep = [(_snap(a - seek, fps), _snap(b - seek, fps)) for a, b in keep]
+        edl = {**edl, "cuts": [{**c, "start": float(c.get("start", 0)) - seek, "end": float(c.get("end", 0)) - seek}
+                               for c in (edl.get("cuts") or []) if isinstance(c, dict)]}
+        meta = {**meta, "face_track": [[float(t) - seek, cx] for t, cx in (meta.get("face_track") or [])]}
+        if transcript:
+            transcript = {**transcript, "segments": [
+                {**sg, "start": float(sg.get("start", 0)) - seek, "end": float(sg.get("end", 0)) - seek,
+                 "words": [{**wd, "start": float(wd.get("start", 0)) - seek, "end": float(wd.get("end", 0)) - seek}
+                           for wd in (sg.get("words") or [])]}
+                for sg in (transcript.get("segments") or [])]}
     e_tr_default = (effects or {}).get("transition") or "none"
     segs = _segment_timeline(_plan_segments(keep, edl, e_tr_default, (effects or {}).get("speed") or edl.get("speed")))
     use_segments = any(fx.is_xfade(sg["tr"]) or sg["rate"] != 1.0 for sg in segs)
@@ -334,7 +369,8 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     tap = protools.source_tap(e, video, meta, work, max(b for _, b in keep), need_from=min(a for a, _ in keep),
                               preview=bool(clip) and float(clip.get("end", 0)) - float(clip.get("start", 0)) < 1.0)
 
-    inputs: list[str] = ["-i", str(video)]
+    seek_args = ["-ss", f"{seek:.3f}"] if seek > 0 else []
+    inputs: list[str] = [*seek_args, "-i", str(video)]
     next_in = 1
     chains: list[str] = []
 
@@ -344,7 +380,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     body = (e.get("body") or {}) if e.get("body", {}).get("enabled") and e.get("body", {}).get("alpha_path") else None
     src_w0, src_h0 = int(meta.get("width", w)), int(meta.get("height", h))
     if body:
-        inputs += ["-i", str(body["alpha_path"])]
+        inputs += [*seek_args, "-i", str(body["alpha_path"])]
         body_alpha_in = next_in
         next_in += 1
         extra_in = {}
@@ -360,7 +396,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         # trim/concat/xfade path: real transitions and speed ramps
         a_src = "[1:a]" if audio is not None else ("[0:a]" if meta.get("has_audio") else None)
         if audio is not None:
-            inputs += ["-i", str(audio)]
+            inputs += [*seek_args, "-i", str(audio)]
             next_in += 1
         next_in = tap.attach(inputs, chains, next_in, len(segs))
         vlabels, alabels, mlabels = [], [], []
@@ -466,6 +502,10 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                     kind = cdef["transition"]
             if kind and kind != "none" and not fx.is_xfade(kind):
                 tr_cuts.append((t, kind))
+    if boundary_cut and boundary_cut != "none" and not fx.is_xfade(boundary_cut):
+        tr_cuts.insert(0, (0.0, boundary_cut))
+    if trailing_cut and trailing_cut != "none" and not fx.is_xfade(trailing_cut):
+        tr_cuts.append((new_dur, trailing_cut))  # only the leading half of that transition falls inside this piece
     bump, tr_filters = fx.transition_filters(tr_cuts, new_dur)
     zoom = e.get("zoom") or {}
     emph = None
@@ -473,8 +513,11 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         from .shorts import HOOK_WORDS
         import re as _re
         emph = [wd["start"] for wd in words if _re.sub(r"[^\w]", "", wd["w"].lower()) in HOOK_WORDS or wd["w"].rstrip().endswith("!")]
-    plan = (fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0)), mode=zoom.get("mode") or "punch", emphasis=emph)
-            if zoom.get("enabled") else [(0.0, 1.0)])
+    if zoom_plan_override is not None:
+        plan = list(zoom_plan_override) or [(0.0, 1.0)]
+    else:
+        plan = (fx.zoom_plan(cuts, new_dur, float(zoom.get("strength", 1.0)), mode=zoom.get("mode") or "punch", emphasis=emph)
+                if zoom.get("enabled") else [(0.0, 1.0)])
     if len(plan) > 1 or bump:
         v += "," + fx.zoom_filter(plan, w, h, fx=0.5, fy=min(0.9, max(0.1, focus_y)), bump=bump)
     look = fx.look_filter(e.get("look"), Path(e["lut_path"]) if e.get("lut_path") else None, e.get("lut_amount"))
@@ -574,17 +617,20 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         tail += f"{sub},"
     chains.append(f"{cur}{tail}format=yuv420p[v]")
     maps = ["-map", "[v]"]
+    if audio_only:
+        chains.append("[v]nullsink")
+        maps = []
 
     # ---- audio: voice (cut) → music duck → sfx → loudnorm
     a_cfg = preset.get("audio", {})
     has_orig = bool(seg_audio_label) or (not use_segments and (audio is not None or bool(meta.get("has_audio"))))
     dub_mode = "both" if (dub_path and has_orig and e.get("voice_track_mode") == "both") else "replace"
-    if has_orig or dub_path:
+    if (has_orig or dub_path) and not video_only:
         cur_a = None
         if has_orig and not (dub_path and dub_mode == "replace"):
             if not use_segments:
                 if audio is not None:
-                    inputs += ["-i", str(audio)]
+                    inputs += [*seek_args, "-i", str(audio)]
                     a_in = f"[{next_in}:a]"
                     next_in += 1
                 else:
@@ -679,8 +725,29 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     out = out_dir / f"{name}.{enc['container']}"
     gop = max(1, int(math.ceil(fps * 2)))
     speed = ["-preset", encoder_preset or vcfg.get("preset", "medium")] if enc["preset_arg_ok"] else []
-    base = [*inputs, "-filter_complex_script", str(script), *maps, *enc["vargs"], *speed, "-g", str(gop)]
+    ts_args: list[str] = []
     label = f"{preset.get('label', name)} रेंडर"
+    if audio_only:
+        if "-map" not in maps:
+            import shutil as _sh
+            _sh.rmtree(work, ignore_errors=True)
+            return {"files": [], "duration": round(new_dur, 2), "warnings": [], "audio": None}
+        out = out_dir / f"{name}.{'webm' if enc['export']['audio_codec'] == 'opus' else 'm4a'}"
+        ffmpeg.run([*inputs, *ts_args, "-filter_complex_script", str(script), *maps, "-vn", *enc["aargs"], "-t", f"{new_dur:.3f}", str(out)],
+                   duration=new_dur, on_progress=on_progress, label=label + " (आवाज़)")
+        import shutil as _sh
+        _sh.rmtree(work, ignore_errors=True)
+        return {"files": [], "duration": round(new_dur, 2), "warnings": [], "audio": out}
+    base = [*inputs, *ts_args, "-filter_complex_script", str(script), *maps, *enc["vargs"], *speed, "-g", str(gop)]
+    if video_only:
+        # a piece: exact frame count, keyframe first, no audio; the pieces are later joined without re-encoding
+        frames = max(1, int(round(new_dur * fps)))
+        ffmpeg.run([*base, "-an", "-frames:v", str(frames), "-force_key_frames", "0", *enc["extra"], str(out)],
+                   duration=new_dur, on_progress=on_progress, label=label)
+        import shutil as _sh
+        _sh.rmtree(work, ignore_errors=True)
+        return {"files": [{"kind": "render", "path": out, "mime": enc["mime"], "label": preset["id"], "meta": {"frames": frames}}],
+                "duration": round(new_dur, 2), "warnings": [], "fps": fps, "frames": frames}
     if enc["two_pass"]:
         # target-bitrate mode: a first pass only measures, the second one writes
         passlog = str(work / "pass")

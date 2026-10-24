@@ -13,7 +13,7 @@ import hashlib
 import json
 import subprocess
 
-RENDER_VERSION = 4  # bump when render output changes for the same inputs (invalidates every signature)
+RENDER_VERSION = 5  # bump when render output changes for the same inputs (invalidates every signature)
 
 RESOLUTIONS = ["source", "360p", "480p", "720p", "1080p", "1440p", "2160p", "custom"]
 _SHORT = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080, "1440p": 1440, "2160p": 2160}
@@ -32,7 +32,7 @@ _KBPS = {360: 700, 480: 1200, 720: 2600, 1080: 5500, 1440: 9500, 2160: 17000}
 
 DEFAULT = {"resolution": "source", "width": 0, "height": 0, "fps": "source", "container": "mp4", "codec": "h264",
            "mode": "crf", "crf": 0, "bitrate_kbps": 0, "two_pass": False, "audio_codec": "aac", "audio_kbps": 192,
-           "sample_rate": 48000, "mono": False, "upscale": False}
+           "sample_rate": 48000, "mono": False, "upscale": False, "quality": "final"}
 
 
 @functools.lru_cache(maxsize=1)
@@ -76,6 +76,14 @@ def normalize(raw: dict | None) -> dict:
     e["sample_rate"] = 44100 if int(r.get("sample_rate") or 48000) == 44100 else 48000
     e["mono"] = bool(r.get("mono"))
     e["upscale"] = bool(r.get("upscale"))
+    # draft = a quick look at the whole edit: 720p max, H.264 veryfast CRF 26, no denoise / stabilise
+    e["quality"] = "draft" if r.get("quality") == "draft" else "final"
+    if e["quality"] == "draft":
+        e["codec"], e["mode"], e["two_pass"], e["crf"] = "h264", "crf", False, 26
+        if e["container"] not in CODECS["h264"]["containers"]:
+            e["container"] = "mp4"
+        if e["resolution"] in ("1080p", "1440p", "2160p", "source") or (e["resolution"] == "custom" and min(e["width"], e["height"]) > 720):
+            e["resolution"], e["width"], e["height"] = "720p", 0, 0
     return e
 
 

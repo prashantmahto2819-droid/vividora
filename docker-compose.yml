@@ -48,6 +48,11 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       HF_HUB_DISABLE_XET: "1"
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      # all = every job kind (one worker does everything). With the "quick" profile below this one
+      # takes only the long jobs and the quick worker the short steps.
+      WORKER_LANE: ${WORKER_LANE:-all}
+      SEGMENT_RENDER: ${SEGMENT_RENDER:-1}
+      SEG_CACHE_GB: ${SEG_CACHE_GB:-20}
     command: ["python", "-m", "vividora.worker.cpu"]
     depends_on:
       api:
@@ -58,6 +63,32 @@ services:
     volumes:
       - worker-tmp:/tmp
       - whisper-models:/models
+
+  # Quick lane (optional): a second, small worker for the short steps — prepare, cuts, plans, publish,
+  # compress — so a new upload never waits behind a long render. Start with:
+  #   WORKER_LANE=heavy docker compose --profile tunnel --profile quick up -d
+  worker-quick:
+    image: vividora/server
+    restart: always
+    env_file: .env
+    environment:
+      API_URL: http://api:8000
+      WORKER_NAME: quick@docker
+      WORKER_LANE: quick
+      TRANSCRIBE_LOCAL: "0"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      HF_HUB_DISABLE_XET: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+    command: ["python", "-m", "vividora.worker.cpu"]
+    depends_on:
+      api:
+        condition: service_healthy
+    cpus: ${QUICK_WORKER_CPUS:-4}
+    mem_limit: ${QUICK_WORKER_MEM:-6g}
+    volumes:
+      - worker-tmp:/tmp
+    profiles: ["quick"]
 
   # Cloudflare Tunnel — Vividora को https://studio.<domain> पर खोलता है (port forward नहीं चाहिए).
   # .env में CLOUDFLARE_TUNNEL_TOKEN डालें, फिर: docker compose --profile tunnel up -d
