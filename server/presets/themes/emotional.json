@@ -1,0 +1,49 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.5
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "vignette"
+ ],
+ "id": "emotional",
+ "label": "Emotional / sad",
+ "emoji": "🌧️",
+ "hint": "हल्के fade रंग, धीमे cuts, soft white text",
+ "swatch": [
+  "#5B6B8C",
+  "#C9D1E3"
+ ],
+ "caption_style": "story",
+ "text_style": "bold_white",
+ "look": "none",
+ "grade_preset": "haze",
+ "transition": "dip",
+ "transition_duration": 0.6,
+ "stack": [],
+ "music": {
+  "mood": "emotional",
+  "volume": 0.18,
+  "duck_amount": 0.5
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 1.0,
+  "max_cut": 3.0,
+  "look": "grade:haze",
+  "fx_strong": [
+   "zoom_in",
+   "black_fade"
+  ],
+  "fx_soft": [
+   "zoom_out",
+   "blur_in"
+  ],
+  "intro": true,
+  "outro": false
+ }
+}

@@ -1,0 +1,56 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.9
+ },
+ "voice": "studio",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [],
+ "id": "motivational",
+ "label": "Motivational",
+ "emoji": "🔥",
+ "hint": "जोशीला: punchy रंग, बड़े पीले captions, beat पर punch cuts",
+ "swatch": [
+  "#F2B33D",
+  "#1B1F2A"
+ ],
+ "caption_style": "hormozi",
+ "text_style": "yellow_punch",
+ "look": "none",
+ "grade_preset": "punchy",
+ "transition": "punch",
+ "transition_duration": 0.25,
+ "stack": [
+  {
+   "id": "tr_light_leak",
+   "params": {
+    "amount": 0.35
+   }
+  }
+ ],
+ "music": {
+  "mood": "motivational",
+  "volume": 0.14,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "auto",
+  "effects_level": "strong",
+  "min_cut": 0.4,
+  "max_cut": 1.8,
+  "look": "grade:punchy",
+  "fx_strong": [
+   "zoom_punch",
+   "flash",
+   "shake",
+   "rgb"
+  ],
+  "fx_soft": [
+   "zoom_punch",
+   "flash"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

@@ -1,0 +1,46 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.8
+ },
+ "voice": "podcast",
+ "slowmo": false,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "podcast",
+ "label": "Podcast / talking-head",
+ "emoji": "🎙️",
+ "hint": "skin-friendly grade, karaoke captions, हल्का zoom, आवाज़ भरी",
+ "swatch": [
+  "#8E6C4A",
+  "#F2E8DA"
+ ],
+ "caption_style": "karaoke",
+ "text_style": "black_box_yellow",
+ "look": "none",
+ "grade_preset": "natural_skin",
+ "transition": "punch",
+ "transition_duration": 0.25,
+ "stack": [],
+ "music": {
+  "mood": "lofi",
+  "volume": 0.1,
+  "duck_amount": 0.7
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.4,
+  "look": "grade:natural_skin",
+  "fx_strong": [
+   "zoom_punch"
+  ],
+  "fx_soft": [
+   "cut",
+   "zoom_in"
+  ],
+  "intro": false,
+  "outro": true
+ }
+}

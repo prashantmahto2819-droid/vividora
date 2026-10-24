@@ -1,0 +1,56 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [
+  "vignette",
+  "grain"
+ ],
+ "id": "cinematic",
+ "label": "Cinematic storytelling",
+ "emoji": "🎬",
+ "hint": "teal-orange, letterbox, धीमे dissolve, soft text",
+ "swatch": [
+  "#0E7C86",
+  "#D9822B"
+ ],
+ "caption_style": "minimal",
+ "text_style": "bold_white",
+ "look": "none",
+ "grade_preset": "teal_orange",
+ "transition": "dip",
+ "transition_duration": 0.5,
+ "stack": [
+  {
+   "id": "tr_letterbox",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "cinematic",
+  "volume": 0.16,
+  "duck_amount": 0.55
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.6,
+  "look": "grade:teal_orange",
+  "fx_strong": [
+   "zoom_in",
+   "white_fade"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out",
+   "black_fade"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

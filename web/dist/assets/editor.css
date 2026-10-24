@@ -546,3 +546,16 @@ svg.curve .cline { fill: none; stroke-width: 2; } svg.curve circle { stroke: #00
 .modal.shortcuts { max-width: 560px; } .modal.shortcuts table { width: 100%; border-collapse: collapse; font-size: .85rem; } .modal.shortcuts td { padding: .3rem .4rem; border-bottom: 1px solid var(--ed-line); }
 .modal.shortcuts td:first-child { white-space: nowrap; width: 1%; }
 kbd { display: inline-block; font: 600 .72rem/1.4 ui-monospace, monospace; padding: .05rem .4rem; border: 1px solid #4b5568; border-bottom-width: 2px; border-radius: 5px; background: #1f2632; color: #e8e8e8; }
+
+/* ---- 🎨 themes ---- */
+.modal.themes { width: min(900px, 100%); }
+.thgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: .5rem; margin: .6rem 0; }
+.thtile { background: var(--ed-bg); border: 2px solid var(--ed-line); border-radius: 10px; padding: 0 0 .35rem; cursor: pointer; color: var(--text); display: flex; flex-direction: column; gap: .15rem; align-items: stretch; text-align: left; overflow: hidden; }
+.thtile:hover { border-color: var(--muted); } .thtile.on { border-color: var(--ed-accent); box-shadow: 0 0 0 1px var(--ed-accent); }
+.thtile b { font-size: .78rem; padding: .3rem .45rem 0; } .thtile small { font-size: .66rem; color: var(--muted); padding: 0 .45rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thsw { display: flex; align-items: center; justify-content: center; height: 58px; }
+.thcap { font-weight: 800; font-size: 1.1rem; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+.mobeats { display: flex; align-items: flex-end; gap: 1px; height: 34px; margin: .3rem 0; padding: 2px; background: var(--ed-bg); border-radius: 6px; border: 1px solid var(--ed-line); }
+.mobeats i { flex: 1; min-width: 1px; background: var(--ed-accent); border-radius: 1px 1px 0 0; }
+.moseg .ibtn.small { width: 22px; height: 22px; font-size: .8rem; }
+.ibtn.on { background: var(--ed-panel-2); color: var(--ed-accent); }

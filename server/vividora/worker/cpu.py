@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import socket
 import tempfile
 import urllib.error
@@ -354,20 +355,57 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             lib = tmp / "lib"
             prog = _progress(client, job["id"])
             local = {}
+            missing = []
             for n, item in enumerate(p.get("clips") or []):
-                path = client.download_library(item["id"], lib / item["id"])
+                prog(0.0, f"clips ला रहे हैं {n + 1}/{len(p.get('clips') or [])}")
+                try:
+                    path = client.download_library(item["id"], lib / item["id"])
+                except urllib.error.HTTPError as e:
+                    if e.code != 404:
+                        raise
+                    missing.append(item.get("name") or item["id"])   # file gone from the library (share dropped, deleted) — skip it
+                    continue
                 k = "image" if (path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") or _is_image(path)) else "video"
                 local[item["id"]] = {"path": path, "kind": k}
-            music = client.download_library(p["music"], lib / p["music"])
+            if not local:
+                raise ValueError("कोई clip नहीं मिली — library में files जाँचें (D: drive share बंद तो नहीं?)")
+            try:
+                music = client.download_library(p["music"], lib / p["music"])
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    raise ValueError("song की file library में नहीं मिली — दूसरा song चुनें") from None
+                raise
+            th = p.get("theme_opts") or {}
             if kind == "montage_plan":
-                mu = beatcut.music(music, float(p.get("max_seconds", 30)))
-                infos = []
+                prog(0.02, "song सुन रहे हैं — beats, drops, सबसे जोशीला हिस्सा")
+                max_s = float(p.get("max_seconds", 30) or 0)
+                mu = beatcut.music(music, max_s if max_s > 0 else 10_000)
+                infos, bad = [], []
+                names = {it["id"]: it.get("name") for it in (p.get("clips") or [])}
                 for n, (cid, c) in enumerate(local.items()):
-                    prog(n / max(1, len(local)), f"clip {n + 1}/{len(local)} देख रहे हैं (best moments, चेहरा)")
-                    infos.append({"id": cid, **beatcut.clip(c["path"], c["kind"])})
-                pl = beatcut.plan(mu, infos, max_seconds=float(p.get("max_seconds", 30)), pace=p.get("pace") or "auto",
-                                  effects=p.get("effects_level") or "auto", slowmo=bool(p.get("slowmo", True)), seed=int(p.get("seed", 7)))
+                    prog(0.05 + 0.85 * n / max(1, len(local)), f"clip {n + 1}/{len(local)} देख रहे हैं — best moments, चेहरा, आवाज़")
+                    try:
+                        infos.append({"id": cid, **beatcut.clip(c["path"], c["kind"])})
+                    except ffmpeg.Cancelled:
+                        raise
+                    except Exception as e:  # noqa: BLE001 — one bad file must not sink the whole montage
+                        log.warning("montage clip %s skipped: %s", cid, e)
+                        bad.append(names.get(cid) or cid)
+                if not infos:
+                    raise ValueError("कोई clip पढ़ी नहीं जा सकी — files जाँचें")
+                prog(0.92, "beat plan बन रहा है — cuts, effects, slow-mo")
+                pl = beatcut.plan(mu, infos, max_seconds=max_s, pace=th.get("pace") or p.get("pace") or "auto",
+                                  effects=th.get("effects_level") or p.get("effects_level") or "auto",
+                                  min_cut=float(th.get("min_cut", 0.4)), max_cut=float(th.get("max_cut", 2.2)),
+                                  slowmo=bool(th.get("slowmo", p.get("slowmo", True))), seed=int(p.get("seed", 7)),
+                                  fx_strong=th.get("fx_strong"), fx_soft=th.get("fx_soft"), speed_ramp=bool(th.get("speed_ramp", True)),
+                                  pins=[x for x in (p.get("pins") or []) if x in local],
+                                  intro=bool(p.get("intro", th.get("intro", False))), outro=bool(p.get("outro", th.get("outro", False))))
                 pl["clip_info"] = {i["id"]: {"kind": i["kind"], "w": i["w"], "h": i["h"], "duration": i["duration"]} for i in infos}
+                pl["theme"] = th.get("theme_id") or ""
+                bad = missing + bad
+                if bad:
+                    pl["warnings"] = [f"{len(bad)} clip छोड़ी (file नहीं मिली / पढ़ी नहीं जा सकी): {', '.join(str(b) for b in bad[:5])}"]
                 return {"plan": pl}
             for cid, c in local.items():
                 try:
@@ -377,11 +415,26 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                     pass
             wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None
             preset = platform(p.get("preset", "ig-reel"))
+            texts = list(p.get("texts") or [])
+            if p.get("text_mode") == "names" or (p.get("text_mode") == "beats" and not texts):
+                # words from the clip names: "bike_ride.mp4" → "bike ride"
+                seen = set()
+                for it in p.get("clips") or []:
+                    w = re.sub(r"[_\-]+", " ", re.sub(r"\.[a-z0-9]+$", "", str(it.get("name") or ""), flags=re.I)).strip()
+                    w = re.sub(r"^(img|vid|mov|dsc|pxl|video|clip)[ _]*\d*$", "", w, flags=re.I).strip()
+                    if w and w.lower() not in seen:
+                        seen.add(w.lower())
+                        texts.append(w[:24])
+            look = th.get("look") if th.get("look") and p.get("look") in (None, "", "auto") else p.get("look") or "auto"
+            prog(0.0, "video बन रहा है — reframe, effects, रंग, text, music")
             out = beatcut.render(pl=p["plan"], clips=local, music_path=music, out_dir=tmp / "out", name=preset["id"], preset=preset,
-                                 texts=p.get("texts") or [], look=p.get("look") or "auto", reframe=p.get("reframe") or "smart",
-                                 font=p.get("font") or "Poppins", text_color=p.get("text_color") or "#FFFFFF",
-                                 text_size=float(p.get("text_size", 0.07)), watermark=wm,
-                                 encoder_preset=os.getenv("X264_PRESET") or None, on_progress=prog)
+                                 texts=texts, look=look, reframe=p.get("reframe") or "smart",
+                                 font=p.get("font") or th.get("font") or "Poppins", text_color=p.get("text_color") or th.get("text_color") or "#FFFFFF",
+                                 text_size=float(p.get("text_size") or th.get("text_size") or 0.07), watermark=wm,
+                                 encoder_preset=os.getenv("X264_PRESET") or None, on_progress=prog,
+                                 text_style=th.get("text_style") if p.get("theme_text", True) else None,
+                                 text_mode="beats" if p.get("text_mode") in ("beats", "names") else "bars",
+                                 intro_text=str(p.get("intro_text") or ""), outro_text=str(p.get("outro_text") or ""))
             warns = _montage_voice(client, p, assets, out, tmp)
             files = []
             for f in out["files"]:

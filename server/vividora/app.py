@@ -85,6 +85,8 @@ def create_app() -> Starlette:
     api_routes += pro_api.routes  # pro editing: text-based cuts, scenes, colour match, music fit
     from .api import compress_api
     api_routes += compress_api.routes  # standalone video compressor
+    from .api import themes_api
+    api_routes += themes_api.routes  # one-click themes
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))
