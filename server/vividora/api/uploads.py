@@ -75,13 +75,23 @@ async def chunk(request: Request, user: dict):
     have = path.stat().st_size if path.exists() else 0
     if offset != have:
         raise ApiError(409, "offset mismatch", received=have)
+    # integrity: the browser sends the chunk's SHA-256; a damaged chunk is dropped (file truncated back) and re-sent
+    want = (request.headers.get("x-sha256") or "").strip().lower()
+    import hashlib
+    h = hashlib.sha256()
     written = 0
     with path.open("ab") as f:
         async for part in request.stream():
             if have + written + len(part) > up["size"]:
-                raise ApiError(413, "more bytes than announced")
+                f.truncate(have)
+                raise ApiError(413, "more bytes than announced", received=have)
             f.write(part)
+            h.update(part)
             written += len(part)
+    if want and h.hexdigest() != want:
+        with path.open("r+b") as f:
+            f.truncate(have)
+        raise ApiError(422, "chunk corrupted in transit", code="hash", received=have)
     received = have + written
     with db.tx() as c:
         db.update(c, "uploads", up["id"], {"received": received})

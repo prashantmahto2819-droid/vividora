@@ -8,6 +8,7 @@ proven story formats, so the calendar never sits empty.
 from __future__ import annotations
 
 import random
+import re
 
 from . import llm
 from .metadata import voice_text
@@ -95,3 +96,92 @@ def script(idea: dict, *, fmt: str = "short", language: str = "hi", target_secon
                 "title_options": [str(x) for x in (data.get("title_options") or [])][:5],
                 "words": len(str(data["script"]).split()), "seconds": secs, "source": "llm"}
     return fallback
+
+
+# ---- script sections: the teleprompter shows [HOOK] … [CTA] as separate blocks and can redo one at a time ----
+SECTION_LABELS = {"HOOK": "Hook — पहले 2 सेकंड", "SETUP": "Setup", "STORY": "Story", "TURN": "Turn — वो पल", "LESSON": "Lesson — सीख",
+                  "POINTS": "मुख्य बातें", "MAIN": "मुख्य बात", "CTA": "CTA", "CLOSING": "Closing"}
+_SEC_RE = re.compile(r"^[ \t]*\[([A-Za-z][A-Za-z /\-]*?)(?:[ \t]*[—\-–:].*?)?\][ \t]*$", re.M)
+
+
+def parse_sections(script: str) -> list[dict]:
+    """[HOOK]…[CTA] markers → [{key, label, text}] in order; a script with no markers is one MAIN block."""
+    text = script or ""
+    hits = list(_SEC_RE.finditer(text))
+    if not hits:
+        return [{"key": "MAIN", "label": SECTION_LABELS["MAIN"], "text": text.strip()}] if text.strip() else []
+    out = []
+    lead = text[:hits[0].start()].strip()
+    if lead:
+        out.append({"key": "MAIN", "label": SECTION_LABELS["MAIN"], "text": lead})
+    for n, h in enumerate(hits):
+        key = re.sub(r"[^A-Z]", "", h.group(1).split()[0].upper()) or "MAIN"
+        end = hits[n + 1].start() if n + 1 < len(hits) else len(text)
+        out.append({"key": key, "label": SECTION_LABELS.get(key, key.title()), "text": text[h.end():end].strip()})
+    return out
+
+
+def structured(script: str) -> dict:
+    """The same script as {hook, main, points[], cta, closing} for clients that want fixed slots."""
+    secs = parse_sections(script)
+
+    def get(k: str) -> str:
+        return "\n\n".join(s["text"] for s in secs if s["key"] == k)
+    return {"hook": get("HOOK"), "main": "\n\n".join(x for x in (get("SETUP"), get("STORY"), get("MAIN")) if x),
+            "points": [s["text"] for s in secs if s["key"] in ("TURN", "LESSON", "POINTS")],
+            "cta": get("CTA"), "closing": get("CLOSING"), "sections": secs}
+
+
+def join_sections(secs: list[dict]) -> str:
+    return "\n\n".join(f"[{s['key']}]\n{s['text'].strip()}" for s in secs if s.get("text", "").strip() or s.get("key") == "HOOK")
+
+
+SECTION_MODES = {"rewrite": "Rewrite this section from scratch with a fresh angle; same meaning, different words and rhythm.",
+                 "improve": "Make this section stronger: more vivid, more emotional, tighter — keep its length within ±20%.",
+                 "shorten": "Cut this section to about half its length without losing the point."}
+
+
+def regenerate_section(idea: dict, script: str, key: str, mode: str = "rewrite", language: str = "hi") -> dict:
+    """One LLM call that rewrites ONLY `key` (HOOK/SETUP/…); the other sections are passed as context and kept verbatim."""
+    secs = parse_sections(script)
+    key = (key or "").upper()
+    cur = next((s for s in secs if s["key"] == key), None)
+    if cur is None:
+        return {"ok": False, "error": "यह section script में नहीं है"}
+    if not llm.available():
+        return {"ok": False, "error": "AI key नहीं — section हाथ से बदलें"}
+    voice = voice_text()
+    others = "\n\n".join(f"[{s['key']}]\n{s['text']}" for s in secs if s["key"] != key)
+    prompt = ((f"Creator voice & style:\n{voice}\n\n" if voice else "") +
+              f"Video: {idea.get('title')}\nFormat: {FORMATS.get(idea.get('format') or 'short', idea.get('format'))}\n"
+              f"Language: {'spoken Hindi/Hinglish as this creator talks' if language != 'en' else 'English'}.\n\n"
+              f"The full on-camera script (keep every other section exactly as it is):\n{others}\n\n"
+              f"Current [{key}] section:\n{cur['text']}\n\n{SECTION_MODES.get(mode, SECTION_MODES['rewrite'])} "
+              'Spoken, short sentences, no headings. Reply JSON: {"text": "..."}')
+    data = llm.ask_json(prompt, system="You are a screenwriter for short motivational videos. JSON only.", max_tokens=1200)
+    if not isinstance(data, dict) or not str(data.get("text") or "").strip():
+        return {"ok": False, "error": llm.LAST_ERROR or "AI से जवाब नहीं आया"}
+    new = [{**s, "text": str(data["text"]).strip()} if s["key"] == key else s for s in secs]
+    return {"ok": True, "key": key, "text": str(data["text"]).strip(), "script": join_sections(new), "sections": new}
+
+
+def hook_options(idea: dict, script: str, language: str = "hi", pack: dict | None = None) -> dict:
+    """3 alternative hooks. When the project already has an AI pack (transcript) its hooks are reused — no new credit."""
+    if pack and isinstance(pack.get("hooks"), list) and pack["hooks"]:
+        opts = [str((h.get("say") or h.get("heading")) if isinstance(h, dict) else h) for h in pack["hooks"] if h][:3]
+        if opts:
+            return {"ok": True, "hooks": opts, "source": "aipack"}
+    if not llm.available():
+        return {"ok": False, "error": "AI key नहीं", "hooks": []}
+    cur = structured(script).get("hook") or idea.get("hook") or ""
+    voice = voice_text()
+    prompt = ((f"Creator voice & style:\n{voice}\n\n" if voice else "") +
+              f"Video: {idea.get('title')}\nAngle: {idea.get('angle')}\nOutline: {idea.get('outline')}\nCurrent hook: {cur}\n"
+              f"Language: {'spoken Hindi/Hinglish' if language != 'en' else 'English'}. Write 3 different scroll-stopping opening lines "
+              "(≤14 words each, spoken: one a question, one a shock/contrast, one a promise). No clickbait lies. "
+              'Reply JSON: {"hooks": ["...", "...", "..."]}')
+    data = llm.ask_json(prompt, system="You write hooks for short Hindi motivational videos. JSON only.", max_tokens=600)
+    hooks = [str(h).strip() for h in ((data.get("hooks") if isinstance(data, dict) else None) or []) if str(h).strip()][:3]
+    if not hooks:
+        return {"ok": False, "error": llm.LAST_ERROR or "AI से जवाब नहीं आया", "hooks": []}
+    return {"ok": True, "hooks": hooks, "source": "llm"}

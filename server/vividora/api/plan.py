@@ -145,7 +145,57 @@ async def write_script(request: Request, user: dict):
                                                                         "script_source": r.get("source")},
                                         "updated_at": db.now()})
     from ..engine import llm as _llm
-    return ok({**r, "idea": db.get("ideas", i["id"]), "ai_error": _llm.LAST_ERROR if r.get("source") != "llm" else ""})
+    return ok({**r, "structured": planner.structured(r["script"]), "idea": db.get("ideas", i["id"]),
+               "ai_error": _llm.LAST_ERROR if r.get("source") != "llm" else ""})
+
+
+@require("viewer")
+async def script_sections(request: Request, user: dict):
+    """The idea's script split into teleprompter blocks (plus the fixed {hook, main, points, cta, closing} slots)."""
+    i = _own_idea(request, user)
+    return ok(planner.structured(i.get("script") or ""))
+
+
+@require("editor")
+async def script_section(request: Request, user: dict):
+    """Redo ONE section: {key: HOOK|SETUP|…, mode: rewrite|improve|shorten} — or {key, text} to set it by hand.
+    Only that block changes; the rest of the script is kept word for word."""
+    i = _own_idea(request, user)
+    data = await body(request)
+    need(data, "key")
+    script = data.get("script") if isinstance(data.get("script"), str) else (i.get("script") or "")
+    key = str(data["key"]).upper()
+    if isinstance(data.get("text"), str):
+        secs = planner.parse_sections(script)
+        if not any(s["key"] == key for s in secs):
+            secs.append({"key": key, "label": planner.SECTION_LABELS.get(key, key.title()), "text": ""})
+        secs = [{**s, "text": data["text"].strip()} if s["key"] == key else s for s in secs]
+        r = {"ok": True, "key": key, "text": data["text"].strip(), "script": planner.join_sections(secs), "sections": secs}
+    else:
+        r = await run_in_threadpool(planner.regenerate_section, i, script, key, data.get("mode") or "rewrite",
+                                    data.get("language") or "hi")
+    if not r.get("ok"):
+        raise ApiError(502, r.get("error") or "section नहीं बना")
+    with db.tx() as c:
+        db.update(c, "ideas", i["id"], {"script": r["script"], "updated_at": db.now()})
+    return ok({**r, "structured": planner.structured(r["script"])})
+
+
+@require("editor")
+async def script_hooks(request: Request, user: dict):
+    """3 hook alternatives — from the linked project's AI pack when it has a transcript (no new credit), else one LLM call."""
+    i = _own_idea(request, user)
+    data = await body(request)
+    pack = None
+    if i.get("project_id"):
+        p = db.get("projects", i["project_id"])
+        if p and p.get("workspace_id") == user["workspace_id"]:
+            from ..engine import aipack
+            pack = await run_in_threadpool(aipack.get, p)
+    r = await run_in_threadpool(planner.hook_options, i, i.get("script") or "", data.get("language") or "hi", pack)
+    if not r.get("ok"):
+        raise ApiError(502, r.get("error") or "hooks नहीं बने")
+    return ok(r)
 
 
 @require("viewer")
@@ -302,6 +352,9 @@ routes = [
     Route("/ideas/generate", generate_ideas, methods=["POST"]),
     Route("/ideas/{idea_id}", update_idea, methods=["PATCH"]),
     Route("/ideas/{idea_id}/script", write_script, methods=["POST"]),
+    Route("/ideas/{idea_id}/script/sections", script_sections),
+    Route("/ideas/{idea_id}/script/section", script_section, methods=["POST"]),
+    Route("/ideas/{idea_id}/script/hooks", script_hooks, methods=["POST"]),
     Route("/notify", notify_status),
     Route("/notify/test", notify_test, methods=["POST"]),
     Route("/hooks/inbound", inbound, methods=["POST"]),

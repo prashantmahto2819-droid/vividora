@@ -228,6 +228,19 @@
 .tp-bar .ibtn { color: #fff; width: 28px; height: 28px; }
 .tp-text { flex: 1; overflow: auto; padding: .6rem 1rem; font-weight: 600; line-height: 1.45; text-align: center; font-family: var(--font); scrollbar-width: none; }
 .tp-text p { margin: 0 0 .5em; }
+/* script sections on the prompter: a labelled block per [HOOK]…[CTA], with room between them */
+.tp-sec { margin: 0 0 1.4em; padding-top: .4em; border-top: 1px dashed rgba(255,255,255,.25); }
+.tp-sec:first-child { border-top: 0; padding-top: 0; }
+.tp-sec h5 { margin: 0 0 .35em; font-size: .55em; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--amber); opacity: .9; }
+.tp-sections { display: flex; flex-direction: column; gap: .5rem; max-height: 46vh; overflow: auto; }
+.tp-secrow { border: 1px solid var(--ed-line); border-radius: 8px; padding: .5rem; }
+.tp-secbtns { flex-wrap: wrap; gap: .35rem; margin-top: .35rem; } .tp-secbtns .btn { min-height: 40px; }
+.tp-alts { display: flex; flex-direction: column; gap: .35rem; margin-top: .4rem; }
+.tp-alt { background: var(--ed-bg); border-radius: 8px; padding: .45rem .55rem; font-size: .9rem; display: flex; flex-direction: column; gap: .35rem; } .tp-alt .btn { min-height: 40px; }
+.rec-recover { position: absolute; left: 12px; right: 12px; top: 48px; z-index: 4; background: rgba(23,28,37,.96); border: 1px solid var(--amber); border-radius: 10px; padding: .6rem .8rem; font-size: .9rem; }
+.rec-recover .btn { min-height: 40px; }
+#rec-local { margin-left: .4rem; opacity: .85; }
+@media (max-width: 640px) { .rec-panel { width: calc(100% - 20px); right: 10px; } .rec-panel .btn, .rec-panel select, .rec-panel textarea { min-height: 40px; font-size: 16px; } }
 .tp-resize { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, rgba(255,255,255,.5) 50%); border-radius: 0 0 10px 0; }
 .rec-review { padding: 1rem; overflow: auto; } .rec-review video { width: 100%; max-height: 60vh; background: #000; border-radius: 10px; }
 .rec-review input { background: var(--ed-bg); border: 1px solid var(--ed-line); color: var(--text); border-radius: 8px; padding: .55rem .7rem; }

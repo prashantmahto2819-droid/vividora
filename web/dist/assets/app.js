@@ -59,6 +59,7 @@ async function api(method, path, body, raw) {
   if (S.token) h.authorization = "Bearer " + S.token;
   if (raw) h["content-type"] = "application/octet-stream"; else if (body) h["content-type"] = "application/json";
   if (raw && raw.offset != null) h["x-offset"] = raw.offset;
+  if (raw && raw.sha256) h["x-sha256"] = raw.sha256;
   const r = await fetch("/api" + path, { method, headers: h, body: raw ? raw.data : body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { if (r.status === 401 && S.token) { logout(); } throw Object.assign(new Error(data.error || r.statusText), data); }
@@ -164,7 +165,7 @@ function render() {
   document.body.classList.toggle("ed-mode", r.kind === "projects" && !!r.id);
   const detail = r.kind === "projects" && r.id;
   if (r.kind === "record") {
-    if (app.dataset.mode !== "record") { ED.unmount(); TH.unmount(); app.dataset.mode = "record"; app.innerHTML = `<div id="recroot"></div>`; REC.mount($("#recroot"), { S, api, esc, toast, go, uploadFile }); }
+    if (app.dataset.mode !== "record") { ED.unmount(); TH.unmount(); app.dataset.mode = "record"; app.innerHTML = `<div id="recroot"></div>`; REC.mount($("#recroot"), { S, api, esc, toast, go, uploadFile, uploadControl, uploadProgressHtml, gb }); }
     return;
   }
   if (app.dataset.mode === "record") REC.unmount();
@@ -499,10 +500,13 @@ function bindNew() {
     try {
       const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, skip_transcript: f.transcript_mode.value === "skip", theme_id: $("#up-theme")?.value || "", channel_id: S.channel });
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
+      const ctl = uploadControl();
+      const prog = (label) => (done, total, info) => { const box = $("#up-progress"); if (!box) return;
+        box.innerHTML = uploadProgressHtml(label, done, total, info, ctl); const pb = $("#up-pause", box); if (pb) pb.onclick = () => { if (ctl.paused) ctl.resume(); else ctl.pause(); pb.textContent = ctl.paused ? "▶ जारी रखें" : "⏸ रोकें"; $("#up-state", box).textContent = ctl.paused ? "रुका हुआ" : ""; }; };
       if (chosenAll.length > 1) {
-        for (let i = 0; i < chosenAll.length; i++) { const f = chosenAll[i]; await uploadFile(p.id, f, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">Clip ${i + 1}/${chosenAll.length} — ${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; }, { clip: true, start: i === chosenAll.length - 1 }); }
+        for (let i = 0; i < chosenAll.length; i++) { const f = chosenAll[i]; await uploadFile(p.id, f, prog(`Clip ${i + 1}/${chosenAll.length}`), { clip: true, start: i === chosenAll.length - 1, ctl }); }
       } else
-      await uploadFile(p.id, chosen, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; });
+      await uploadFile(p.id, chosen, prog(""), { ctl });
       toast("Upload पूरा हुआ — जाँच शुरू हो गई"); go("/projects/" + p.id);
     } catch (err) { $("#up-progress").innerHTML = `<div class="note err">${esc(err.message)} — फिर से कोशिश करें, upload वहीं से आगे चलेगा।</div>`; $("#start").disabled = false; }
   };
@@ -519,14 +523,45 @@ function libPut(kind, file, onPct) {
     x.send(file);
   });
 }
+// Resumable upload: 8 MB chunks, each with its SHA-256 so a damaged chunk is re-sent; a dropped connection retries
+// with backoff and continues from the byte the server has (also after a page reload — the server remembers).
+// opts.ctl = uploadControl() gives pause/resume/cancel; onProgress(done, total, info).
+function uploadProgressHtml(label, done, total, info, ctl) {
+  const pc = (done / total * 100).toFixed(1);
+  const note = info?.retry ? `network टूटा — ${info.retry}/3 कोशिश…` : info?.resumed ? "वहीं से आगे" : "";
+  return `<p class="small muted row between"><span>${label ? label + " — " : ""}${gb(done)} / ${gb(total)} <span id="up-state" class="muted">${ctl?.paused ? "रुका हुआ" : note}</span></span>${ctl ? `<button type="button" class="btn small quiet" id="up-pause">${ctl.paused ? "▶ जारी रखें" : "⏸ रोकें"}</button>` : ""}</p><div class="progress"><i style="width:${pc}%"></i></div>`;
+}
+function uploadControl() {
+  const c = { paused: false, cancelled: false, _wake: null };
+  c.pause = () => { c.paused = true; };
+  c.resume = () => { c.paused = false; if (c._wake) { c._wake(); c._wake = null; } };
+  c.cancel = () => { c.cancelled = true; c.resume(); };
+  c.wait = () => (c.paused ? new Promise((res) => (c._wake = res)) : Promise.resolve());
+  return c;
+}
+async function sha256Hex(blob) {
+  if (!window.crypto?.subtle) return "";  // http:// on the LAN has no WebCrypto — the server then skips the check
+  try { const d = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()); return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join(""); } catch { return ""; }
+}
 async function uploadFile(pid, file, onProgress, opts = {}) {
+  const ctl = opts.ctl || uploadControl();
   const up = await api("POST", `/projects/${pid}/uploads`, { filename: file.name, size: file.size, clip: !!opts.clip });
-  let off = up.received; const chunk = up.chunk;
+  let off = up.received; const chunk = up.chunk; let tries = 0;
+  if (off) onProgress(off, file.size, { resumed: true });
   while (off < file.size) {
+    await ctl.wait(); if (ctl.cancelled) throw new Error("upload रद्द");
     const part = file.slice(off, Math.min(file.size, off + chunk));
+    const hash = await sha256Hex(part);
     let r;
-    try { r = await api("PUT", `/projects/${pid}/uploads/${up.upload_id}/chunk`, null, { data: part, offset: off }); }
-    catch (err) { if (err.received != null) { off = err.received; continue; } throw err; }
+    try { r = await api("PUT", `/projects/${pid}/uploads/${up.upload_id}/chunk`, null, { data: part, offset: off, sha256: hash }); tries = 0; }
+    catch (err) {
+      if (err.received != null) { off = err.received; if (err.code === "hash" && ++tries > 3) throw new Error("upload में data ख़राब हो रहा है — network बदलकर फिर कोशिश करें"); continue; }
+      if (++tries > 3) throw new Error((err.message || "network") + " — upload रुका; बाद में फिर शुरू करें, वहीं से चलेगा");
+      onProgress(off, file.size, { retry: tries });
+      await new Promise((res) => setTimeout(res, 1000 * 2 ** (tries - 1)));
+      try { const st = await api("GET", `/projects/${pid}/uploads/${up.upload_id}`); off = st.received; } catch {}
+      continue;
+    }
     off = r.received; onProgress(off, file.size);
   }
   return api("POST", `/projects/${pid}/uploads/${up.upload_id}/finish`, { start: opts.start !== false });
