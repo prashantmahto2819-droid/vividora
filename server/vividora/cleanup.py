@@ -60,7 +60,7 @@ def _young(f: Path, hours: float = 6) -> bool:
 def _finished_projects(workspace_id: str, days: int) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max(0, days))).isoformat(timespec="seconds")
     return db.rows(db.conn().execute(
-        "SELECT * FROM projects WHERE workspace_id = ? AND updated_at < ? AND (status = 'approved' OR id IN "
+        "SELECT * FROM projects WHERE workspace_id = ? AND kind != 'tools' AND updated_at < ? AND (status = 'approved' OR id IN "
         "(SELECT project_id FROM publications WHERE remote_id IS NOT NULL AND remote_id != ''))",
         (workspace_id, cutoff)))
 

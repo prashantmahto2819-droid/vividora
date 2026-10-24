@@ -35,6 +35,7 @@ const IC = {
   rec: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
   upload: '<path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  zip: '<path d="M4 20V8l4-4h12v16z"/><path d="M8 4v4H4"/><path d="M15 20v-5h-4v5"/><path d="M9 9h2M9 12h2"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
   bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
   trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
@@ -69,7 +70,7 @@ function toast(msg, ms = 2600) { const t = document.createElement("div"); t.clas
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -96,6 +97,7 @@ async function load() {
   if (r.kind === "trends") { S.trends = await api("GET", "/trends").catch(() => ({ trends: [], setup: {} })); S.radar = S.channel ? await api("GET", `/radar?channel=${S.channel}`).catch(() => null) : null; }
   if (r.kind === "publish") { const [o, p] = await Promise.all([api("GET", "/overview" + ovQ).catch(() => null), api("GET", "/publications" + ovQ).catch(() => [])]); S.overview = o; S.pubs = p; }
   if (r.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
+  if (r.kind === "compress") { const [c, src] = await Promise.all([api("GET", "/compress").catch(() => ({ jobs: [], presets: {} })), api("GET", "/compress/sources").catch(() => [])]); S.comp = c; S.compSrc = src; }
   if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
   if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; S.notify = await api("GET", "/notify").catch(() => null); }
   const ids = new Set(S.projects.map((p) => p.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
@@ -105,14 +107,15 @@ function schedulePoll() {
   clearTimeout(S.poll);
   const busy = S.project && (WORKING.includes(S.project.status) || (S.project.jobs || []).some((j) => ["queued", "running"].includes(j.status)));
   const anyBusy = S.projects.some((p) => WORKING.includes(p.status)) || (S.route.kind === "home" && (S.overview?.jobs || []).length);
-  if (busy || anyBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy ? 2500 : 6000);
+  const compBusy = S.route.kind === "compress" && (S.comp?.jobs || []).some((j) => ["queued", "running"].includes(j.status));
+  if (busy || anyBusy || compBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy ? 2500 : 6000);
 }
 function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || S.route.kind === "thumbs") { schedulePoll(); return; } render(); }
 
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
-  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["compress", "#/compress", "zip", "Compress", 1]]],
   ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
@@ -184,13 +187,13 @@ function render() {
     return;
   }
   app.dataset.mode = "shell"; ED.unmount();
-  const views = { new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
+  const views = { compress: compressView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
                   thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
@@ -862,6 +865,58 @@ function libCard(x) {
     <div class="lbody"><b title="${esc(x.name)}">${esc(x.name)}</b><span class="small muted" title="${esc(x.license || "")}">${esc((x.tags || "").split(",").filter((t) => t && t !== "starter").slice(0, 3).join(" · "))}</span></div>
     ${S.user.role !== "viewer" ? `<button class="ibtn ldel" data-del="${x.id}" title="हटाएँ">✕</button>` : ""}</div>`;
 }
+// ---------- video compressor (standalone tool) ----------
+const COMP_TARGETS = [10, 20, 25, 50];
+function fmtMB(b) { return b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : (b / 1e6).toFixed(b < 1e7 ? 1 : 0) + " MB"; }
+function compressView() {
+  const c = S.comp || { jobs: [], presets: {} }; const f = S.compForm || (S.compForm = { preset: "whatsapp", target: 16, custom: true, max_h: 720, fps: 30, src: "" });
+  const canEdit = S.user.role !== "viewer"; const presets = c.presets || {};
+  const srcs = S.compSrc || [];
+  const jobs = c.jobs || [];
+  return `<div class="pghead"><h1>Video Compress</h1></div>
+    <p class="muted small">बड़ी video (200–300 MB) को WhatsApp, email या social के लिए छोटी file बनाएँ। Original वैसी ही रहती है — नई file Library (B-roll) में आती है।</p>
+    ${canEdit ? `<div class="box">
+      <div class="irow"><div class="ifield"><label>Video</label><div class="row"><input type="file" id="cp-file" accept="video/*"><span class="small muted" id="cp-up"></span></div></div>
+        ${srcs.length ? `<div class="ifield"><label>या कोई render चुनें</label><select id="cp-src"><option value="">— upload की हुई file —</option>${srcs.map((x) => `<option value="${x.id}" ${f.src === x.id ? "selected" : ""}>${esc(x.title)} · ${esc(x.label || "")} · ${fmtMB(x.size || 0)}</option>`).join("")}</select></div>` : ""}</div>
+      <div class="ifield"><label>किसके लिए</label><div class="choices">${Object.entries(presets).map(([k, v]) => `<label class="chip ${f.preset === k ? "on" : ""}"><input type="radio" name="cp-preset" value="${k}" ${f.preset === k ? "checked" : ""}>${esc(v.label)}${v.target_mb ? ` · ${v.target_mb} MB` : ""}</label>`).join("")}</div></div>
+      ${f.preset !== "high" ? `<div class="ifield"><label>Target size</label><div class="choices">${COMP_TARGETS.map((t) => `<label class="chip ${!f.custom && f.target === t ? "on" : ""}"><input type="radio" name="cp-t" value="${t}" ${!f.custom && f.target === t ? "checked" : ""}>${t} MB</label>`).join("")}<label class="chip ${f.custom ? "on" : ""}"><input type="radio" name="cp-t" value="custom" ${f.custom ? "checked" : ""}>custom <input type="number" id="cp-custom" value="${f.custom ? f.target : ""}" min="1" max="20000" style="width:70px" placeholder="MB"></label></div></div>` : ""}
+      <div class="irow"><div class="ifield"><label>ज़्यादा से ज़्यादा resolution</label><select id="cp-h">${[2160, 1440, 1080, 720, 540, 480, 360].map((h) => `<option value="${h}" ${f.max_h === h ? "selected" : ""}>${h}p</option>`).join("")}</select></div>
+        <div class="ifield"><label>Frame rate</label><select id="cp-fps"><option value="0" ${!f.fps ? "selected" : ""}>जैसी है</option>${[24, 25, 30].map((x) => `<option value="${x}" ${f.fps === x ? "selected" : ""}>${x} fps तक</option>`).join("")}</select></div>
+        <div class="ifield" style="justify-content:flex-end"><button class="btn primary" id="cp-go">Compress करें</button></div></div>
+      <p class="small muted">बहुत छोटा target (लंबी video पर) quality साफ़ गिरा देता है — ऐसा होने पर नीचे चेतावनी दिखेगी, फिर भी बना सकते हैं।</p></div>` : ""}
+    <h3>काम</h3>
+    ${jobs.length ? `<ul class="jobs cplist">${jobs.map((j) => { const r = j.result || {}; const pl = j.payload || {}; const it = j.item;
+      const head = `<b>${esc(pl.name || "video")}</b> <span class="small muted">→ ${pl.target_mb ? pl.target_mb + " MB" : "high quality"} · ${pl.max_h}p${pl.fps ? " · " + pl.fps + " fps" : ""}</span>`;
+      if (j.status === "done") return `<li class="done"><div>${head}<div class="small">${r.source_size ? fmtMB(r.source_size) + " → " : ""}<b>${fmtMB(r.size || 0)}</b> · ${r.width}×${r.height} @ ${r.fps} fps · ${r.video_kbps ? r.video_kbps + " kbps" : "CRF"}${r.attempts > 1 ? ` · ${r.attempts} कोशिश` : ""}${r.hit_target === false ? ` · <span style="color:var(--amber)">target से बड़ी रही</span>` : ""}</div>
+        ${(r.warnings || []).map((w) => `<div class="small" style="color:var(--amber)">⚠ ${esc(w)}</div>`).join("")}
+        ${it ? `<div class="row" style="margin-top:.3rem"><a class="btn small" href="${it.url}&download=1" download>⬇ download</a><a class="btn small quiet" href="#/library">Library में</a><span class="small muted">WhatsApp पर भेजने के लिए download करके share करें</span></div>` : ""}</div></li>`;
+      if (j.status === "failed") return `<li class="failed"><div>${head}<div class="small" style="color:var(--rose)">असफल — ${esc(((j.error || "").trim().split("\n").filter(Boolean).slice(-1)[0] || "error").slice(0, 200))}</div></div></li>`;
+      if (j.status === "cancelled") return `<li><div>${head}<div class="small muted">रद्द</div></div></li>`;
+      return `<li><div>${head}<div class="small muted">${j.status === "queued" ? `कतार में${j.queue_position ? " · " + j.queue_position + " आगे" : ""}` : esc(j.message || "चल रहा है")}</div><div class="progress"><i ${j.status === "queued" ? 'class="indet"' : `style="width:${j.progress || 0}%"`}></i></div></div><span class="small">${j.status === "running" ? (j.progress || 0) + "%" : ""}</span>${canEdit ? `<button class="ibtn" data-cpx="${j.id}" title="रद्द">✕</button>` : ""}</li>`; }).join("")}</ul>` : `<p class="muted small">अभी कोई compress job नहीं।</p>`}`;
+}
+function bindCompress() {
+  const f = S.compForm; const canEdit = S.user.role !== "viewer"; if (!canEdit) return;
+  document.querySelectorAll("input[name=cp-preset]").forEach((i) => (i.onchange = () => { f.preset = i.value; const p = S.comp?.presets?.[f.preset]; if (p) { if (p.target_mb) { f.target = p.target_mb; f.custom = !COMP_TARGETS.includes(p.target_mb); } f.max_h = p.max_h; f.fps = p.fps || 0; } render(); }));
+  document.querySelectorAll("input[name=cp-t]").forEach((i) => (i.onchange = () => { if (i.value === "custom") { f.custom = true; f.target = +($("#cp-custom")?.value) || f.target; } else { f.custom = false; f.target = +i.value; } f.preset = "custom"; render(); }));
+  const cu = $("#cp-custom"); if (cu) { cu.onclick = (e) => e.stopPropagation(); cu.onchange = () => { f.custom = true; f.target = +cu.value || f.target; f.preset = "custom"; document.querySelectorAll("input[name=cp-t]").forEach((x) => (x.checked = x.value === "custom")); }; }
+  $("#cp-h").onchange = (e) => { f.max_h = +e.target.value; }; $("#cp-fps").onchange = (e) => { f.fps = +e.target.value; };
+  const sel = $("#cp-src"); if (sel) sel.onchange = () => { f.src = sel.value; };
+  document.querySelectorAll("[data-cpx]").forEach((b) => (b.onclick = async () => { if (!confirm("यह compress रद्द करें?")) return; try { await api("POST", `/compress/${b.dataset.cpx}/cancel`); await load(); render(); } catch (e) { toast(e.message); } }));
+  $("#cp-go").onclick = async () => {
+    const go = $("#cp-go"); const file = $("#cp-file").files[0]; const src = $("#cp-src")?.value || "";
+    if (!file && !src) return toast("पहले video चुनें या upload करें");
+    const target = f.preset === "high" ? 0 : (f.custom ? +($("#cp-custom").value) : f.target);
+    if (f.preset !== "high" && !(target > 0)) return toast("target MB लिखें");
+    go.disabled = true;
+    try {
+      const body = { preset: f.preset, target_mb: target, max_h: f.max_h, fps: f.fps };
+      if (file) { go.textContent = "upload 0%"; const up = $("#cp-up"); const item = await libPut("broll", file, (pct) => { go.textContent = `upload ${pct}%`; up.textContent = pct < 100 ? "" : "server पर आ गई, queue में…"; }); body.library_id = item.id; }
+      else body.asset_id = src;
+      await api("POST", "/compress", body); toast("compress शुरू"); await load(); render();
+    } catch (e) { toast(e.message); go.disabled = false; go.textContent = "Compress करें"; }
+  };
+}
+
 function libraryView() {
   const all = S.lib || []; const items = all.filter(libFilter); const canEdit = S.user.role !== "viewer";
   const counts = Object.fromEntries(LIBCATS.map(([k, , c]) => [k, all.filter((x) => !c || ((!c.kind || x.kind === c.kind) && (!c.tag || (`,${x.tags},`).includes(`,${c.tag},`)) && (!c.source || x.source === c.source))).length]));

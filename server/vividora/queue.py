@@ -62,7 +62,7 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
         # a one-line re-transcribe is seconds of work the creator waits for in the editor: first;
         # then quick pipeline steps before long renders
         "ORDER BY (kind = 'transcribe' AND json_extract(payload, '$.range') IS NOT NULL) DESC, "
-        "CASE WHEN kind IN ('render','montage','matte','dub') THEN 1 ELSE 0 END, created_at LIMIT 1",
+        "CASE WHEN kind IN ('render','montage','matte','dub','compress') THEN 1 ELSE 0 END, created_at LIMIT 1",
         [*kinds, db.now()]).fetchone())
     if job is None:
         return None

@@ -13,6 +13,7 @@ from typing import Any
 from . import db, notify, queue, storage
 from .config import settings
 from .engine import autocut, autopilot
+from .engine import encode
 from .engine.presets import caption_styles, platforms
 
 DEFAULT_EFFECTS = {
@@ -374,6 +375,28 @@ def after_job(c, job: dict, result: dict) -> None:
             except ValueError:
                 pass
 
+    elif kind == "compress":
+        # the compressed file becomes a library video next to the original (which is untouched)
+        f = (result.get("files") or [{}])[0]
+        if f.get("path"):
+            from .api.library import _probe_meta
+            src = storage.abs_path(f["path"])
+            pl = job.get("payload") or {}
+            tag = f"{pl.get('target_mb'):g} MB" if pl.get("target_mb") else "HQ"
+            base = (pl.get("name") or "video").rsplit(".", 1)[0]
+            item_id = db.new_id()
+            rel = str(Path(f"ws_{project['workspace_id']}") / "library" / "broll" / f"{item_id[:8]}_{storage.safe_name(src.name)}")
+            dst = storage.ensure_parent(rel)
+            shutil.move(str(src), str(dst))
+            item = {"id": item_id, "workspace_id": project["workspace_id"], "kind": "broll", "name": f"{base} ({tag})"[:120], "path": rel,
+                    "size": dst.stat().st_size, "mime": storage.guess_mime(rel),
+                    "meta": {**_probe_meta(dst, "broll"), "compressed": {k: v for k, v in result.items() if k != "files"},
+                             "compressed_from": pl.get("library_id") or pl.get("asset_id")},
+                    "created_by": pl.get("user_id"), "created_at": db.now(), "tags": "compressed", "source": "compress", "license": "own"}
+            db.insert(c, "library", item)
+            db.update(c, "jobs", job["id"], {"result": {**result, "library_id": item_id}})
+        return
+
     elif kind == "montage_plan":
         st = project.get("settings", {})
         mo = {**(st.get("montage") or {}), "plan": result.get("plan")}
@@ -432,6 +455,8 @@ def fail_job(c, job: dict, error: str) -> None:
     pid = job["project_id"]
     db.update(c, "jobs", job["id"], {"status": "failed", "error": error[:4000],
                                      "finished_at": db.now()})
+    if job["kind"] == "compress":
+        return  # a tool job: the Compress page shows the error, the hidden tools project stays as is
     if job["kind"] == "matte_lib" and not ((db.get("projects", pid) or {}).get("meta") or {}).get("render_after_matte"):
         # a library clip's cutout is a side job unless a render is waiting for it
         db.update(c, "projects", pid, {"status_note": f"cutout (B-roll) असफल: {error.splitlines()[-1][:160] if error else 'error'}",
@@ -483,6 +508,7 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
         raise ValueError("कम से कम एक platform चुनें")
     if opts["caption_style"] not in caption_styles():
         raise ValueError("unknown caption style")
+    opts["export"] = encode.normalize(opts.get("export"))
     new_settings = {**project.get("settings", {}), "render": opts}
     db.update(c, "projects", pid, {"settings": new_settings, "updated_at": db.now()})
     body = (opts.get("effects") or {}).get("body") or {}
@@ -503,8 +529,65 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
               "AND kind='render' AND status='queued'", (db.now(), pid))
     set_status(c, pid, "rendering", f"{len(opts['presets'])} वीडियो render हो रहे हैं")
     fonts = [r[0] for r in c.execute("SELECT id FROM library WHERE workspace_id = ? AND kind = 'font'", (project["workspace_id"],))]
-    return [queue.enqueue(c, pid, "render", {"preset": p, "fonts": fonts, **{k: v for k, v in opts.items() if k != 'presets'}})
+    sigs = render_sigs(db.get("projects", pid) or project)
+    return [queue.enqueue(c, pid, "render", {"preset": p, "fonts": fonts, "signature": sigs.get(p),
+                                             **{k: v for k, v in opts.items() if k != 'presets'}})
             for p in opts["presets"]]
+
+
+def tools_project(c, workspace_id: str) -> dict:
+    """A hidden per-workspace project that carries tool jobs (video compressor) — jobs need a project."""
+    row = c.execute("SELECT * FROM projects WHERE workspace_id = ? AND kind = 'tools' LIMIT 1", (workspace_id,)).fetchone()
+    if row:
+        return db.row(row)
+    p = {"id": db.new_id(), "workspace_id": workspace_id, "title": "🔧 Tools", "kind": "tools", "language": "hi",
+         "status": "approved", "status_note": "", "meta": {"hidden": True}, "settings": {}, "created_at": db.now(), "updated_at": db.now()}
+    db.insert(c, "projects", p)
+    return p
+
+
+def request_compress(c, workspace_id: str, user_id: str | None, src: dict, opts: dict) -> dict:
+    """Queue a compress job for a library item or a project asset of this workspace."""
+    from .engine import compress as cmp
+    payload: dict = {"user_id": user_id}
+    if src.get("library_id"):
+        item = db.get("library", src["library_id"])
+        if not item or item["workspace_id"] != workspace_id:
+            raise ValueError("library item नहीं मिला")
+        payload.update(library_id=item["id"], name=item["name"])
+    elif src.get("asset_id"):
+        a = db.get("assets", src["asset_id"])
+        pr = db.get("projects", a["project_id"]) if a else None
+        if not a or not pr or pr["workspace_id"] != workspace_id:
+            raise ValueError("file नहीं मिली")
+        payload.update(asset_id=a["id"], name=f"{pr['title']} {a.get('label') or a['kind']}.mp4")
+    else:
+        raise ValueError("पहले video चुनें या upload करें")
+    preset = opts.get("preset") if opts.get("preset") in cmp.PRESETS else "custom"
+    base = cmp.PRESETS[preset]
+    target = float(opts.get("target_mb") if opts.get("target_mb") not in (None, "") else base["target_mb"])
+    if target < 0 or target > 20000:
+        raise ValueError("target 1–20000 MB के बीच रखें")
+    max_h = int(opts.get("max_h") or base["max_h"])
+    if max_h not in (240, 360, 480, 540, 720, 1080, 1440, 2160):
+        raise ValueError("max resolution सही नहीं")
+    fps = float(opts.get("fps") or base["fps"] or 0)
+    payload.update(preset=preset, target_mb=target, max_h=max_h, fps=fps, audio_kbps=int(opts.get("audio_kbps") or base["audio_kbps"]),
+                   crf=int(opts.get("crf") or base.get("crf") or 0))
+    tp = tools_project(c, workspace_id)
+    job = queue.enqueue(c, tp["id"], "compress", payload)
+    log(c, workspace_id, "compress.start", user_id=user_id, project_id=tp["id"], detail={"target_mb": target, "preset": preset})
+    return job
+
+
+def render_sigs(project: dict) -> dict:
+    """preset id → signature of the output the CURRENT project state would produce; a finished
+    render whose asset meta carries the same signature is still valid (editor: "यह render अभी भी सही है")."""
+    opts = {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})}
+    srcs = [a["id"] for a in db.rows(db.conn().execute(
+        "SELECT id FROM assets WHERE project_id = ? AND kind IN ('raw','audio_clean','alpha','voice_track') AND archived = 0",
+        (project["id"],)))]
+    return {p: encode.signature(opts, p, project, srcs) for p in platforms()}
 
 
 def request_shorts_plan(c, project: dict, options: dict | None = None) -> dict:
@@ -689,4 +772,5 @@ def project_view(project: dict) -> dict:
     jobs = db.rows(cn.execute("SELECT * FROM jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 20",
                               (project["id"],)))
     return {**project, "assets": [{k: v for k, v in a.items() if k != "path"} for a in assets],
-            "jobs": jobs, "render_defaults": {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})}}
+            "jobs": jobs, "render_defaults": {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})},
+            "render_sigs": render_sigs(project)}

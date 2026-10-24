@@ -263,7 +263,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 burn_captions=p.get("burn_captions"),
                 caption_overrides=p.get("captions"),
                 effects={**effects, "font_paths": font_paths},
-                encoder_preset=os.getenv("X264_PRESET") or None,
+                encoder_preset=os.getenv("X264_PRESET") or None, export=p.get("export"),
                 on_progress=lambda f, m, _cb=_progress(client, job["id"]): _cb(f * 0.92, m),
             )
             # output QA before anyone is asked to approve: black start (cut off), loudness, captions
@@ -282,11 +282,32 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 label = p.get("label") or f.get("label")
                 up = client.upload(job["id"], f["path"], f["kind"], label)
                 files.append({**f, "label": label, "path": up["path"],
-                              "meta": {**f.get("meta", {}), "title": p.get("title"),
+                              "meta": {**f.get("meta", {}), "title": p.get("title"), "signature": p.get("signature"),
                                        **({"qa": qa_info} if qa_info and f is vid else {})}})
             if effects.get("_cutout_missing"):
                 qa_warn = qa_warn + [f"{len(effects['_cutout_missing'])} overlay का cutout अभी नहीं बना — वह पूरा clip दिखा"]
             return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn + qa_warn}
+
+        if kind == "compress":
+            from ..engine import compress as cmp
+            pl = job["payload"] or {}
+            prog = _progress(client, job["id"])
+            prog(0.01, "file ला रहे हैं")
+            if pl.get("library_id"):
+                src = client.download_library(pl["library_id"], tmp / "src" / pl["library_id"])
+            else:
+                src = client.download(pl["asset_id"], tmp / "src" / "asset.bin")
+            info = ffmpeg.probe(src)
+            plan = cmp.plan(info, target_mb=float(pl.get("target_mb") or 0), max_h=int(pl.get("max_h") or 1080),
+                            fps=float(pl.get("fps") or 0), audio_kbps=int(pl.get("audio_kbps") or 96), crf=int(pl.get("crf") or 0))
+            prog(0.03, f"{plan['width']}×{plan['height']} @ {plan['fps']:g} fps, {plan['video_kbps'] or 'CRF ' + str(plan['crf'])} kbps")
+            stem = Path(str(pl.get("name") or "video")).stem[:60] or "video"
+            out = tmp / "out" / f"{stem}.mp4"
+            r = cmp.run(src, out, plan, on_progress=lambda f, m: prog(0.03 + f * 0.95, m), label="compress")
+            prog(0.99, "upload")
+            up = client.upload(job["id"], out, "compress", "compress")
+            return {**r, "source_size": src.stat().st_size, "plan": {k: v for k, v in plan.items() if k != "warnings"},
+                    "files": [{"kind": "compress", "path": up["path"], "mime": "video/mp4"}]}
 
         if kind == "dub":
             from ..engine import tts
@@ -452,7 +473,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan", "compress"]
     try:
         if not os.getenv("VIVIDORA_MATTE_MOCK"):
             import onnxruntime  # noqa: F401

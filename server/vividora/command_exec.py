@@ -7,7 +7,7 @@ from .engine import commands
 
 
 def latest_project(workspace_id: str) -> dict | None:
-    return db.row(db.conn().execute("SELECT * FROM projects WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT 1",
+    return db.row(db.conn().execute("SELECT * FROM projects WHERE workspace_id = ? AND kind != 'tools' ORDER BY updated_at DESC LIMIT 1",
                                     (workspace_id,)).fetchone())
 
 

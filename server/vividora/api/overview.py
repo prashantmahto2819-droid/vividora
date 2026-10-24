@@ -45,7 +45,7 @@ async def overview(request: Request, user: dict):
     upcoming = sorted([p for p in pubs if p["status"] in ("queued", "running") or (p["when"] and p["when"] > now)],
                       key=lambda p: p["when"] or p["created_at"])
     recent = [p for p in pubs if p["status"] == "done" and not (p["when"] and p["when"] > now)][:10]
-    counts = dict(db.conn().execute("SELECT status, COUNT(*) FROM projects WHERE workspace_id = ?" + (" AND channel_id = ?" if channel else "")
+    counts = dict(db.conn().execute("SELECT status, COUNT(*) FROM projects WHERE workspace_id = ? AND kind != 'tools'" + (" AND channel_id = ?" if channel else "")
                                     + " GROUP BY status", [ws, channel] if channel else [ws]).fetchall())
     return ok({"jobs": jobs, "upcoming": upcoming[:20], "recent": recent, "counts": counts})
 

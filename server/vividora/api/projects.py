@@ -8,7 +8,7 @@ from starlette.routing import Route
 
 from .. import db, service, storage
 from ..engine import autocut
-from ..engine import catalog, procatalog, textfx
+from ..engine import catalog, encode, procatalog, textfx
 from ..engine import autopilot as autopilot_eng
 from ..engine.effects import BODY_ANIMS, BODY_BG, EXTRAS, LOOKS, STICKER_ANIMS, TEXT_ANIMS, TRANSITIONS, VOICE_PARAMS, VOICE_PRESETS, ZOOM_MODES, BLENDS
 from ..engine.presets import caption_styles, platforms
@@ -22,7 +22,7 @@ STATUSES = ("uploading", "preparing", "transcribing", "cutting", "review_cuts", 
 
 @require("viewer")
 async def list_projects(request: Request, user: dict):
-    q = "SELECT * FROM projects WHERE workspace_id = ?"
+    q = "SELECT * FROM projects WHERE workspace_id = ? AND kind != 'tools'"
     args: list = [user["workspace_id"]]
     status = request.query_params.get("status")
     if status in STATUSES:
@@ -432,6 +432,29 @@ async def recut(request: Request, user: dict):
     return ok({"job": job})
 
 
+@require("viewer")
+async def encoders(request: Request, user: dict):
+    """Which codecs/containers this server's ffmpeg can write (the export modal hides the rest)."""
+    return ok(encode.available())
+
+
+@require("viewer")
+async def export_estimate(request: Request, user: dict):
+    """Rough output size per chosen preset for the export overrides in the body ("लगभग")."""
+    p = own_project(request, user)
+    data = await body(request)
+    exp = encode.normalize(data.get("export"))
+    dur = float(data.get("duration") or p.get("meta", {}).get("duration") or 0)
+    out = {}
+    for pid in data.get("presets") or []:
+        pr = platforms().get(pid)
+        if pr:
+            pl = encode.plan(exp, pr, p.get("meta") or {}, float((p.get("meta") or {}).get("fps") or 30))
+            out[pid] = {"bytes": encode.estimate_bytes(exp, pr, p.get("meta") or {}, dur), "width": pl["width"],
+                        "height": pl["height"], "fps": pl["fps"], "codec": pl["codec"], "container": pl["container"]}
+    return ok({"estimate": out, "export": exp})
+
+
 @require("editor")
 async def render(request: Request, user: dict):
     p = own_project(request, user)
@@ -774,6 +797,8 @@ routes = [
     Route("/projects/{project_id}/suggest", suggestions),
     Route("/projects/{project_id}/audio-preview", audio_preview, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),
+    Route("/projects/{project_id}/export-estimate", export_estimate, methods=["POST"]),
+    Route("/system/encoders", encoders),
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
