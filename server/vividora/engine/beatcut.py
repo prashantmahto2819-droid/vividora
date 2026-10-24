@@ -549,7 +549,8 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
            texts: list[str] | None = None, look: str = "auto", reframe: str = "smart", font: str = "Poppins",
            text_color: str = "#FFFFFF", text_size: float = 0.07, watermark: Path | None = None,
            fonts_dir: Path | None = None, encoder_preset: str | None = None, on_progress=None,
-           text_style: dict | None = None, text_mode: str = "bars", intro_text: str = "", outro_text: str = "") -> dict:
+           text_style: dict | None = None, text_mode: str = "bars", intro_text: str = "", outro_text: str = "",
+           beat_only: bool = False, keep_clip_audio: bool = False) -> dict:
     """clips: id → {path, kind, w, h}. text_style: a textfx style (font/color/outline/box…) — the theme's text look;
     text_mode: "bars" (one line per bar) or "beats" (one word on every strong-beat cut); intro_text / outro_text sit on
     the intro / outro cuts of the plan."""
@@ -680,29 +681,95 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
         f.write_text("\n".join(ass) + "\n", encoding="utf-8")
         fonts = fonts_dir or Path(__file__).resolve().parent.parent.parent / "fonts"
         tail += f"ass=filename='{ffmpeg.escape_filter_path(f)}':fontsdir='{ffmpeg.escape_filter_path(fonts)}':shaping=complex,"
-    mi = 1
-    inputs += ["-ss", f"{float(pl.get('music_start', 0)):.3f}", "-t", f"{total + 0.5:.3f}", "-i", str(music_path)]
-    if watermark is not None:
-        inputs += ["-i", str(watermark)]
-        chains.append(f"[{mi + 1}:v]scale={int(W * 0.14)}:-1,format=rgba,colorchannelmixer=aa=0.75[wm]")
-        chains.append(f"[vcat]{tail}format=yuv420p[vt];[vt][wm]overlay=W-w-{int(min(W, H) * 0.035)}:{int(min(W, H) * 0.035)}[v]")
+    # beat_only: song is used only for beat detection — output has no song audio
+    if beat_only and not keep_clip_audio:
+        # silent output: no audio inputs, video only
+        if watermark is not None:
+            inputs += ["-i", str(watermark)]
+            chains.append(f"[1:v]scale={int(W * 0.14)}:-1,format=rgba,colorchannelmixer=aa=0.75[wm]")
+            chains.append(f"[vcat]{tail}format=yuv420p[vt];[vt][wm]overlay=W-w-{int(min(W, H) * 0.035)}:{int(min(W, H) * 0.035)}[v]")
+        else:
+            chains.append(f"[vcat]{tail}format=yuv420p[v]")
+        script = work / "filter.txt"
+        script.write_text(";\n".join(chains), encoding="utf-8")
+        out = out_dir / f"{name}.mp4"
+        vcfg = preset.get("video", {})
+        ffmpeg.run([*inputs, "-filter_complex_script", str(script), "-map", "[v]", "-an",
+                    "-c:v", "libx264", "-preset", encoder_preset or vcfg.get("preset", "medium"), "-crf", str(vcfg.get("crf", 20)),
+                    "-g", str(fps * 2), "-profile:v", "high",
+                    "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)],
+                   duration=total, on_progress=(lambda f, l: on_progress(0.75 + 0.25 * f, l)) if on_progress else None, label="beat edit रेंडर (beat-only, silent)")
+    elif beat_only and keep_clip_audio:
+        # beat-only with original clip audio: concat the clip audio from the segment files, skip the song
+        # re-render segment files with audio retained
+        seg_a_files: list[Path] = [work / f"sega{n:03d}.ts" for n in range(len(segs))]
+        for n, s in enumerate(segs):
+            c = clips[s["clip"]]
+            d = float(s["dur"])
+            speed = float(s.get("speed") or 1)
+            if c["kind"] == "image" or c.get("kind") == "image":
+                # images have no audio — generate silence
+                ffmpeg.run(["-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo", "-t", f"{d:.3f}",
+                            "-c:a", "aac", "-b:a", "128k", str(seg_a_files[n])], label=f"clip audio (silent) {n + 1}")
+            else:
+                # extract and speed-match the clip's own audio
+                a_in = ["-ss", f"{float(s['src_in']):.3f}", "-t", f"{d * speed + 0.25:.3f}", "-i", str(c["path"])]
+                atempo = f"atempo={1 / speed}" if speed != 1 else ""
+                af = f"[0:a]{atempo + ',' if atempo else ''}atrim=0:{d:.3f},asetpts=PTS-STARTPTS,aresample=48000[a]"
+                try:
+                    ffmpeg.run([*a_in, "-filter_complex", af, "-map", "[a]", "-c:a", "aac", "-b:a", "128k",
+                                "-t", f"{d:.3f}", str(seg_a_files[n])], label=f"clip audio {n + 1}")
+                except Exception:  # noqa: BLE001 — no audio track in this clip
+                    ffmpeg.run(["-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo", "-t", f"{d:.3f}",
+                                "-c:a", "aac", "-b:a", "128k", str(seg_a_files[n])], label=f"clip audio (fallback silent) {n + 1}")
+        alst = work / "segs_a.txt"
+        alst.write_text("".join(f"file '{f.as_posix()}'\n" for f in seg_a_files), encoding="utf-8")
+        mi = 1
+        inputs += ["-f", "concat", "-safe", "0", "-i", str(alst)]
+        if watermark is not None:
+            inputs += ["-i", str(watermark)]
+            chains.append(f"[{mi + 1}:v]scale={int(W * 0.14)}:-1,format=rgba,colorchannelmixer=aa=0.75[wm]")
+            chains.append(f"[vcat]{tail}format=yuv420p[vt];[vt][wm]overlay=W-w-{int(min(W, H) * 0.035)}:{int(min(W, H) * 0.035)}[v]")
+        else:
+            chains.append(f"[vcat]{tail}format=yuv420p[v]")
+        a_cfg = preset.get("audio", {})
+        chains.append(f"[{mi}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={max(0.0, total - 1.0):.3f}:d=1.0,"
+                      f"loudnorm=I={a_cfg.get('loudness', -14)}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,aresample=48000[a]")
+        script = work / "filter.txt"
+        script.write_text(";\n".join(chains), encoding="utf-8")
+        out = out_dir / f"{name}.mp4"
+        vcfg = preset.get("video", {})
+        ffmpeg.run([*inputs, "-filter_complex_script", str(script), "-map", "[v]", "-map", "[a]",
+                    "-c:v", "libx264", "-preset", encoder_preset or vcfg.get("preset", "medium"), "-crf", str(vcfg.get("crf", 20)),
+                    "-g", str(fps * 2), "-profile:v", "high", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)],
+                   duration=total, on_progress=(lambda f, l: on_progress(0.75 + 0.25 * f, l)) if on_progress else None, label="beat edit रेंडर (beat-only, clip audio)")
     else:
-        chains.append(f"[vcat]{tail}format=yuv420p[v]")
-    a_cfg = preset.get("audio", {})
-    chains.append(f"[{mi}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={max(0.0, total - 1.0):.3f}:d=1.0,"
-                  f"loudnorm=I={a_cfg.get('loudness', -14)}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,aresample=48000[a]")
-    script = work / "filter.txt"
-    script.write_text(";\n".join(chains), encoding="utf-8")
-    out = out_dir / f"{name}.mp4"
-    vcfg = preset.get("video", {})
-    ffmpeg.run([*inputs, "-filter_complex_script", str(script), "-map", "[v]", "-map", "[a]",
-                "-c:v", "libx264", "-preset", encoder_preset or vcfg.get("preset", "medium"), "-crf", str(vcfg.get("crf", 20)),
-                "-g", str(fps * 2), "-profile:v", "high", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
-                "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)],
-               duration=total, on_progress=(lambda f, l: on_progress(0.75 + 0.25 * f, l)) if on_progress else None, label="beat edit रेंडर")
+        # normal mode: song audio mixed in
+        mi = 1
+        inputs += ["-ss", f"{float(pl.get('music_start', 0)):.3f}", "-t", f"{total + 0.5:.3f}", "-i", str(music_path)]
+        if watermark is not None:
+            inputs += ["-i", str(watermark)]
+            chains.append(f"[{mi + 1}:v]scale={int(W * 0.14)}:-1,format=rgba,colorchannelmixer=aa=0.75[wm]")
+            chains.append(f"[vcat]{tail}format=yuv420p[vt];[vt][wm]overlay=W-w-{int(min(W, H) * 0.035)}:{int(min(W, H) * 0.035)}[v]")
+        else:
+            chains.append(f"[vcat]{tail}format=yuv420p[v]")
+        a_cfg = preset.get("audio", {})
+        chains.append(f"[{mi}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={max(0.0, total - 1.0):.3f}:d=1.0,"
+                      f"loudnorm=I={a_cfg.get('loudness', -14)}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,aresample=48000[a]")
+        script = work / "filter.txt"
+        script.write_text(";\n".join(chains), encoding="utf-8")
+        out = out_dir / f"{name}.mp4"
+        vcfg = preset.get("video", {})
+        ffmpeg.run([*inputs, "-filter_complex_script", str(script), "-map", "[v]", "-map", "[a]",
+                    "-c:v", "libx264", "-preset", encoder_preset or vcfg.get("preset", "medium"), "-crf", str(vcfg.get("crf", 20)),
+                    "-g", str(fps * 2), "-profile:v", "high", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                    "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)],
+                   duration=total, on_progress=(lambda f, l: on_progress(0.75 + 0.25 * f, l)) if on_progress else None, label="beat edit रेंडर")
     import shutil
     shutil.rmtree(work, ignore_errors=True)
     return {"files": [{"kind": "render", "path": out, "mime": "video/mp4", "label": preset["id"],
                        "meta": {"preset": preset["id"], "width": W, "height": H, "duration": round(total, 2), "fps": fps,
-                                "montage": True, "bpm": pl.get("bpm"), "segments": len(segs), "effects": {"look": look, "music": True}}}],
+                                "montage": True, "bpm": pl.get("bpm"), "segments": len(segs),
+                                "effects": {"look": look, "music": not beat_only, "beat_only": beat_only, "keep_clip_audio": keep_clip_audio}}}],
             "duration": round(total, 2), "bpm": pl.get("bpm"), "segments": len(segs), "warnings": []}
