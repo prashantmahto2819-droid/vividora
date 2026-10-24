@@ -71,7 +71,7 @@ function toast(msg, ms = 2600) { const t = document.createElement("div"); t.clas
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress|billing|admin|signup)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -94,6 +94,9 @@ async function load() {
   } else S.project = null;
   if (r.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (r.kind === "users" || (r.kind === "account" && S.user?.role === "admin")) S.users = await api("GET", "/users").catch(() => []);
+  if (r.kind === "users" && S.user?.role === "admin") S.invites = await api("GET", "/invites").catch(() => []);
+  if (r.kind === "billing" || r.kind === "account") S.planInfo = await api("GET", "/plan").catch(() => null);
+  if (r.kind === "admin" && S.user?.role === "admin") { const [w, a, b] = await Promise.all([api("GET", "/admin/workspaces").catch(() => null), api("GET", "/admin/audit?limit=150").catch(() => []), api("GET", "/admin/backups").catch(() => null)]); S.adminWs = w; S.audit = a; S.backups = b; }
   if (r.kind === "plan") { const [t, i, n, rf] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [], setup: {} })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", "/notify").catch(() => ({})), api("GET", "/refs").catch(() => [])]); S.trends = t; S.ideas = i; S.notify = n; S.refs = rf; }
   if (r.kind === "trends") { S.trends = await api("GET", "/trends").catch(() => ({ trends: [], setup: {} })); S.radar = S.channel ? await api("GET", `/radar?channel=${S.channel}`).catch(() => null) : null; }
   if (r.kind === "publish") { const [o, p] = await Promise.all([api("GET", "/overview" + ovQ).catch(() => null), api("GET", "/publications" + ovQ).catch(() => [])]); S.overview = o; S.pubs = p; }
@@ -160,6 +163,7 @@ function render() {
   const app = $("#app");
   closeMenu();
   if (!S.token) { ED.unmount(); TH.unmount(); VO.unmount(); app.dataset.mode = ""; app.innerHTML = loginView(); bindLogin(); return; }
+  if (S.route.kind === "signup") { go("/"); return; }
   const r = S.route;
   if (S.user?.role !== "viewer") VO.mount({ api, toast, reload: () => { $("#app").dataset.mode = ""; load().then(render); } });
   document.body.classList.toggle("ed-mode", r.kind === "projects" && !!r.id);
@@ -190,12 +194,12 @@ function render() {
   }
   app.dataset.mode = "shell"; ED.unmount();
   const views = { compress: compressView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
-                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView };
+                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, billing: bindBilling, admin: bindAdmin };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
@@ -408,18 +412,38 @@ function bindHome() {
   }
 }
 function loginView() {
+  const q = new URLSearchParams((location.hash.split("?")[1] || "")); const signup = /^#\/signup/.test(location.hash); const invite = q.get("invite") || "";
+  if (signup) return `<div class="login"><form id="signup"><div class="brand"><i></i>Vividora</div><p class="muted">${invite ? "आपको इस studio में बुलाया गया है — अपना account बनाएँ।" : "नया account — 14 दिन का free trial, card नहीं चाहिए।"}</p>
+    <div class="field"><label>आपका नाम</label><input name="name" required maxlength="80" autocomplete="name"></div>
+    ${invite ? "" : `<div class="field"><label>Studio / channel का नाम</label><input name="workspace" maxlength="80" placeholder="जैसे: Prashant Motivation"></div>`}
+    <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
+    <div class="field"><label>Password (8+ अक्षर, अक्षर और अंक दोनों)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div>
+    <input type="hidden" name="invite" value="${esc(invite)}">
+    <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Account बनाएँ</button>
+    <p class="small muted" style="margin-top:.8rem;text-align:center">पहले से account है? <a href="#/" id="to-login">Login करें</a></p></form></div>`;
   return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका video studio — आगे बढ़ने के लिए login करें।</p>
     <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
     <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
-    <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Login करें</button></form></div>`;
+    <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Login करें</button>
+    <p class="small muted" id="signup-link" style="margin-top:.8rem;text-align:center" hidden>नया हैं? <a href="#/signup">Free trial शुरू करें</a></p></form></div>`;
 }
 function bindLogin() {
+  const finish = async (r) => { S.token = r.token; S.user = r.user; S.ws = r.workspace; S.saas = !!r.saas; localStorage.setItem("vividora_token", r.token); location.hash = "#/"; await load(); render(); };
+  const sf = $("#signup");
+  if (sf) { sf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true;
+      try { const r = await api("POST", "/auth/signup", { name: f.name.value, workspace: f.workspace?.value || "", email: f.email.value, password: f.password.value, invite: f.invite.value });
+        if (r.verify_needed) { $("#login-err").innerHTML = `<div class="note">${esc(r.message)}</div>`; b.disabled = false; return; } await finish(r); }
+      catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; b.disabled = false; } };
+    return; }
+  // the verify link from the email lands here: #/?verify=<token>
+  const vt = new URLSearchParams((location.hash.split("?")[1] || "")).get("verify");
+  if (vt) api("GET", `/auth/verify?t=${encodeURIComponent(vt)}`).then(finish).catch((err) => { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; });
+  // is signup open on this server? (SAAS_MODE) — a cheap probe: /auth/signup answers 404 when closed
+  fetch("/api/auth/signup", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => { if (r.status !== 404) $("#signup-link").hidden = false; }).catch(() => {});
   $("#login").onsubmit = async (e) => {
     e.preventDefault(); const f = e.target;
-    try { const r = await api("POST", "/auth/login", { email: f.email.value, password: f.password.value });
-      S.token = r.token; S.user = r.user; S.ws = r.workspace; localStorage.setItem("vividora_token", r.token);
-      await load(); render();
-    } catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; }
+    try { const r = await api("POST", "/auth/login", { email: f.email.value, password: f.password.value }); await finish(r); }
+    catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; }
   };
 }
 
@@ -734,12 +758,15 @@ function usersView() {
       <div class="field"><label>नाम</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" type="email" required></div>
       <div class="field"><label>Password (कम से कम 8 अक्षर)</label><input name="password" type="password" minlength="8" required></div>
       <div class="field"><label>Role</label><select name="role"><option>editor</option><option>viewer</option><option>admin</option></select></div>
-      <button class="btn primary">User जोड़ें</button></form></div>
+      <button class="btn primary">User जोड़ें</button></form>
+      ${S.planInfo?.saas || (S.invites || []).length ? `<h3 class="small" style="margin-top:1rem">Invite link (user खुद signup करे)</h3><form id="mkinv" class="row"><div class="field"><label>Role</label><select name="role"><option>editor</option><option>viewer</option><option>admin</option></select></div><div class="field"><label>सिर्फ़ इस email के लिए (खाली = कोई भी)</label><input name="email" type="email"></div><button class="btn small">Link बनाएँ</button></form>
+      <ul class="hlist">${(S.invites || []).map((i) => `<li><code class="small">${esc(i.url || i.code)}</code> <span class="small muted">${esc(i.role)} · ${i.uses_left} बाक़ी</span></li>`).join("") || `<li class="small muted">अभी कोई invite नहीं</li>`}</ul>` : ""}</div>
     <div class="section"><h2>अपना password</h2><form id="pw" class="row"><div class="field"><label>मौजूदा password</label><input name="current" type="password" required></div><div class="field"><label>नया password</label><input name="new" type="password" minlength="8" required></div><button class="btn">Password बदलें</button></form></div>`;
 }
 function bindUsers() {
   document.querySelectorAll(".role").forEach((s) => (s.onchange = () => api("PATCH", `/users/${s.dataset.id}`, { role: s.value }).then(() => toast("Role बदल दिया")).catch((e) => toast(e.message))));
   document.querySelectorAll(".toggle").forEach((b) => (b.onclick = () => api("PATCH", `/users/${b.dataset.id}`, { active: b.dataset.active !== "true" }).then(() => load().then(render))));
+  const mk = $("#mkinv"); if (mk) mk.onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { const r = await api("POST", "/invites", { role: f.role.value, email: f.email.value }); try { await navigator.clipboard.writeText(r.url); toast("Invite link copy हो गया"); } catch { toast("Invite link बना"); } await load(); render(); } catch (err) { toast(err.message); } };
   $("#adduser").onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/users", { name: f.name.value, email: f.email.value, password: f.password.value, role: f.role.value }); toast("User जोड़ दिया"); load().then(render); } catch (err) { toast(err.message); } };
   $("#pw").onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/auth/password", { current: f.current.value, new: f.new.value }); toast("Password बदल दिया"); f.reset(); } catch (err) { toast(err.message); } };
 }
@@ -1156,9 +1183,10 @@ function accountView() {
     <div class="setgrid">
       <section class="card"><div class="card-h"><h2>आपका account</h2></div><p><b>${esc(S.user.name)}</b> <span class="pill">${S.user.role}</span><br><span class="small muted">${esc(S.user.email || "")}</span></p>
         <form id="pw" class="row" style="align-items:flex-end"><div class="field"><label>मौजूदा password</label><input name="current" type="password" required autocomplete="current-password"></div><div class="field"><label>नया password</label><input name="new" type="password" minlength="8" required autocomplete="new-password"></div><button class="btn">बदलें</button></form>
-        <button class="btn quiet danger" id="logout2">${ic("out")} बाहर निकलें</button></section>
+        <div class="row" style="gap:.5rem;flex-wrap:wrap"><button class="btn quiet danger" id="logout2">${ic("out")} बाहर निकलें</button><button class="btn quiet small" id="logout-all" title="हर phone/laptop से logout — token बदल जाते हैं">सब devices से बाहर</button></div></section>
+      ${S.planInfo?.saas ? `<section class="card"><div class="card-h"><h2>Plan</h2><a class="btn small" href="#/billing">देखें / बदलें</a></div>${planMini(S.planInfo)}</section>` : ""}
       <section class="card"><div class="card-h"><h2>Workspace</h2></div><ul class="hlist">
-        <li><a href="#/settings">Channels & Brand kit, YouTube / Instagram connections</a></li>${admin ? `<li><a href="#/users">Users और roles (${(S.users || []).length})</a></li>` : ""}<li><a href="#/status">Workers, queue और archive की स्थिति</a></li>
+        <li><a href="#/settings">Channels & Brand kit, YouTube / Instagram connections</a></li>${admin ? `<li><a href="#/users">Users और roles (${(S.users || []).length})</a></li><li><a href="#/admin">Admin — workspaces, audit log, backups</a></li>` : ""}<li><a href="#/status">Workers, queue और archive की स्थिति</a></li>
         <li><span>Home के sections</span><button class="btn small quiet" id="home-reset">Default पर लौटें</button></li></ul></section>
     </div>
     ${admin ? `<section class="card" id="storage"><div class="card-h"><h2>Storage</h2><button class="btn small" id="st-load">फिर जाँचें</button></div>
@@ -1167,8 +1195,51 @@ function accountView() {
 function bindAccount() {
   $("#pw").onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/auth/password", { current: f.current.value, new: f.new.value }); toast("Password बदल दिया"); f.reset(); } catch (err) { toast(err.message); } };
   $("#logout2").onclick = logout;
+  const la = $("#logout-all"); if (la) la.onclick = async () => { if (!confirm("हर device से logout हो जाएगा — ठीक है?")) return; try { await api("POST", "/auth/logout-all"); } catch {} logout(); };
   $("#home-reset").onclick = () => { try { localStorage.removeItem("vividora_home"); } catch {} toast("Home के sections default पर लौट आए"); };
   const stl = $("#st-load"); if (stl) { stl.onclick = () => loadStorage(); loadStorage(); }
+}
+
+// ---------- SaaS: plan / billing / admin ----------
+function planMini(pi) {
+  const l = pi.limits || {}, u = pi.usage || {}, left = pi.left || {};
+  const bar = (used, cap, label) => { const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0; return `<div class="small">${label}: <b>${used}</b> / ${cap}</div><div class="stbar"><i style="width:${pct}%;background:${pct > 90 ? "#e5484d" : pct > 70 ? "#f2b33d" : "#46a758"}"></i></div>`; };
+  return `<p><b>${esc(pi.plan?.name || "—")}</b> <span class="pill">${esc(pi.status || "")}</span>${pi.period_end ? `<br><span class="small muted">${pi.status === "trialing" ? "trial खत्म" : "अगला renewal"}: ${new Date(pi.period_end).toLocaleDateString("hi-IN")}</span>` : ""}</p>
+    ${bar(u.ai_calls || 0, l.ai_credits || 0, "AI credits")}${bar(Math.round((u.render_seconds || 0) / 60), l.render_minutes || 0, "Render minutes")}${bar(((u.storage_bytes || 0) / 1024 ** 3).toFixed(1), l.storage_gb || 0, "Storage GB")}
+    <p class="small muted">Export ${l.max_export_height || 1080}p तक · एक साथ ${l.concurrent_jobs || 1} काम · premium आवाज़ें ${l.premium_voices ? "✓" : "✗"}</p>`;
+}
+function billingView() {
+  const pi = S.planInfo; if (!pi) return `<h1>Plan</h1><p class="muted">जानकारी नहीं मिली।</p>`;
+  if (!pi.saas) return `<div class="pghead"><div><h1>Plan</h1></div></div><div class="note">यह self-hosted install है — कोई plan/limit नहीं। (SAAS_MODE=1 करने पर plans चालू होते हैं।)</div>`;
+  const admin = S.user.role === "admin"; const cyc = S.billCycle || "monthly";
+  const price = (p) => { const v = (p.price_inr || {})[cyc]; return v ? `₹${v.toLocaleString("en-IN")} / ${{ monthly: "महीना", quarterly: "3 महीने", annual: "साल" }[cyc]}` : (p.id === "free" ? "₹0" : "कीमत जल्द"); };
+  return `<div class="pghead"><div><h1>Plan & billing</h1><p class="muted small">आपका plan, इस period का उपयोग, और receipts।</p></div></div>
+    <div class="setgrid"><section class="card"><div class="card-h"><h2>अभी</h2></div>${planMini(pi)}${admin && pi.plan && pi.plan.id !== "free" && pi.status === "active" ? `<button class="btn quiet small danger" id="bill-cancel">period के अंत में बंद करें</button>` : ""}</section>
+    <section class="card"><div class="card-h"><h2>Plans</h2><div class="seg" id="bill-cycle">${["monthly", "quarterly", "annual"].map((c) => `<button data-c="${c}" class="${c === cyc ? "on" : ""}">${{ monthly: "महीना", quarterly: "तिमाही", annual: "साल" }[c]}</button>`).join("")}</div></div>
+      <div class="plans">${(pi.plans || []).map((p) => `<div class="plan ${pi.plan?.id === p.id ? "on" : ""}"><h3>${esc(p.name)}</h3><p class="price">${price(p)}</p><ul class="small"><li>${p.limits.ai_credits} AI credits</li><li>${p.limits.render_minutes} render minutes</li><li>${p.limits.storage_gb} GB storage</li><li>${p.limits.max_export_height}p export</li><li>${p.limits.concurrent_jobs} साथ-साथ काम</li><li>premium आवाज़ें ${p.limits.premium_voices ? "✓" : "✗"}</li></ul>
+        ${pi.plan?.id === p.id ? `<span class="pill">मौजूदा</span>` : admin && p.id !== "free" ? `<button class="btn primary small" data-buy="${p.id}" ${pi.billing ? "" : "disabled title='payment अभी चालू नहीं'"}>${pi.billing ? "यह लें" : "जल्द"}</button>` : ""}</div>`).join("")}</div>
+      ${pi.billing ? `<p class="small muted">Payment Razorpay पर होता है (UPI, card, netbanking) — card की जानकारी यहाँ नहीं आती।</p>` : `<p class="small muted">Online payment अभी चालू नहीं — admin से बात करें।</p>`}</section></div>
+    <section class="card"><div class="card-h"><h2>Receipts</h2></div>${(pi.invoices || []).length ? `<div class="tablewrap"><table><tr><th>तारीख़</th><th>Plan</th><th>राशि</th><th>Period</th><th></th></tr>${pi.invoices.map((i) => `<tr><td>${new Date(i.created_at).toLocaleDateString("hi-IN")}</td><td>${esc(i.plan_id)}</td><td>₹${(+i.amount_inr).toLocaleString("en-IN")}</td><td class="small muted">${(i.period_start || "").slice(0, 10)} → ${(i.period_end || "").slice(0, 10)}</td><td><a class="btn small" target="_blank" rel="noopener" href="/api/billing/invoices/${i.id}">receipt</a></td></tr>`).join("")}</table></div>` : `<p class="small muted">अभी कोई payment नहीं।</p>`}</section>`;
+}
+function bindBilling() {
+  $$("#bill-cycle button").forEach((b) => (b.onclick = () => { S.billCycle = b.dataset.c; render(); }));
+  $$("[data-buy]").forEach((b) => (b.onclick = async () => { b.disabled = true; try { const r = await api("POST", "/billing/checkout", { plan: b.dataset.buy, cycle: S.billCycle || "monthly" }); if (r.url) location.href = r.url; else toast("checkout link नहीं मिला"); } catch (e) { toast(e.message); b.disabled = false; } }));
+  const bc = $("#bill-cancel"); if (bc) bc.onclick = async () => { if (!confirm("period खत्म होने पर plan बंद हो जाएगा — ठीक है?")) return; try { await api("POST", "/billing/cancel", { at_cycle_end: true }); toast("बंद होने का निर्देश दे दिया"); await load(); render(); } catch (e) { toast(e.message); } };
+}
+function adminView() {
+  const w = S.adminWs; const bk = S.backups;
+  return `<div class="pghead"><div><h1>Admin</h1><p class="muted small">Workspaces, audit log और database backups।</p></div></div>
+    <section class="card"><div class="card-h"><h2>Workspaces${w?.operator ? " (सब)" : ""}</h2></div>${w ? `<div class="tablewrap"><table><tr><th>नाम</th><th>Owner</th><th>Users</th><th>Projects</th><th>Plan</th><th>AI</th><th>Render min</th><th>Storage</th>${w.operator ? "<th></th>" : ""}</tr>${w.workspaces.map((x) => `<tr><td>${esc(x.name)}</td><td class="small muted">${esc(x.owner || "")}</td><td>${x.users}</td><td>${x.projects}</td><td>${esc(x.plan?.name || x.status || "")}${x.period_end ? `<br><span class="small muted">→ ${x.period_end.slice(0, 10)}</span>` : ""}</td><td>${x.usage?.ai_calls ?? 0}</td><td>${Math.round((x.usage?.render_seconds || 0) / 60)}</td><td>${fmtBytes(x.usage?.storage_bytes || 0)}</td>${w.operator ? `<td><select data-setplan="${x.id}" class="small"><option value="">plan दें…</option>${(S.planInfo?.plans || []).map((p) => `<option value="${p.id}">${esc(p.name)} (30 दिन)</option>`).join("")}</select></td>` : ""}</tr>`).join("")}</table></div>` : `<p class="small muted">नहीं मिला</p>`}</section>
+    <section class="card"><div class="card-h"><h2>Database backup</h2><button class="btn small primary" id="bk-now">अभी backup लें</button></div>
+      <p class="small">${bk?.latest ? `आख़िरी: <b>${esc(bk.latest.file)}</b> · ${fmtBytes(bk.latest.size)} · ${new Date(bk.latest.at).toLocaleString("hi-IN")} · कुल ${bk.latest.count} files` : "अभी तक कोई backup नहीं — रोज़ रात अपने-आप बनेगा"}</p>
+      <p class="small muted">रखे जाते हैं ${bk?.keep_days ?? 7} दिन · जगह: <code>${esc(bk?.dir || "")}</code>${bk?.restore ? `<br>${esc(bk.restore)}` : ""}</p></section>
+    <section class="card"><div class="card-h"><h2>Audit log</h2><input id="audit-q" class="small" placeholder="action से छानें: login, publish, user…" style="max-width:260px"></div>
+      <div class="tablewrap"><table id="audit-t">${(S.audit || []).map((a) => `<tr data-a="${esc(a.action)}"><td class="small muted">${new Date(a.created_at).toLocaleString("hi-IN")}</td><td>${esc(a.user_name || a.user_email || "—")}</td><td><b>${esc(a.action)}</b></td><td class="small muted">${esc(JSON.stringify(a.detail || {})).slice(0, 140)}</td></tr>`).join("") || `<tr><td class="small muted">खाली</td></tr>`}</table></div></section>`;
+}
+function bindAdmin() {
+  $("#bk-now").onclick = async (e) => { e.target.disabled = true; try { const r = await api("POST", "/admin/backups"); toast(`backup बना: ${r.file}`); await load(); render(); } catch (err) { toast(err.message); e.target.disabled = false; } };
+  const q = $("#audit-q"); if (q) q.oninput = () => { const v = q.value.trim().toLowerCase(); $$("#audit-t tr").forEach((tr) => (tr.hidden = v && !(tr.dataset.a || "").toLowerCase().includes(v))); };
+  $$("[data-setplan]").forEach((s) => (s.onchange = async () => { if (!s.value) return; try { await api("POST", `/admin/workspaces/${s.dataset.setplan}/plan`, { plan: s.value, days: 30 }); toast("plan दे दिया"); await load(); render(); } catch (e) { toast(e.message); } }));
 }
 
 // ---------- boot ----------

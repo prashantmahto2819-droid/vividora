@@ -78,6 +78,18 @@ class Settings:
     notify_template: str = field(default_factory=lambda: os.getenv("NOTIFY_TEMPLATE", '{"to": "{to}", "message": "{text}"}'))
     notify_inbound_secret: str = field(default_factory=lambda: os.getenv("NOTIFY_INBOUND_SECRET", ""))
     publish_dry_run: bool = field(default_factory=lambda: _bool("PUBLISH_DRY_RUN"))
+    # SaaS: signup, plans, quotas, Razorpay. Off by default — the self-hosted single workspace is unchanged.
+    saas_mode: bool = field(default_factory=lambda: _bool("SAAS_MODE"))
+    razorpay_key_id: str = field(default_factory=lambda: os.getenv("RAZORPAY_KEY_ID", ""))
+    razorpay_key_secret: str = field(default_factory=lambda: os.getenv("RAZORPAY_KEY_SECRET", ""))
+    razorpay_webhook_secret: str = field(default_factory=lambda: os.getenv("RAZORPAY_WEBHOOK_SECRET", ""))
+    # Razorpay plan ids per Vividora plan + cycle, e.g. RAZORPAY_PLAN_creator_monthly=plan_xxx
+    signup_open: bool = field(default_factory=lambda: _bool("SIGNUP_OPEN", True))
+    invite_only: bool = field(default_factory=lambda: _bool("INVITE_ONLY"))
+    require_email_verify: bool = field(default_factory=lambda: _bool("REQUIRE_EMAIL_VERIFY"))
+    backup_keep_days: int = field(default_factory=lambda: int(os.getenv("BACKUP_KEEP_DAYS", "7")))
+    # the operator's (your) workspace id: sees every workspace in Admin; default = the first workspace created
+    operator_workspace: str = field(default_factory=lambda: os.getenv("OPERATOR_WORKSPACE", ""))
 
 
 settings = Settings()

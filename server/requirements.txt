@@ -12,3 +12,4 @@ opencv-python-headless>=4.9,<5
 onnxruntime>=1.17
 # thumbnails (engine/thumbnail.py); wheels ship libraqm for Devanagari shaping (needs libfribidi0 in the image)
 Pillow>=10.0
+cryptography>=42

@@ -83,6 +83,11 @@ def voice_preset(vid: str | None) -> dict | None:
     return next((v for v in VOICE_PRESETS if v["id"] == vid), None)
 
 
+def is_premium(voice: dict | None) -> bool:
+    """Plans can gate the heavy Parler voices (and any custom description); Kokoro voices are always allowed."""
+    return bool(voice) and (voice.get("engine") == "parler" or bool(voice.get("custom")))
+
+
 # ---------------------------------------------------------------- wav helpers
 def write_wav(path: Path, pcm: bytes, sr: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

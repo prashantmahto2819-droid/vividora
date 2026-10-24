@@ -49,6 +49,9 @@ async def create_dub(request: Request, user: dict):
     fixes = dub.fixes_map(data.get("fixes") if data.get("fixes") is not None else rs.get("tts_fixes"))
     found = pl.pop("speakers_found", []) or []
     missing_cast = [n for n in found if n not in cast]
+    from .. import saas
+    from ..engine import tts as _tts
+    saas.check_voice(p["workspace_id"], _tts.is_premium(voice))
     payload = {**pl, "voice": voice, "speed": speed, "pitch": pitch, "fixes": fixes, "speakers": cast}
     with db.tx() as c:
         job = queue.enqueue(c, p["id"], "dub", payload)

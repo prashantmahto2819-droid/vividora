@@ -328,6 +328,8 @@ async def upload(request: Request, user: dict):
         size = 0
     if size > MAX_SIZE:
         raise ApiError(413, "file too large")
+    from .. import saas
+    saas.check_storage(db.conn(), user["workspace_id"], size)
     item_id = db.new_id()
     rel = str(Path(f"ws_{user['workspace_id']}") / "library" / kind / f"{item_id[:8]}_{name}")
     path = storage.ensure_parent(rel)
@@ -342,8 +344,9 @@ async def upload(request: Request, user: dict):
             f.write(part)
     try:
         meta = _probe_meta(path, kind)
+        storage.validate_media(path, kind)  # the bytes must really be the media type the name claims
     except ApiError:
-        path.unlink(missing_ok=True)  # a rejected LUT never stays in the library
+        path.unlink(missing_ok=True)  # a rejected LUT / fake file never stays in the library
         raise
     tags = (request.query_params.get("tags") or "")[:200]
     if kind == "music":
@@ -515,6 +518,9 @@ async def frame(request: Request):
 async def worker_file(request: Request):
     item = db.get("library", request.path_params["item_id"])
     if not item:
+        raise ApiError(404, "library item not found")
+    from .workers import job_workspace
+    if job_workspace(request) not in (None, item["workspace_id"]):
         raise ApiError(404, "library item not found")
     path = storage.abs_path(item["path"])
     if not path.exists():

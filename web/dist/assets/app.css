@@ -561,3 +561,10 @@ a.stat:hover { border-color: #46546A; } .stat b { font-size: 1.55rem; font-varia
 .th-tplv .rays { inset: 0; background: repeating-conic-gradient(from 0deg at 70% 40%, rgba(255,255,255,.22) 0 6deg, transparent 6deg 24deg); }
 .th-tplv .spot { inset: 0; background: radial-gradient(ellipse at 68% 42%, rgba(255,240,220,.4), transparent 45%); }
 /* ===== end thumbnail direct editing ===== */
+
+/* plan & billing */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; margin-top: .5rem; }
+.plan { border: 1px solid var(--line); border-radius: 12px; padding: .9rem; background: var(--panel-2, rgba(255,255,255,.03)); display: flex; flex-direction: column; gap: .4rem; }
+.plan.on { border-color: var(--accent, #F2B33D); box-shadow: 0 0 0 1px var(--accent, #F2B33D) inset; }
+.plan h3 { margin: 0; font-size: 1rem; } .plan .price { margin: 0; font-weight: 700; color: var(--accent, #F2B33D); }
+.plan ul { margin: 0; padding-left: 1.1rem; color: var(--muted); } .plan .btn, .plan .pill { align-self: flex-start; margin-top: auto; }

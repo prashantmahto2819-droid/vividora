@@ -51,19 +51,24 @@ def touch_worker(c, name: str, kinds: list[str], info: dict | None = None) -> No
                                  "last_seen_at": db.now()})
 
 
+HEAVY = ('render', 'montage', 'matte', 'dub', 'compress')
+
+
 def claim(c, kinds: list[str], worker: str) -> dict | None:
     requeue_stale(c)
     marks = ", ".join("?" for _ in kinds)
     # quick pipeline steps (prepare, autocut, Shorts plan, publish…) first: a new upload should not
     # wait behind a queue of long renders before its transcript / cuts / plan are made
-    job = db.row(c.execute(
-        f"SELECT * FROM jobs WHERE status = 'queued' AND kind IN ({marks}) "
-        "AND (run_after IS NULL OR run_after <= ?) "
+    cands = db.rows(c.execute(
+        f"SELECT j.*, p.workspace_id AS ws FROM jobs j JOIN projects p ON p.id = j.project_id "
+        f"WHERE j.status = 'queued' AND j.kind IN ({marks}) "
+        "AND (j.run_after IS NULL OR j.run_after <= ?) "
         # a one-line re-transcribe is seconds of work the creator waits for in the editor: first;
         # then quick pipeline steps before long renders
-        "ORDER BY (kind = 'transcribe' AND json_extract(payload, '$.range') IS NOT NULL) DESC, "
-        "CASE WHEN kind IN ('render','montage','matte','dub','compress') THEN 1 ELSE 0 END, created_at LIMIT 1",
-        [*kinds, db.now()]).fetchone())
+        "ORDER BY (j.kind = 'transcribe' AND json_extract(j.payload, '$.range') IS NOT NULL) DESC, "
+        "CASE WHEN j.kind IN ('render','montage','matte','dub','compress') THEN 1 ELSE 0 END, j.created_at LIMIT 200",
+        [*kinds, db.now()]))
+    job = _pick_fair(c, cands)
     if job is None:
         return None
     n = c.execute(
@@ -73,6 +78,30 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
     if n != 1:
         return None
     return db.row(c.execute("SELECT * FROM jobs WHERE id = ?", (job["id"],)).fetchone())
+
+
+def _pick_fair(c, cands: list[dict]) -> dict | None:
+    """SAAS_MODE: one workspace must not hold the whole queue. Skip workspaces at their plan's
+    concurrent-job limit, then round-robin by "least recently served" workspace. Otherwise FIFO."""
+    from . import saas
+    if not cands:
+        return None
+    if not saas.enabled():
+        return cands[0]
+    running = {r[0]: r[1] for r in c.execute(
+        "SELECT p.workspace_id, COUNT(*) FROM jobs j JOIN projects p ON p.id = j.project_id "
+        "WHERE j.status = 'running' GROUP BY p.workspace_id").fetchall()}
+    last = {r[0]: r[1] or "" for r in c.execute(
+        "SELECT p.workspace_id, MAX(j.started_at) FROM jobs j JOIN projects p ON p.id = j.project_id "
+        "WHERE j.started_at IS NOT NULL GROUP BY p.workspace_id").fetchall()}
+    ok = [j for j in cands if running.get(j["ws"], 0) < saas.concurrent_limit(c, j["ws"])]
+    if not ok:
+        return None
+    # keep the priority classes (quick before heavy) and, within the first class, serve the workspace that
+    # waited longest since its last job started
+    first_heavy = ok[0]["kind"] in HEAVY
+    cls = [j for j in ok if (j["kind"] in HEAVY) == first_heavy]
+    return min(cls, key=lambda j: (last.get(j["ws"], ""), j["created_at"]))
 
 
 def heartbeat(c, job_id: str, progress: int | None, message: str | None) -> None:
