@@ -34,6 +34,25 @@ async def spa(request: Request):
     return JSONResponse({"ok": True, "message": "Vividora API चालू है। dashboard build नहीं मिला (web-dist)."})
 
 
+def _trend_templates_tick() -> None:
+    """Channels with brand.trendtpl.auto = true refresh their thumbnail-trend research once a day at `hour`."""
+    from datetime import datetime
+    from .engine import radar, trendtpl
+    from .engine.schedule import _tz
+    loc = datetime.now(_tz("Asia/Kolkata"))
+    today = loc.strftime("%Y-%m-%d")
+    for ch in db.rows(db.conn().execute("SELECT * FROM channels")):
+        st = ch.get("settings") or {}
+        if not trendtpl.due(st, loc.hour, today):
+            continue
+        try:
+            trendtpl.collect(ch["workspace_id"], radar.settings_of(st).get("queries") or [])
+        except Exception as e:  # noqa: BLE001
+            log.warning("trend templates %s: %s", ch.get("id"), e)
+        with db.tx() as c:
+            db.update(c, "channels", ch["id"], {"settings": {**st, "trendtpl": {**(st.get("trendtpl") or {}), "last": today}}})
+
+
 async def _scheduler():
     """Hourly housekeeping: requeue stale jobs, archive old approved projects."""
     import asyncio
@@ -52,6 +71,7 @@ async def _scheduler():
             from . import backup  # one SQLite backup per day (DATA_ROOT/backups, pushed to the archive remote)
             if backup.due():
                 await run_in_threadpool(backup.run)
+            await run_in_threadpool(_trend_templates_tick)  # optional scheduled thumbnail-trend research
         except Exception as e:  # noqa: BLE001
             log.warning("scheduler: %s", e)
         await asyncio.sleep(3600)
@@ -99,6 +119,8 @@ def create_app() -> Starlette:
     api_routes += themes_api.routes  # one-click themes
     from .api import saas_api
     api_routes += saas_api.routes  # plans / usage / Razorpay / admin (inert without SAAS_MODE)
+    from .api import templates_api
+    api_routes += templates_api.routes  # template studio, ad templates, trend research
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))

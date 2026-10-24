@@ -27,6 +27,39 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 FONTS_DIR = Path(__file__).resolve().parent.parent.parent / "fonts"
 SIZES = {"yt": (1280, 720), "vertical": (1080, 1920)}
+# Template studio formats: key → (width, height, label). "yt" / "vertical" stay the thumbnail keys; every other
+# format borrows one of those two layouts ("base") and keeps its own placement under settings.layout[key].
+FORMATS = {
+    "yt": (1280, 720, "YouTube thumbnail 16:9"),
+    "vertical": (1080, 1920, "Shorts / Reels cover 9:16"),
+    "story": (1080, 1920, "Story / Reel 9:16"),
+    "wa": (1080, 1920, "WhatsApp status 9:16"),
+    "square": (1080, 1080, "Instagram post 1:1"),
+    "portrait": (1080, 1350, "Instagram portrait 4:5"),
+    "fb": (1200, 628, "Facebook post 1.91:1"),
+    "custom": (1080, 1080, "Custom size"),
+}
+
+
+def size_px(settings: dict) -> tuple[int, int]:
+    """Canvas pixels for a settings dict (custom formats carry their own [w, h])."""
+    key = settings.get("size") if settings.get("size") in FORMATS else "yt"
+    if key == "custom":
+        try:
+            w, h = int(settings.get("custom_size", [1080, 1080])[0]), int(settings.get("custom_size", [1080, 1080])[1])
+            return max(200, min(4096, w)), max(200, min(4096, h))
+        except (TypeError, ValueError, IndexError):
+            return 1080, 1080
+    return FORMATS[key][0], FORMATS[key][1]
+
+
+def base_of(settings_or_key, h: int | None = None) -> str:
+    """Which thumbnail layout a format uses: wide → "yt", tall/square → "vertical"."""
+    if isinstance(settings_or_key, dict):
+        w, h = size_px(settings_or_key)
+    else:
+        w = settings_or_key
+    return "yt" if h and w / h >= 1.2 else "vertical"
 # family → (file, variable-font instance)
 FONTS = {
     "Mukta": ("Mukta-ExtraBold.ttf", None),
@@ -49,7 +82,8 @@ OVERLAYS = {"": "कोई नहीं", "rays": "रोशनी की कि
 BG_TYPES = {"": "template जैसा", "photo": "पूरा frame", "blur": "धुँधला frame", "solid": "एक रंग", "gradient": "gradient",
             "image": "library image"}
 SHAPES = {"arrow": "तीर", "curve": "मुड़ा तीर", "circle": "गोला", "underline": "underline", "rect": "box / frame",
-          "burst": "burst / star", "cross": "✕ गलत", "tick": "✓ सही"}
+          "burst": "burst / star", "cross": "✕ गलत", "tick": "✓ सही", "rrect": "rectangle", "disc": "circle (भरा)", "line": "line",
+          "pill": "pill / button"}
 RAQM = features.check("raqm")
 
 
@@ -301,6 +335,8 @@ def _deep(a: dict, b: dict) -> dict:
 def template(tid: str, size: str = "yt") -> dict:
     base = next((t for t in TEMPLATES if t["id"] == tid), TEMPLATES[0])
     t = {k: v for k, v in base.items() if k != "vertical"}
+    if size in FORMATS and size not in SIZES:
+        size = base_of(*FORMATS[size][:2])
     if size == "vertical":
         t = _deep(t, base.get("vertical") or {})
         if t.get("text"):
@@ -828,7 +864,56 @@ def _mark(kind: str, color, w: int, outline=(255, 255, 255)) -> Image.Image:
     return im
 
 
-def shape_image(kind: str, color, w: int, fill: bool = False) -> Image.Image:
+def _simple_shape(kind: str, color, w: int, *, stroke=None, stroke_w: float | None, radius: float | None,
+                  aspect: float | None, shadow: bool) -> Image.Image:
+    """Template-studio shapes: filled rectangle / circle / line / pill with optional stroke, radius, shadow."""
+    aspect = aspect if aspect else (1.0 if kind == "disc" else 0.62 if kind == "rrect" else 0.3 if kind == "pill" else 0.04)
+    h = max(2, int(w * aspect))
+    sw = int((stroke_w if stroke_w is not None else (0.0 if stroke is None else 0.02)) * w)
+    pad = sw + (max(6, w // 30) if shadow else 0) + 4
+    im = Image.new("RGBA", (w + pad * 2, h + pad * 2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    box = (pad, pad, pad + w, pad + h)
+    r = int((radius if radius is not None else (0.06 if kind == "rrect" else 0.5)) * min(w, h))
+    if shadow:
+        off = max(4, w // 40)
+        sh = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        sd = ImageDraw.Draw(sh)
+        sbox = (box[0] + off, box[1] + off, box[2] + off, box[3] + off)
+        if kind == "disc":
+            sd.ellipse(sbox, fill=(0, 0, 0, 140))
+        else:
+            sd.rounded_rectangle(sbox, radius=r, fill=(0, 0, 0, 140))
+        im.alpha_composite(sh.filter(ImageFilter.GaussianBlur(max(2, w // 60))))
+        d = ImageDraw.Draw(im)
+    kw = {"fill": (*color, 255)}
+    if stroke is not None and sw > 0:
+        kw.update(outline=(*stroke, 255), width=sw)
+    if kind == "disc":
+        d.ellipse(box, **kw)
+    elif kind == "line":
+        d.rounded_rectangle(box, radius=h // 2, **kw)
+    else:
+        d.rounded_rectangle(box, radius=r, **kw)
+    return im
+
+
+def qr_image(data: str, w: int, fg, bg) -> Image.Image | None:
+    try:
+        import qrcode  # optional dependency
+    except ImportError:
+        return None
+    q = qrcode.QRCode(border=1, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    q.add_data(data)
+    q.make(fit=True)
+    im = q.make_image(fill_color=_hex(fg), back_color=_hex(bg)).convert("RGBA")
+    return im.resize((w, w), Image.NEAREST)
+
+
+def shape_image(kind: str, color, w: int, fill: bool = False, *, stroke=None, stroke_w: float | None = None,
+                radius: float | None = None, aspect: float | None = None, shadow: bool = False) -> Image.Image:
+    if kind in ("rrect", "disc", "line", "pill"):
+        return _simple_shape(kind, color, w, stroke=stroke, stroke_w=stroke_w, radius=radius, aspect=aspect, shadow=shadow)
     if kind == "arrow":
         return _arrow(color, w, 0)
     if kind == "curve":
@@ -860,12 +945,14 @@ def _sticker(path: Path, w: int, rot: float = 0) -> Image.Image | None:
     return im.rotate(-rot, expand=True, resample=Image.BICUBIC) if rot else im
 
 
-def _label(text: str, *, px: int, fam: str, color, bg, rotate: float = 0, stroke=None, accent: str = "#FFD400") -> Image.Image:
+def _label(text: str, *, px: int, fam: str, color, bg, rotate: float = 0, stroke=None, accent: str = "#FFD400",
+           stroke_w: float | None = None) -> Image.Image:
+    """stroke_w = outline as a fraction of the font size (None = the default thin outline, 0 = none)."""
     f = _wfont(fam, px, text)
     l, t, r, b = f.getbbox(text, anchor="ls")
     padx, pady = (int(px * 0.35), int(px * 0.18)) if bg else (int(px * 0.08), int(px * 0.08))
     stroke_c = _rgb(stroke, accent, (0, 0, 0)) if stroke else (0, 0, 0)
-    stroke = 0 if bg else max(2, px // 16)
+    stroke = 0 if bg else (max(0, int(round(stroke_w * px))) if stroke_w is not None else max(2, px // 16))
     im = Image.new("RGBA", (r - l + padx * 2 + stroke * 2, b - t + pady * 2 + stroke * 2), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     if bg:
@@ -896,7 +983,7 @@ STYLE_DEF = {
 TEXT_KEYS = ("stroke_w", "stroke2_w", "stroke", "stroke2", "shadow", "shadow_color", "glow", "fill2", "spacing", "line_h",
              "skew", "hl_box", "banner", "hl2")
 SHADOWS = {"none": "कोई नहीं", "soft": "soft", "hard": "hard (कड़ी)", "long": "long shadow", "glow": "glow / neon", "block": "3D block"}
-LATIN_ONLY = {"Inter"}
+LATIN_ONLY = {"Inter", "Lora"}  # no Devanagari glyphs → Hindi words fall back to Mukta
 _DEVA = re.compile("[\u0900-\u097F]")
 EMOJI_FONTS = [FONTS_DIR / "NotoColorEmoji.ttf", Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
                Path("/usr/share/fonts/noto/NotoColorEmoji.ttf"), Path("/usr/local/share/fonts/NotoColorEmoji.ttf")]
@@ -1205,8 +1292,9 @@ def draw_text(canvas: Image.Image, text_spec: dict, lines, accent: str) -> dict:
 # ---------------------------------------------------------------- render
 def resolve(settings: dict) -> dict:
     """Template + user settings → one flat spec."""
-    size = settings.get("size") if settings.get("size") in SIZES else "yt"
-    t = template(settings.get("template") or "face_right", size)
+    size = settings.get("size") if settings.get("size") in FORMATS else "yt"
+    base = base_of(settings)
+    t = template(settings.get("template") or "face_right", base)
     accent = settings.get("accent") or t.get("accent") or "#FFD400"
     tx = t.setdefault("text", {})
     for k_in, k_t in (("font", "font"), ("color", "color"), ("hl", "hl"), ("style", "style"), ("stroke", "stroke")):
@@ -1249,10 +1337,13 @@ def resolve(settings: dict) -> dict:
                 lab["text"] = str(txt)[:30]
     if settings.get("no_shapes"):
         t["shapes"] = []
-    if settings.get("flip") and size == "yt":
+    if settings.get("flip") and base == "yt":
         t = _flip(t)
+    if settings.get("no_person"):
+        t["person"] = None
     t["accent"] = accent
     t["size"] = size
+    t["base"] = base
     return t
 
 
@@ -1438,13 +1529,19 @@ def sticker_uid(st: dict, i: int) -> str:
     return str(st.get("uid") or f"i{i}")[:24]
 
 
-def render(frame: Image.Image, settings: dict, *, alpha: Image.Image | None = None, face: dict | None = None,
+def render(frame: Image.Image | None, settings: dict, *, alpha: Image.Image | None = None, face: dict | None = None,
            frame2: Image.Image | None = None, paths: dict | None = None, layers: bool = False) -> tuple[Image.Image, dict]:
     """Compose one thumbnail. `paths`: resolved files {bg_image, logo, stickers: {id: path}}.
     layers=True also returns info["_layers"] = {base, layers, hidden} for the studio's direct editing."""
     paths = paths or {}
     t = resolve(settings)
-    W, H = SIZES[t["size"]]
+    W, H = size_px(settings)
+    base_key = t.get("base", t["size"])
+    if frame is None:  # template studio without a video: no person, photo backgrounds become a gradient
+        t["person"] = None
+        frame = _gradient((W, H), (24, 28, 38), (52, 60, 80), 110).convert("RGB")
+        if (t.get("bg") or {}).get("type") in ("blur", "photo", "split", None, ""):
+            t["bg"] = {"type": "gradient", "color": "#1F2633", "color2": "#3B4660", "angle": 110}
     accent = t["accent"]
     unit = max(W, H) / 1280
     lay_ov = layout_of(settings, t["size"])
@@ -1477,7 +1574,7 @@ def render(frame: Image.Image, settings: dict, *, alpha: Image.Image | None = No
 
     if btype == "split":
         a2 = frame2 or frame
-        if t["size"] == "vertical":
+        if base_key == "vertical":
             top = _grade(_cover(a2, (W, H // 2), focus_x), "dark")
             top = ImageEnhance.Color(top).enhance(0.15)
             canvas.paste(top, (0, 0))
@@ -1579,13 +1676,20 @@ def render(frame: Image.Image, settings: dict, *, alpha: Image.Image | None = No
                 lay = _emoji(txt, px)
                 kind, name = "emoji", txt
             else:
-                lay = _label(txt, px=px, fam=fam, color=col, bg=bgc, stroke=s.get("stroke"), accent=accent)
+                lay = _label(txt, px=px, fam=fam, color=col, bg=bgc, stroke=s.get("stroke"), accent=accent, stroke_w=_num(s, "stroke_w", None, 0, 0.5))
                 kind, name = "textsticker", txt[:24]
             extra["edit"] = {"value": txt, "font": fam, "px": px / H, "color": _hex(col), "bg": _hex(bgc) if bgc else "", "align": "center"}
         elif s.get("shape") in SHAPES:
             col = _rgb(s.get("color") or "accent", accent)
-            lay = shape_image(s["shape"], col, w, bool(s.get("fill")))
+            lay = shape_image(s["shape"], col, w, bool(s.get("fill")), stroke=_rgb(s["stroke"], accent) if s.get("stroke") else None,
+                              stroke_w=_num(s, "stroke_w", None, 0, 0.2), radius=_num(s, "radius", None, 0, 0.5),
+                              aspect=_num(s, "h", None, 0.02, 4.0), shadow=bool(s.get("shadow")))
             kind, name = "shape", SHAPES[s["shape"]]
+        elif s.get("qr"):
+            lay = qr_image(str(s["qr"])[:400], w, _rgb(s.get("color") or "#111111", accent), _rgb(s.get("bg") or "#FFFFFF", accent))
+            kind, name = "qr", "QR"
+            if lay is None:
+                continue
         else:
             p = (paths.get("stickers") or {}).get(s.get("id"))
             lay = _sticker(Path(p), w) if p else None
@@ -1653,7 +1757,7 @@ def render(frame: Image.Image, settings: dict, *, alpha: Image.Image | None = No
     if settings.get("logo") and paths.get("logo") and not is_hidden("logo", "Logo", "logo"):
         o = _ovr(lay_ov, "logo")
         k = _num(o, "s", 1.0, 0.1, 6.0)
-        lw = int(W * (0.11 if t["size"] == "yt" else 0.16) * k)
+        lw = int(W * (0.11 if base_key == "yt" else 0.16) * k)
         lay = _sticker(Path(paths["logo"]), lw)
         if lay is not None:
             pos = settings.get("logo_pos") or "tr"
@@ -1677,6 +1781,16 @@ def render(frame: Image.Image, settings: dict, *, alpha: Image.Image | None = No
         ImageDraw.Draw(bl).rectangle((bwid // 2, bwid // 2, W - 1 - bwid // 2, H - 1 - bwid // 2),
                                      outline=(*_rgb(t["border"].get("color"), accent), 255), width=bwid)
         add(_layer("border", "fx", "Border", bl, 0, 0, locked=True, trim=False))
+    for ly in out_layers:  # per-layer opacity / lock from the layout overrides
+        o = _ovr(lay_ov, ly["id"])
+        op = _num(o, "op", 1.0, 0.0, 1.0)
+        if op < 1.0:
+            im = ly["img"].copy()
+            im.putalpha(im.getchannel("A").point(lambda a, _o=op: int(a * _o)))
+            ly["img"] = im
+            ly["op"] = op
+        if o.get("locked"):
+            ly["locked"] = True
     comp = base.copy() if layers else base
     for ly in out_layers:
         _place(comp, ly["img"], ly["x"], ly["y"])
@@ -1734,7 +1848,7 @@ def lint(settings: dict, info: dict | None, title: str = "") -> list[dict]:
     out = []
     text = plain(settings.get("text") or "")
     words = text.split()
-    size = settings.get("size") or "yt"
+    size = base_of(settings)
     if not words:
         out.append({"level": "info", "code": "no_text", "msg": "कोई text नहीं — 2–4 बड़े शब्द CTR अक्सर बढ़ाते हैं"})
     elif len(words) > 5:
@@ -1758,7 +1872,7 @@ def lint(settings: dict, info: dict | None, title: str = "") -> list[dict]:
         need = 2.0 if style in ("outline", "block", "box", "highlight") else 3.0
         if words and c is not None and c < need:
             out.append({"level": "warn", "code": "low_contrast", "msg": f"text और background का contrast कम है ({c}:1) — outline / box style या दूसरा रंग चुनें"})
-    if settings.get("size") == "yt" and not settings.get("cutout", True) and (settings.get("bg") or {}).get("type") in ("solid", "gradient"):
+    if base_of(settings) == "yt" and not settings.get("cutout", True) and (settings.get("bg") or {}).get("type") in ("solid", "gradient"):
         out.append({"level": "info", "code": "no_cutout", "msg": "cutout बंद है, इसलिए पूरा frame background में लगा है"})
     return out
 
