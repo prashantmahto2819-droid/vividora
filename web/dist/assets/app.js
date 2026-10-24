@@ -110,7 +110,8 @@ function schedulePoll() {
   const compBusy = S.route.kind === "compress" && (S.comp?.jobs || []).some((j) => ["queued", "running"].includes(j.status));
   if (busy || anyBusy || compBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy ? 2500 : 6000);
 }
-function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || S.route.kind === "thumbs") { schedulePoll(); return; } render(); }
+// a background poll must never wipe a form someone is filling in: the upload/montage page keeps chosen files in memory
+function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
 
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
