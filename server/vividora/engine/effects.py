@@ -361,7 +361,13 @@ def overlay_input_args(item: dict, path: Path) -> list[str]:
     dur = max(0.2, float(item["end"]) - float(item["start"]))
     if item.get("type") == "image":
         return ["-loop", "1", "-t", f"{dur:.3f}", "-i", str(path)]
-    return ["-t", f"{dur + 0.5:.3f}", "-i", str(path)]
+    return [*alpha_decoder(path), "-t", f"{dur + 0.5:.3f}", "-i", str(path)]
+
+
+def alpha_decoder(path: Path) -> list[str]:
+    """VP9 webm with an alpha plane (3D Studio characters, transparent stock): ffmpeg's native vp9 decoder drops
+    the alpha — libvpx keeps it, so force it for .webm inputs."""
+    return ["-c:v", "libvpx-vp9"] if str(path).lower().endswith(".webm") else []
 
 
 BLENDS = {"normal": "Normal", "screen": "Screen (काला हटे — light leak, particles)", "black": "काला background हटाएँ",

@@ -304,6 +304,26 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 qa_warn = qa_warn + [f"{len(effects['_cutout_missing'])} overlay का cutout अभी नहीं बना — वह पूरा clip दिखा"]
             return {"files": files, "duration": out["duration"], "warnings": out["warnings"] + dub_warn + qa_warn}
 
+        if kind in ("char3d", "storyboard3d"):
+            # 3D Studio: Chromium (software GL) renders the three.js shot frame by frame, ffmpeg encodes it.
+            from ..engine import chars3d as c3
+            pl = job["payload"] or {}
+            prog = _progress(client, job["id"])
+            page_url = os.getenv("CHARS3D_PAGE_URL") or f"{client.base}/assets/3d.html"
+            if kind == "char3d":
+                r = c3.character_clip(pl, tmp / "c3d", page_url=page_url, on_progress=prog)
+                prog(0.99, "upload")
+                up = client.upload(job["id"], r["file"], "char3d", "char3d")
+                poster = client.upload(job["id"], r["poster"], "char3d_poster", "poster") if r.get("poster") and Path(r["poster"]).exists() else None
+                return {"duration": r["duration"], "width": r["width"], "height": r["height"], "alpha": r["alpha"], "visemes": r["visemes"], "lines": r["lines"],
+                        "files": [{"kind": "char3d", "path": up["path"], "mime": "video/webm" if r["alpha"] else "video/mp4"},
+                                  *([{"kind": "char3d_poster", "path": poster["path"], "mime": "image/png"}] if poster else [])]}
+            r = c3.storyboard(pl, tmp / "sb3d", page_url=page_url, on_progress=prog)
+            prog(0.995, "upload")
+            up = client.upload(job["id"], r["file"], "storyboard3d", "explainer")
+            return {"duration": r["duration"], "scenes": r["scenes"], "transcript": r["transcript"],
+                    "files": [{"kind": "storyboard3d", "path": up["path"], "mime": "video/mp4"}]}
+
         if kind == "compress":
             from ..engine import compress as cmp
             pl = job["payload"] or {}
@@ -541,7 +561,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan", "compress"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan", "compress", "char3d", "storyboard3d"]
     try:
         if not os.getenv("VIVIDORA_MATTE_MOCK"):
             import onnxruntime  # noqa: F401

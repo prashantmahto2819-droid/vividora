@@ -308,7 +308,17 @@ def after_job(c, job: dict, result: dict) -> None:
             replace_assets(c, pid, f["kind"], keep_path=f["path"])
             add_asset(c, pid, f["kind"], f["path"], mime=f.get("mime"), meta=f.get("meta"))
         skip = bool((project.get("settings") or {}).get("skip_transcript")) and meta.get("has_audio")
-        if skip:
+        preset_tr = meta.pop("transcript_preset", None)
+        if preset_tr and preset_tr.get("segments"):
+            # a 3D explainer / scripted video: the words are known already — captions without Whisper
+            db.update(c, "projects", pid, {"meta": meta, "transcript": preset_tr,
+                                           "edl": autocut.build_edl({"segments": []}, float(meta.get("duration") or 0)), "updated_at": db.now()})
+            if ap_on:
+                apf.enter(c, pid, "autocut", "script से transcript")
+                queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {})})
+            else:
+                set_status(c, pid, "review_cuts", "3D explainer तैयार — captions script से; render करें")
+        elif skip:
             # "Transcript छोड़ें": no speech-to-text — cuts from silence + scene changes, captions/AI text later on request
             meta["transcript_skipped"] = True
             db.update(c, "projects", pid, {"meta": meta, "transcript": dict(SKIPPED_TRANSCRIPT), "updated_at": db.now()})
@@ -497,6 +507,56 @@ def after_job(c, job: dict, result: dict) -> None:
                     "created_by": pl.get("user_id"), "created_at": db.now(), "tags": "compressed", "source": "compress", "license": "own"}
             db.insert(c, "library", item)
             db.update(c, "jobs", job["id"], {"result": {**result, "library_id": item_id}})
+        return
+
+    elif kind == "char3d":
+        # a 3D character clip (VP9 + alpha) becomes a library B-roll — place it on any overlay track in the editor
+        files = result.get("files") or []
+        f = next((x for x in files if x.get("kind") == "char3d"), None)
+        if f and f.get("path"):
+            from .api.library import _probe_meta
+            src = storage.abs_path(f["path"])
+            pl = job.get("payload") or {}
+            item_id = db.new_id()
+            rel = str(Path(f"ws_{project['workspace_id']}") / "library" / "broll" / f"{item_id[:8]}_{storage.safe_name(src.name)}")
+            dst = storage.ensure_parent(rel)
+            shutil.move(str(src), str(dst))
+            thumb = None
+            pf = next((x for x in files if x.get("kind") == "char3d_poster"), None)
+            if pf and pf.get("path"):
+                trel = str(Path(f"ws_{project['workspace_id']}") / "library" / "broll" / f"{item_id[:8]}_poster.png")
+                shutil.move(str(storage.abs_path(pf["path"])), str(storage.ensure_parent(trel)))
+                thumb = trel
+            meta = {**_probe_meta(dst, "broll"), "char3d": {k: v for k, v in pl.items() if k in ("profile", "animation", "lines", "scene", "camera")},
+                    "alpha": bool(result.get("alpha")), "duration": result.get("duration"), "visemes": result.get("visemes"), **({"thumb": thumb} if thumb else {})}
+            item = {"id": item_id, "workspace_id": project["workspace_id"], "kind": "broll", "name": f"3D · {pl.get('name') or 'character'}"[:120], "path": rel,
+                    "size": dst.stat().st_size, "mime": storage.guess_mime(rel), "meta": meta, "created_by": pl.get("user_id"), "created_at": db.now(),
+                    "tags": "3d,character" + (",lipsync" if pl.get("lines") else ""), "source": "chars3d", "license": "own"}
+            db.insert(c, "library", item)
+            db.update(c, "jobs", job["id"], {"result": {**result, "library_id": item_id}})
+        return
+
+    elif kind == "storyboard3d":
+        # the rendered explainer becomes a new project: recording = the mp4, transcript = the script (no Whisper needed)
+        f = next((x for x in (result.get("files") or []) if x.get("kind") == "storyboard3d"), None)
+        if f and f.get("path"):
+            pl = job.get("payload") or {}
+            np_ = {"id": db.new_id(), "workspace_id": project["workspace_id"], "created_by": pl.get("user_id"), "channel_id": pl.get("channel_id"),
+                   "title": pl.get("title") or "3D explainer", "kind": "explainer3d", "language": pl.get("language") or "hi", "status": "uploading",
+                   "status_note": "3D explainer तैयार — जाँच हो रही है", "meta": {"explainer3d": {"scenes": result.get("scenes"), "duration": result.get("duration")},
+                                                                            "transcript_preset": result.get("transcript")},
+                   "transcript": None, "edl": None,
+                   "settings": {"render": {**DEFAULT_RENDER}, "autocut": {}, "autopilot": bool(pl.get("autopilot")), "skip_transcript": False,
+                                "theme_id": pl.get("theme_id") or ""},
+                   "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
+            db.insert(c, "projects", np_)
+            src = storage.abs_path(f["path"])
+            rel = str(Path(f"ws_{project['workspace_id']}") / f"p_{np_['id']}" / "raw" / "explainer3d.mp4")
+            dst = storage.ensure_parent(rel)
+            shutil.move(str(src), str(dst))
+            add_asset(c, np_["id"], "raw", rel, mime="video/mp4")
+            start_pipeline(c, np_)
+            db.update(c, "jobs", job["id"], {"result": {**result, "project_id": np_["id"], "transcript": None}})
         return
 
     elif kind == "montage_plan":

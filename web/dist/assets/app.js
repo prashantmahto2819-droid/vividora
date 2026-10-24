@@ -3,6 +3,9 @@ import * as ED from "./editor.js";
 import * as REC from "./record.js";
 import * as TH from "./thumbs.js";
 import * as VO from "./voice.js";
+// 3D Studio (characters / scenes): lazy — three.js (~700 KB) only loads when the page opens
+const C3D = { mod: null, async mount(kind, root, ctx) { const ui = await import("./chars3d-ui.js"); const sc = await import("./scenes3d.js"); this.mod = { ui, sc }; return kind === "scenes3d" ? sc.mountScenes(root, ctx) : ui.mountStudio(root, ctx); },
+  unmount() { this.mod?.ui.unmountStudio(); this.mod?.sc.unmountScenes(); } };
 
 const S = { token: null, user: null, ws: null, projects: [], project: null, presets: null, channels: [], channel: localStorage.getItem("vividora_channel") || "",
             route: parseRoute(), poll: null, upload: null, playhead: 0, status: null, users: null, activity: null,
@@ -35,6 +38,7 @@ const IC = {
   rec: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/>',
   upload: '<path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  cube: '<path d="M12 3 3 7.5v9L12 21l9-4.5v-9z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>',
   zip: '<path d="M4 20V8l4-4h12v16z"/><path d="M8 4v4H4"/><path d="M15 20v-5h-4v5"/><path d="M9 9h2M9 12h2"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
   bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
@@ -71,7 +75,7 @@ function toast(msg, ms = 2600) { const t = document.createElement("div"); t.clas
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|publish|trends|help|account|compress|characters3d|scenes3d)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -112,12 +116,12 @@ function schedulePoll() {
   if (busy || anyBusy || compBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy ? 2500 : 6000);
 }
 // a background poll must never wipe a form someone is filling in: the upload/montage page keeps chosen files in memory
-function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
+function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "characters3d", "scenes3d"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
 
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
-  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["compress", "#/compress", "zip", "Compress", 1]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["compress", "#/compress", "zip", "Compress", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1]]],
   ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
@@ -177,6 +181,15 @@ function render() {
     return;
   }
   if ((app.dataset.mode || "").startsWith("thumbs:")) TH.unmount();
+  if (r.kind === "characters3d" || r.kind === "scenes3d") {
+    // 3D Studio pages keep their own state (live three.js preview); three.js loads only here
+    const key = "3d:" + r.kind;
+    if (app.dataset.mode === key) return;
+    ED.unmount(); C3D.unmount(); app.dataset.mode = key; app.innerHTML = shellHTML(`<div id="c3droot"></div>`, true); bindShell();
+    C3D.mount(r.kind, $("#c3droot"), { S, api, esc, toast, go }).catch((e) => toast(e.message));
+    return;
+  }
+  if ((app.dataset.mode || "").startsWith("3d:")) C3D.unmount();
   const edKey = S.project ? "editor:" + S.project.id : "";
   // a re-transcribe / re-cut of a project that is already open keeps the editor (it shows the progress and locks editing)
   const reworking = S.project && ["transcribing", "cutting"].includes(S.project.status) && S.project.edl && app.dataset.mode === edKey;

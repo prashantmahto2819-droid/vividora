@@ -87,6 +87,8 @@ def create_app() -> Starlette:
     api_routes += compress_api.routes  # standalone video compressor
     from .api import themes_api
     api_routes += themes_api.routes  # one-click themes
+    from .api import chars3d_api
+    api_routes += chars3d_api.routes  # 3D Studio: procedural characters, scenes, lip-sync, explainers
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))
