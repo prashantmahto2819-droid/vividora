@@ -83,7 +83,13 @@ p { margin: 0 0 .75rem; } .muted { color: var(--muted); } .small { font-size: .8
 .section > h2 { margin-bottom: .75rem; }
 .note { padding: .7rem .9rem; border-left: 3px solid var(--amber); background: var(--panel); border-radius: 0 8px 8px 0; margin: .75rem 0; }
 .note.err { border-color: var(--rose); }
-.toast { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: .6rem 1rem; border-radius: 999px; font-weight: 500; z-index: 50; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+.toast-container { position: fixed; bottom: 1.25rem; right: 1.25rem; display: flex; flex-direction: column-reverse; gap: .5rem; z-index: 9990; pointer-events: none; max-width: min(22rem, calc(100vw - 2.5rem)); }
+.toast { position: relative; background: var(--text); color: var(--bg); padding: .55rem 2.2rem .55rem 1rem; border-radius: 10px; font-weight: 500; box-shadow: 0 6px 24px rgba(0,0,0,.4); pointer-events: auto; cursor: pointer; animation: toast-in .28s ease-out; word-break: break-word; }
+.toast .toast-x { position: absolute; top: 0; right: 0; width: 2rem; height: 100%; display: flex; align-items: center; justify-content: center; opacity: .55; font-size: 1.1rem; cursor: pointer; }
+.toast .toast-x:hover { opacity: 1; }
+.toast.toast-out { animation: toast-out .22s ease-in forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translateX(2rem); } to { opacity: 1; transform: translateX(0); } }
+@keyframes toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(2rem); } }
 .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
 .progress i { display: block; height: 100%; background: var(--amber); transition: width .3s; }
 

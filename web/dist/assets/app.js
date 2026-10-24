@@ -74,7 +74,20 @@ async function api(method, path, body, raw) {
   return data;
 }
 function logout() { S.token = null; S.user = null; localStorage.removeItem("vividora_token"); go("/"); render(); }
-function toast(msg, ms = 2600) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
+function toast(msg, ms = 2600) {
+  let c = document.getElementById("toast-container");
+  if (!c) { c = document.createElement("div"); c.id = "toast-container"; c.className = "toast-container"; document.body.appendChild(c); }
+  const t = document.createElement("div"); t.className = "toast";
+  const span = document.createElement("span"); span.textContent = msg; t.appendChild(span);
+  const x = document.createElement("span"); x.className = "toast-x"; x.textContent = "×"; t.appendChild(x);
+  const dismiss = () => { if (t._dismissed) return; t._dismissed = true; t.classList.add("toast-out"); t.addEventListener("animationend", () => t.remove()); };
+  t.addEventListener("click", dismiss);
+  c.appendChild(t);
+  if (ms > 0) setTimeout(dismiss, ms);
+  // keep max 5 visible
+  const all = c.querySelectorAll(".toast:not(.toast-out)");
+  if (all.length > 5) { for (let i = 0; i < all.length - 5; i++) { all[i]._dismissed = true; all[i].classList.add("toast-out"); all[i].addEventListener("animationend", () => all[i].remove()); } }
+}
 
 // ---------- routing ----------
 function parseRoute() {
