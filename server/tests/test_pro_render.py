@@ -667,6 +667,136 @@ def t_overlay_cutout_pro(c: Checks):
 
 
 @test
+def t_color_pop_bw(c: Checks):
+    """Cutout background mode "bw": the person keeps its colour, everything else goes grey (and sepia at 60 %)."""
+    d = OUT / "media"
+    src, matte = d / "pop_src.mp4", d / "pop_matte.mp4"
+    def moving_box(bg: str, fg: str, out: Path) -> None:
+        ff("-f", "lavfi", "-i", f"color=c={bg}:s=640x360:r=30:d=4", "-f", "lavfi", "-i", f"color=c={fg}:s=120x120:r=30:d=4",
+           "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-filter_complex", "[0:v][1:v]overlay=x='60+40*t':y=120,format=yuv420p[v]",
+           "-map", "[v]", "-map", "2:a", "-t", "4", "-c:v", "libx264", "-preset", "veryfast", "-crf", "8", "-c:a", "aac", "-shortest", str(out))
+    if not src.exists():
+        moving_box("0x2060E0", "0x30D030", src)   # blue background, green "person"
+    if not matte.exists():
+        moving_box("black", "white", matte)
+    shots = []
+    for tone in ("gray", "sepia"):
+        body = {"enabled": True, "alpha_path": str(matte), "bg": "bw", "pop_tone": tone, "pop_amt": 1.0 if tone == "gray" else 0.6}
+        out, dt, _ = do_render(f"color_pop_{tone}", src, {"body": body}, pre=preset(640, 360))
+        f = frame(out, 2.0).astype(np.float32)
+        # person: around x = 60+80+60 = 200 px (source 640) → same in a 640 render; background: top-left corner
+        pr, pg, pb = f[180, 200]
+        br, bg_, bb = f[20, 20]
+        if tone == "gray":
+            c.check("bw: background is grey (r≈g≈b)", abs(br - bg_) < 12 and abs(bg_ - bb) < 12, [int(br), int(bg_), int(bb)])
+        else:
+            c.check("sepia 60 %: background warm but still bluish-grey (r > b − 40, not fully grey)", br > bb - 40, [int(br), int(bg_), int(bb)])
+        c.check(f"{tone}: person keeps its green", pg > pr + 40 and pg > pb + 40, [int(pr), int(pg), int(pb)])
+        shots.append((f, f"bw pop {tone}"))
+    sheet("color_pop_bw", shots, cols=2)
+    return {"file": str(out)}
+
+
+@test
+def t_lut_intensity(c: Checks):
+    """A .cube LUT at 100 % / 50 % / 0 % on the whole video and at 100 % on one overlay clip only."""
+    d = OUT / "media"
+    cube = d / "red_tint.cube"
+    if not cube.exists():  # a 2-point LUT that maps everything towards red (r = 1, g = b = 0.5 × input)
+        rows = []
+        n = 2
+        for b in range(n):
+            for g in range(n):
+                for r in range(n):
+                    rows.append(f"1.0 {g / (n - 1) * 0.5:.3f} {b / (n - 1) * 0.5:.3f}")
+        cube.write_text("TITLE \"red\"\nLUT_3D_SIZE 2\n" + "\n".join(rows) + "\n")
+    shots = []
+    reds = {}
+    for amt in (1.0, 0.5, 0.0):
+        out, _, _ = do_render(f"lut_{int(amt * 100)}", M["gray"], {"look": "none", "lut_path": str(cube), "lut_amount": amt}, pre=preset(320, 180))
+        f = frame(out, 1.0).astype(np.float32)
+        reds[amt] = float(f[..., 0].mean() - f[..., 1].mean())
+        shots.append((f, f"LUT {int(amt * 100)}%"))
+    c.check("100 %: strongly red (r − g > 80)", reds[1.0] > 80, round(reds[1.0], 1))
+    c.check("50 %: about half the shift", 0.3 * reds[1.0] < reds[0.5] < 0.7 * reds[1.0], round(reds[0.5], 1))
+    c.check("0 %: unchanged grey", abs(reds[0.0]) < 6, round(reds[0.0], 1))
+    item = {"path": str(M["white"]), "type": "image", "fit": "free", "scale": 0.4, "x": 0.5, "y": 0.5, "start": 0.0, "end": 3.0, "fade": False,
+            "lut_path": str(cube), "lut_amount": 1.0}
+    out, _, _ = do_render("lut_clip", M["gray"], {"broll": [item]}, pre=preset(320, 180))
+    f = frame(out, 1.0).astype(np.float32)
+    cen, cor = f[90, 160], f[8, 8]
+    c.check("per-clip LUT: the white clip turns red, the grey base stays grey", cen[0] > cen[1] + 80 and abs(cor[0] - cor[1]) < 6,
+            [cen.astype(int).tolist(), cor.astype(int).tolist()])
+    shots.append((f, "LUT on one clip"))
+    sheet("lut_intensity", shots, cols=4)
+    return {"file": str(out)}
+
+
+@test
+def t_overlay_transition(c: Checks):
+    """Crossfade / dip / slide / zoom between two overlay clips on one track, plus the "no overlap" note."""
+    seq = [("crossfade", 0.0), ("dip", 2.5), ("slide_left", 5.0)]
+    items = []
+    for kind, t0 in seq:
+        items.append({"path": str(M["white"]), "type": "image", "fit": "cover", "fade": False, "start": t0, "end": t0 + 1.5, "track": 0})
+        items.append({"path": str(M["magenta"]), "type": "image", "fit": "cover", "fade": False, "start": t0 + 1.0, "end": t0 + 2.4, "track": 0,
+                      "tr": {"kind": kind, "dur": 0.5}})
+    new, notes = compose.apply_transitions(items)
+    c.check("transitions become keyframes on both clips", all("opacity" in (new[i]["kf"] or {}) for i in (0, 1, 2, 3)), [list((x.get("kf") or {}).keys()) for x in new])
+    c.check("slide: x keyframes on the incoming clip", "x" in (new[5].get("kf") or {}), list((new[5].get("kf") or {}).keys()))
+    c.check("no notes for overlapping clips", not notes, notes)
+    _, notes2 = compose.apply_transitions([{"path": str(M["white"]), "type": "image", "start": 0, "end": 1, "track": 0},
+                                            {"path": str(M["white"]), "type": "image", "start": 1.5, "end": 2, "track": 0, "tr": {"kind": "crossfade", "dur": 0.5}}])
+    c.check("non-touching clips → 'handles कम' note", any("handles" in n for n in notes2), notes2)
+    out, dt, _ = do_render("overlay_transition", M["black"], {"broll": items}, pre=preset(320, 180))
+    shots = []
+    # crossfade at t = 1.0 + 0.25: half white, half magenta → green channel ≈ half
+    f = frame(out, 1.25).astype(np.float32)
+    g_mid = float(f[90, 160, 1])
+    c.check("crossfade midpoint: green ≈ 50 % (white→magenta blend)", 70 < g_mid < 190, round(g_mid, 1))
+    shots.append((f, "crossfade mid"))
+    f = frame(out, 1.45).astype(np.float32)
+    c.check("crossfade end: magenta fully in", f[90, 160, 1] < 40 and f[90, 160, 0] > 200, f[90, 160].astype(int).tolist())
+    shots.append((f, "crossfade end"))
+    f = frame(out, 2.5 + 1.0 + 0.25).astype(np.float32)   # dip: midpoint is dark
+    c.check("dip midpoint: dark", f[90, 160].max() < 90, f[90, 160].astype(int).tolist())
+    shots.append((f, "dip mid"))
+    f = frame(out, 5.0 + 1.0 + 0.1).astype(np.float32)    # slide: incoming clip still mostly off to the right
+    c.check("slide_left early: left edge still white, right edge magenta", f[90, 20, 1] > 150 and f[90, 300, 1] < 100,
+            [f[90, 20].astype(int).tolist(), f[90, 300].astype(int).tolist()])
+    shots.append((f, "slide early"))
+    sheet("overlay_transition", shots, cols=4)
+    return {"render_s": round(dt, 2), "file": str(out)}
+
+
+@test
+def t_polygon_mask(c: Checks):
+    """Polygon / freehand mask: a triangle drawn as layer fractions, translated with x, keyframed."""
+    tri = [[0.2, 0.2], [0.8, 0.2], [0.5, 0.9]]
+    items = [
+        {"path": str(M["white"]), "type": "image", "fit": "cover", "fade": False, "start": 0.0, "end": 1.0,
+         "mask": {"shape": "polygon", "pts": tri, "feather": 0.0}},
+        {"path": str(M["white"]), "type": "image", "fit": "cover", "fade": False, "start": 1.0, "end": 2.0,
+         "mask": {"shape": "polygon", "pts": tri, "feather": 0.0, "kf": {"x": [{"t": 0, "v": 0.2}, {"t": 1, "v": 0.8}]}}},
+        {"path": str(M["white"]), "type": "image", "fit": "cover", "fade": False, "start": 2.0, "end": 3.0,
+         "mask": {"shape": "polygon", "pts": [[0.1, 0.1], [0.9, 0.1]], "feather": 0.0}},  # 2 points = no mask
+    ]
+    c.check("polygon with < 3 points is rejected", masks.clean(items[2]["mask"]) is None, masks.clean(items[2]["mask"]))
+    out, dt, _ = do_render("polygon_mask", M["black"], {"broll": items}, pre=preset(640, 360))
+    shots = []
+    f = gray(frame(out, 0.5)); H, W = f.shape
+    c.check("triangle: centre white, top corners black, bottom corners black", f[int(H * 0.45), W // 2] > 215 and f[8, 8] < 40 and f[H - 8, 8] < 40,
+            [float(f[int(H * 0.45), W // 2]), float(f[8, 8]), float(f[H - 8, 8])])
+    shots.append((frame(out, 0.5), "triangle"))
+    fa, fb = gray(frame(out, 1.15)), gray(frame(out, 1.85))
+    ca, cb = centroid(fa, fa > 128), centroid(fb, fb > 128)
+    c.check("keyframed x moves the polygon right", ca is not None and cb is not None and cb[0] - ca[0] > 0.3, [ca, cb])
+    shots += [(frame(out, 1.15), "x=0.3"), (frame(out, 1.85), "x=0.7")]
+    sheet("polygon_mask", shots, cols=3)
+    return {"render_s": round(dt, 2), "file": str(out)}
+
+
+@test
 def t_legacy_unchanged(c: Checks):
     it = {"path": str(M["ov"]), "type": "video", "fit": "pip", "pos": "tr", "start": 1, "end": 4}
     c.check("legacy overlay is not routed to the pro compositor", not compose.is_pro(it), False)

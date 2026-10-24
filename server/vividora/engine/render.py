@@ -19,6 +19,8 @@ Times are on the output (post-cut) timeline.
 
 from __future__ import annotations
 
+import logging
+
 import math
 import re
 from pathlib import Path
@@ -475,7 +477,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             if zoom.get("enabled") else [(0.0, 1.0)])
     if len(plan) > 1 or bump:
         v += "," + fx.zoom_filter(plan, w, h, fx=0.5, fy=min(0.9, max(0.1, focus_y)), bump=bump)
-    look = fx.look_filter(e.get("look"), Path(e["lut_path"]) if e.get("lut_path") else None)
+    look = fx.look_filter(e.get("look"), Path(e["lut_path"]) if e.get("lut_path") else None, e.get("lut_amount"))
     if look:
         v += "," + look
     grade = catalog.grade_filter(e.get("grade"))
@@ -507,7 +509,10 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
 
     # ---- B-roll / image overlays
     pro_audio: list[tuple[str, str]] = []
-    for i, item in enumerate(e.get("broll") or []):
+    broll_items, tr_notes = compose.apply_transitions(e.get("broll") or [])
+    for n_ in tr_notes:
+        logging.getLogger("vividora.render").warning(n_)
+    for i, item in enumerate(broll_items):
         path = item.get("path")
         if not path or float(item.get("end", 0)) <= float(item.get("start", 0)):
             continue
@@ -605,6 +610,14 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                 cur_a = "[vdub]"
             else:
                 cur_a = "[dubv]"
+        # SFX clips marked "बोलते समय धीमा" are side-chained against the voice (before music joins it)
+        ducked = [i for i, s_ in enumerate(e.get("sfx") or []) if s_.get("path") and s_.get("duck")
+                  and fx.track_gain(e, f"audio:{int(s_.get('track', 0) or 0)}") > 0.001]
+        if ducked and cur_a:
+            chains.append(f"{cur_a}asplit={1 + len(ducked)}[avoice]" + "".join(f"[vsc{i}]" for i in ducked))
+            cur_a = "[avoice]"
+        else:
+            ducked = []
         music = e.get("music") or {}
         if music.get("path") and music.get("fit"):
             # remix the song to the video length, ending on a bar (engine/musicfit.py)
@@ -637,8 +650,13 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                 fades += f"afade=t=in:d={float(s['fade_in']):.2f},"
             if float(s.get("fade_out", 0) or 0) > 0 and dur > 0:
                 fades += f"afade=t=out:st={max(0.0, dur - float(s['fade_out'])):.3f}:d={float(s['fade_out']):.2f},"
-            chains.append(f"[{next_in}:a]{clip}aformat=sample_rates=48000:channel_layouts=mono,{fades}"
-                          f"volume={float(s.get('volume', 0.8)) * gk:.3f},adelay={ms}|{ms}[sfx{i}]")
+            if i in ducked:
+                chains.append(f"[{next_in}:a]{clip}aformat=sample_rates=48000:channel_layouts=mono,{fades}"
+                              f"volume={float(s.get('volume', 0.8)) * gk:.3f},adelay={ms}|{ms}[sfxr{i}];"
+                              f"[sfxr{i}][vsc{i}]sidechaincompress=threshold=0.02:ratio=8:attack=15:release=450:makeup=1[sfx{i}]")
+            else:
+                chains.append(f"[{next_in}:a]{clip}aformat=sample_rates=48000:channel_layouts=mono,{fades}"
+                              f"volume={float(s.get('volume', 0.8)) * gk:.3f},adelay={ms}|{ms}[sfx{i}]")
             sfx_labels.append(f"[sfx{i}]")
             next_in += 1
         for a_chain, a_label in pro_audio:  # overlay clips' own sound

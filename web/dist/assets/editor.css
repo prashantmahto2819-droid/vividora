@@ -559,3 +559,23 @@ kbd { display: inline-block; font: 600 .72rem/1.4 ui-monospace, monospace; paddi
 .mobeats i { flex: 1; min-width: 1px; background: var(--ed-accent); border-radius: 1px 1px 0 0; }
 .moseg .ibtn.small { width: 22px; height: 22px; font-size: .8rem; }
 .ibtn.on { background: var(--ed-panel-2); color: var(--ed-accent); }
+
+/* polygon / freehand mask editing on the preview */
+svg.mpoly { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; touch-action: none; }
+svg.mpoly polygon { fill: rgba(155,231,255,.12); stroke: #9be7ff; stroke-width: 1.5; stroke-dasharray: 5 3; pointer-events: auto; cursor: move; }
+svg.mpoly circle { fill: #9be7ff; stroke: #06202a; stroke-width: 1.5; pointer-events: auto; cursor: grab; }
+svg.mpoly text { fill: #9be7ff; font-size: 11px; paint-order: stroke; stroke: rgba(0,0,0,.7); stroke-width: 3px; pointer-events: none; }
+svg.mpoly.mode-add, svg.mpoly.mode-draw { pointer-events: auto; cursor: crosshair; background: rgba(155,231,255,.04); }
+svg.mpoly.mode-draw polygon, svg.mpoly.mode-draw circle { pointer-events: none; }
+
+/* pointer drag from the library panel */
+.dragghost { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; background: var(--amber); color: #111; font-size: .75rem; font-weight: 600; padding: .25rem .6rem; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.45); max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dragghost.bad { background: var(--rose); color: #fff; }
+.dragghost.bad::before { content: "⛔ "; }
+.lib li.lifting, .fxcard.lifting, .look.lifting { opacity: .5; }
+.tl-track.dropon { background-color: rgba(242,179,61,.1) !important; }
+.dropmark { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--amber); z-index: 6; pointer-events: none; box-shadow: 0 0 6px var(--amber); }
+.dropmark::before { content: ""; position: absolute; left: -5px; top: 0; border: 5px solid transparent; border-top: 7px solid var(--amber); }
+.lib li, .fxcard, .look { touch-action: pan-y; }
+.insp-x { display: none; position: sticky; top: 0; float: right; z-index: 3; background: var(--ed-panel-2); margin: -.2rem -.2rem 0 .4rem; }
+@media (max-width: 900px) { .insp-x { display: inline-flex; } }

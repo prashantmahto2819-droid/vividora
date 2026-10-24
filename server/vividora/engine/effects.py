@@ -170,10 +170,27 @@ def zoom_filter(points: list[tuple[float, float]], w: int, h: int, fx: float = 0
             f"crop={w}:{h}:x='(iw-{w})*{fx:.3f}':y='(ih-{h})*{fy:.3f}'")
 
 
-def look_filter(look: str | None, lut_path: Path | None = None) -> str:
+def look_filter(look: str | None, lut_path: Path | None = None, amount: float | None = None) -> str:
+    """The colour look: a .cube LUT (with an intensity 0..1 — a partial LUT is blended over the original) or a built-in look."""
     if lut_path is not None:
-        return f"lut3d=file='{escape_filter_path(lut_path)}'"
+        return lut_mix(f"lut3d=file='{escape_filter_path(lut_path)}':interp=tetrahedral", amount)
     return LOOKS.get(look or "none", LOOKS["none"])["filter"]
+
+
+_LUTN = [0]
+
+
+def lut_mix(lut: str, amount: float | None) -> str:
+    """`lut` at `amount` (1 = full). Below 1 the chain splits, applies the LUT to one copy and blends it back,
+    so the result still reads as ONE filter in a comma chain (it opens and closes its own labels)."""
+    a = 1.0 if amount is None else max(0.0, min(1.0, float(amount)))
+    if a >= 0.995:
+        return lut
+    if a <= 0.005:
+        return "null"
+    _LUTN[0] += 1
+    n = _LUTN[0]
+    return f"split[lo{n}][li{n}];[li{n}]{lut}[lu{n}];[lo{n}][lu{n}]blend=all_mode=normal:all_opacity={a:.3f}"
 
 
 def flash_filter(cut_times: list[float], color: str = "white", alpha: float = 0.55, frames: float = 0.045) -> str:
@@ -536,8 +553,22 @@ def text_anim_tags(anim: str, an: int, w: int, h: int, dur_ms: int) -> str:
 
 # ---------------------------------------------------------------------------
 # Body effects (need the cached alpha video from engine/matting.py)
-BODY_BG = {"none": "जैसा है", "blur": "Blur", "dim": "Dark", "flat": "Solid colour", "image": "Image (library)",
-           "video": "Video (library)", "gradient": "Gradient"}
+BODY_BG = {"none": "जैसा है", "blur": "Blur", "dim": "Dark", "bw": "रंग सिर्फ़ इंसान पर (बाकी B&W)", "flat": "Solid colour",
+           "image": "Image (library)", "video": "Video (library)", "gradient": "Gradient"}
+POP_TONES = {"gray": "काला-सफ़ेद", "sepia": "Sepia (पुराना)", "cool": "ठंडा नीला"}
+
+
+def pop_filter(body: dict) -> str:
+    """Colour pop: the background loses its colour (fully or by `pop_amt`), optionally toned."""
+    amt = max(0.0, min(1.0, float(body.get("pop_amt", 1.0) if body.get("pop_amt") is not None else 1.0)))
+    tone = body.get("pop_tone", "gray") or "gray"
+    f = f"eq=saturation={1 - amt:.3f}"
+    if tone == "sepia" and amt > 0:
+        # sepia on the desaturated picture, faded in with the amount
+        f += ",colorchannelmixer=rr=.393:rg=.769:rb=.189:gr=.349:gg=.686:gb=.168:br=.272:bg=.534:bb=.131" + (f":pa={1 - amt:.2f}" if amt < 0.99 else "")
+    elif tone == "cool" and amt > 0:
+        f += f",colorbalance=bs={0.25 * amt:.3f}:ms={0.12 * amt:.3f}:rs=-{0.08 * amt:.3f}"
+    return f
 BODY_ANIMS = {"none": "कोई नहीं", "drop": "आसमान से गिरे (drop-in)", "pop": "Pop out", "slide": "Slide in", "blink": "Blink / strobe",
               "rise": "नीचे से उठे"}
 
@@ -574,6 +605,9 @@ def body_chain(body: dict, w: int, h: int, v_in: str, a_in: str, out_label: str,
         v_sub = "[bsub]"
     elif bg_mode == "dim":
         ch.append(f"{v_in}split[bsrc][bsub];[bsrc]eq=brightness=-0.35:saturation=0.6[bg0]")
+        v_sub = "[bsub]"
+    elif bg_mode == "bw":
+        ch.append(f"{v_in}split[bsrc][bsub];[bsrc]{pop_filter(body)}[bg0]")
         v_sub = "[bsub]"
     elif bg_mode == "flat":
         ch.append(f"color=c={_c(body.get('bg_color', '#111111'))}:s={w}x{h}:r={fr},format=yuv420p[bg0]")

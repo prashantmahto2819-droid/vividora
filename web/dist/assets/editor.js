@@ -41,6 +41,7 @@ import * as TFX from "./textfx.js";
 import * as CUT from "./cutout.js";
 import * as PRO from "./pro.js";
 import * as MIX from "./mix.js";
+import * as LUT from "./lut.js";
 const TABS_ALL = [["cuts", "कट"], ["media", "Media"], ["audio", "Audio"], ["text", "Text"], ["stickers", "Stickers"], ["effects", "Effects"], ["transitions", "Transitions"], ["color", "Filters"], ["pro", "Pro"], ["captions", "Captions"], ["body", "Cutout"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["ai", "AI Studio"], ["refs", "Refs"]];
 const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
@@ -91,7 +92,7 @@ export function mount(root, project, ctx) {
   E.pps = clamp(Math.floor(900 / E.dur), 6, 120);
   E.rs.markers = Array.isArray(E.rs.markers) ? E.rs.markers : [];
   if (!E.rs.effects.pro || typeof E.rs.effects.pro !== "object") E.rs.effects.pro = {};
-  PRO.host({ get E() { return E; }, touch, select, selItem, renderInspector, renderTimeline, renderOverlay, renderPanel, renderJobs, layoutFrame, applyVideoCss, seek, outOf, srcOf, outDur, keeps, cutAt, libItem, fxDef, fxParams,
+  PRO.host({ get E() { return E; }, touch, select, selItem, renderInspector, renderHandles, renderTimeline, renderOverlay, renderPanel, renderJobs, layoutFrame, applyVideoCss, seek, outOf, srcOf, outDur, keeps, cutAt, libItem, fxDef, fxParams,
     stackCss, gradeCss, scaledGrade, flush, track, field, num, fmt, ICON, brollCutoutBox, follow: CUT.follow,
     rerender: () => { renderInspector(); if (E.tab === "pro") { const pn = $("#ed-panel", E.root); const sc = pn.scrollTop; renderPanel(); pn.scrollTop = sc; } } });
   try { if (localStorage.getItem("vividora_debug") === "1") window.VV = { get E() { return E; }, PRO, touch, renderAll, select, seek, flush }; } catch { /* storage blocked */ }
@@ -143,7 +144,7 @@ function update(project) {
   if (fresh !== E.shortsSeen) { E.shortsSeen = fresh; if (!E.shortsDirty) { E.shorts = JSON.parse(fresh); if (E.tab === "shorts") renderPanel(); renderTimeline(); } }
   // a cutout finished (main video or a library clip) → the live preview / overlay picks it up
   if (finished.some((j) => j.kind === "matte_lib" && j.status === "done")) loadLib();
-  if (!E.montage) { cutSync(); const st = $("#bd-status", E.root); if (st) { const h2 = bodyStatus(); if (st._h !== h2) { st._h = h2; st.innerHTML = h2; bindBodyStatus(st); } } }
+  if (!E.montage) { cutSync(); lutSync(); const st = $("#bd-status", E.root); if (st) { const h2 = bodyStatus(); if (st._h !== h2) { st._h = h2; st.innerHTML = h2; bindBodyStatus(st); } } }
   if (E.sel?.type === "broll" && activeJobs(project).concat(finished).some((j) => j.kind === "matte_lib")) renderInspector();
   renderTop();
   if (E.exportOpen) renderExport();
@@ -307,7 +308,7 @@ function skeleton() {
       <div class="ed-jobs" id="ed-jobs" hidden></div>
       <div class="ed-viewport" id="viewport">
         <div class="ed-frame" id="frame">
-          <div class="vclip vbgclip"><canvas id="pv-bg" hidden></canvas></div><div class="vclip" id="vclip"><div class="vpost" id="vpost"><div class="vbox" id="vbox"><div class="vrot" id="vrot"><video id="pv" playsinline preload="auto" src="${(E.p.assets.find((a) => a.kind === (E.montage ? "render" : "proxy")) || {}).url || ""}" ${E.montage ? "controls" : ""}></video><canvas id="pv-cut" hidden></canvas></div></div></div></div>
+          <div class="vclip vbgclip"><canvas id="pv-bg" hidden></canvas></div><div class="vclip" id="vclip"><div class="vpost" id="vpost"><div class="vbox" id="vbox"><div class="vrot" id="vrot"><video id="pv" playsinline preload="auto" src="${(E.p.assets.find((a) => a.kind === (E.montage ? "render" : "proxy")) || {}).url || ""}" ${E.montage ? "controls" : ""}></video><canvas id="pv-cut" hidden></canvas><canvas id="pv-lut" hidden></canvas></div></div></div></div>
           <div class="ed-mask" id="mask"></div>
           <div class="ed-safe" id="safe"></div>
           <div class="ed-ovl" id="ovl"><div id="ovl-media"></div><div id="ovl-text"></div></div>
@@ -819,7 +820,7 @@ function renderOverlay() {
   $("#ovl-text", ovl).innerHTML = html;
   // effect/filter clips under the playhead change the look of the video while it plays
   const vf = videoFilter(); if (vf !== E.vf) { E.vf = vf; const v = $("#pv", E.root); if (v) v.style.filter = vf; const cv = $("#pv-cut", E.root); if (cv) cv.style.filter = vf; }
-  cutOverlays(); cutSync();
+  cutOverlays(); cutSync(); lutSync();
   renderHandles();
 }
 
@@ -849,6 +850,26 @@ function cutCss() {
   const v = $("#pv", E.root), cv = $("#pv-cut", E.root); if (!v || !cv) return;
   v.style.opacity = ""; cv.style.cssText = v.style.cssText; cv.style.position = "absolute"; cv.style.pointerEvents = "none";
   if (E.cut?.live) v.style.opacity = "0";
+  const lc = $("#pv-lut", E.root); if (lc) { lc.style.cssText = v.style.cssText; lc.style.position = "absolute"; lc.style.pointerEvents = "none"; lc.style.opacity = ""; if (E.lut?.live) { v.style.opacity = "0"; cv.style.opacity = "0"; } else cv.style.opacity = ""; }
+}
+// LUT live preview (approximate): draws the video — or the cutout composite — through the project .cube
+function lutSync() {
+  const v = $("#pv", E.root), lc = $("#pv-lut", E.root); if (!v || !lc) return;
+  const fx = E.rs.effects; const id = (fx.look || "").startsWith("lut:") ? fx.look.slice(4) : "";
+  const want = !!(E.lutLive && id && !E.montage); const L = E.lut || (E.lut = {});
+  if (want) {
+    if (!L.prev) L.prev = LUT.lutPreview(lc);
+    if (L.id !== id) { L.id = id; L.cube = null; const it = libItem(id); if (it) fetch(it.url).then((r) => r.text()).then((t) => { if (L.id !== id) return; L.cube = LUT.parseCube(t); if (!L.cube) E.ctx.toast("यह LUT preview में नहीं दिख सकती (1D या अधूरी)"); cutKick(); }).catch(() => {}); }
+    const vw = v.videoWidth || 1280, vh = v.videoHeight || 720; const k = Math.min(1, 1280 / Math.max(vw, vh)); const W = Math.round(vw * k), H = Math.round(vh * k);
+    if (lc.width !== W || lc.height !== H) { lc.width = W; lc.height = H; }
+  }
+  const live = want && !!L.prev; if (L.live !== live) { L.live = live; lc.hidden = !live; cutCss(); if (live) cutKick(); }
+}
+function lutFrame(v, playing, dirty) {
+  const L = E.lut; if (!L?.live || !L.cube) return false;
+  if (!(playing || dirty || L.pend)) return false;
+  const lc = $("#pv-lut", E.root); const cv = $("#pv-cut", E.root); const src = E.cut?.live && cv && !cv.hidden ? cv : v;
+  L.prev.setLut(L.id, L.cube); const ok = L.prev.draw(src, E.rs.effects.lut_amount ?? 1); L.pend = !ok; return playing;
 }
 function cutSync() {
   const v = $("#pv", E.root), cv = $("#pv-cut", E.root); if (!v || !cv) return;
@@ -944,6 +965,7 @@ function cutFrame() {
     } else if (!playing && (dirty || C.pend)) { C.pend = true; busy = busy || (!C.av.error && (C.av.seeking || !synced)); }
     else if (playing && fresh) { v._vvNew = C.av._vvNew = false; const cv = $("#pv-cut", E.root); cv.dataset.skips = (+cv.dataset.skips || 0) + 1; } // frames did not match → keep the last good composite
   }
+  if (lutFrame(v, playing, dirty || E.lutDirty)) busy = true; E.lutDirty = false;
   for (const [id, o] of E.cutOv || []) {
     const it = E.rs.effects.broll.find((x) => x._id === id); if (!it || !o.vid) continue;
     // the clip's own clock: trim_in + speed / ramp (same mapping as the render)
@@ -977,7 +999,7 @@ function cutOverlays() {
 }
 function cutOvDrop(id) { const o = E.cutOv.get(id); if (!o) return; for (const el of [o.vid, o.av]) { el.pause(); el.removeAttribute("src"); el.load(); el.remove(); } o.comp?.destroy(); o.cv.remove(); E.cutOv.delete(id); }
 function cutTeardown() {
-  cancelAnimationFrame(E.cutRaf); E.cutRaf = 0;
+  cancelAnimationFrame(E.cutRaf); E.cutRaf = 0; if (E.lut?.prev) { E.lut.prev.destroy(); E.lut = null; }
   for (const id of [...(E.cutOv?.keys() || [])]) cutOvDrop(id);
   if (E.cut) { for (const el of [E.cut.av, E.cut.bgEl]) if (el?.tagName === "VIDEO") { el.pause(); el.removeAttribute("src"); el.load(); } E.cut.comp?.destroy(); E.cut = null; }
 }
@@ -1077,6 +1099,11 @@ async function doSave(ed, loud) {
 function field(label, inner) { return `<div class="ifield"><label>${label}</label>${inner}</div>`; }
 function num(id, v, step = 0.1, min = 0, max = 9999) { return `<input type="number" data-k="${id}" value="${(+v).toFixed(step < 1 ? 2 : 0)}" step="${step}" min="${min}" max="${max}">`; }
 function renderInspector() {
+  _renderInspector();
+  // phones / tablets: the inspector is a bottom sheet over the panel — it needs a way to close without a keyboard
+  const ins = $("#inspector", E.root); if (ins && E.sel && selItem() && !$("#insp-x", ins)) { const x = document.createElement("button"); x.id = "insp-x"; x.className = "ibtn insp-x"; x.title = "बंद (Esc)"; x.textContent = "✕"; x.onclick = () => select(null); ins.prepend(x); }
+}
+function _renderInspector() {
   const ins = $("#inspector", E.root); const { esc } = E.ctx; let it = selItem(); const dis = E.canEdit ? "" : "disabled";
   if (!E.sel || !it) {
     if (E.montage) { ins.innerHTML = `<h3>Montage</h3><div class="ikv"><span>लंबाई</span><b>${fmt(E.p.meta?.duration || 0)}</b></div><div class="ikv"><span>BPM</span><b>${E.p.meta?.bpm || "—"}</b></div><div class="ikv"><span>cuts</span><b>${E.p.meta?.segments || "—"}</b></div><p class="small muted" style="margin-top:1rem">clips/music/text बाएँ panel में बदलकर "Montage बनाएँ" दबाएँ; फिर Export से download/publish।</p>`; return; }
@@ -1472,6 +1499,7 @@ function renderPanel() {
       <h4>किनारा (edge)</h4><div class="irow">${field(`अंदर करें <b>${b.edge_shrink || 0}</b>`, `<input type="range" data-bd="edge_shrink" min="0" max="6" step="0.5" value="${b.edge_shrink || 0}" ${dis} title="पुराने background की पतली लकीर (halo) हटाएँ">`)}${field(`नरम <b>${b.edge_feather || 0}</b>`, `<input type="range" data-bd="edge_feather" min="0" max="6" step="0.5" value="${b.edge_feather || 0}" ${dis} title="किनारे को हल्का धुँधला करें">`)}</div>
       <h4>Background</h4><div class="irow">${field("", `<select id="bd-bg" ${dis}>${(S.presets?.body_bg || []).map((o) => `<option value="${o.id}" ${b.bg === o.id ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`)}
         ${b.bg === "blur" ? field("blur", `<input type="range" id="bd-blur" min="4" max="40" step="1" value="${b.bg_blur}" ${dis}>`) : ""}
+        ${b.bg === "bw" ? field(`रंग कितना हटे <b>${Math.round((b.pop_amt == null ? 1 : b.pop_amt) * 100)}%</b>`, `<input type="range" data-bd="pop_amt" min="0" max="1" step="0.05" value="${b.pop_amt == null ? 1 : b.pop_amt}" ${dis} title="100% = background पूरा काला-सफ़ेद, इंसान रंगीन">`) + field("tone", `<select data-bd="pop_tone" ${dis}><option value="gray" ${(b.pop_tone || "gray") === "gray" ? "selected" : ""}>काला-सफ़ेद</option><option value="sepia" ${b.pop_tone === "sepia" ? "selected" : ""}>Sepia (पुराना)</option><option value="cool" ${b.pop_tone === "cool" ? "selected" : ""}>ठंडा नीला</option></select>`) : ""}
         ${["flat", "gradient"].includes(b.bg) ? field("रंग", `<input type="color" id="bd-c1" value="${b.bg_color}" ${dis}>`) : ""}${b.bg === "gradient" ? field("रंग 2", `<input type="color" id="bd-c2" value="${b.bg_color2}" ${dis}>`) : ""}
         ${b.bg === "image" ? field("image (library)", `<select id="bd-img" ${dis}><option value="">—</option>${lib.filter((x) => x.kind === "image").map((x) => `<option value="${x.id}" ${b.bg_image === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`) : ""}
         ${b.bg === "video" ? field("video (library)", `<select id="bd-vid" ${dis}><option value="">—</option>${lib.filter((x) => x.kind === "broll").map((x) => `<option value="${x.id}" ${b.bg_video === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`) : ""}</div>
@@ -1505,6 +1533,7 @@ function renderPanel() {
       <h4>Adjust</h4>${cat.grade_params.map((p) => `<label class="small muted fxp grade"><span>${esc(p.label)}</span><input type="range" data-g="${p.name}" min="${p.min}" max="${p.max}" step="${p.step}" value="${g[p.name] ?? p.default}" ${dis}><b>${(+(g[p.name] ?? p.default)).toFixed(2).replace(/\.?0+$/, "")}</b></label>`).join("")}
       <p class="small muted">preview में अनुमान (CSS); असली grade render में ffmpeg से — exposure, curves, colortemperature, vibrance, hue, vignette, unsharp।</p>
       <h4>LUT</h4><p class="small muted">अपनी .cube LUT Overlay → LUT tab से लगाएँ; grade उसके बाद लगता है। ${fx.look?.startsWith("lut:") ? `<b>अभी: ${esc(libItem(fx.look.slice(4))?.name || "LUT")}</b>` : ""}</p>
+      ${fx.look?.startsWith("lut:") ? `<div class="irow">${field(`LUT कितना <b>${Math.round((fx.lut_amount ?? 1) * 100)}%</b>`, `<input type="range" id="lut-amt" min="0" max="1" step="0.05" value="${fx.lut_amount ?? 1}" ${dis} title="100% = पूरी LUT; कम करने पर original रंग के साथ मिलती है">`)}<label class="chk small"><input type="checkbox" id="lut-live" ${E.lutLive ? "checked" : ""}> preview में LUT दिखाएँ (लगभग)</label><button class="btn small quiet" id="lut-off" ${dis}>LUT हटाएँ</button></div>` : ""}
       <div class="box"><b>🎨 Colour wheels · Curves · HSL · Colour match</b><p class="small muted">DaVinci जैसा pro colour — Pro tab में।</p><button class="btn small" data-tabgo="pro">🎛 Pro colour खोलें</button></div>`;
   } else if (t === "pro") {
     h = PRO.proPanel(dis);
@@ -1702,9 +1731,12 @@ function bindPanel() {
     on("#bd-on", "onchange", (e) => { b.enabled = e.target.checked; touch(); });
     on("#bd-bg", "onchange", (e) => { b.bg = e.target.value; touch(); renderPanel(); });
     on("#bd-blur", "oninput", (e) => { b.bg_blur = +e.target.value; touch(); });
+    on("#lut-amt", "oninput", (e) => { fx.lut_amount = +e.target.value; const lb = e.target.closest(".ifield")?.querySelector("label b"); if (lb) lb.textContent = Math.round(fx.lut_amount * 100) + "%"; touch(); E.lutDirty = true; cutKick(); });
+    on("#lut-live", "onchange", (e) => { E.lutLive = e.target.checked; lutSync(); E.lutDirty = true; cutKick(); });
+    on("#lut-off", "onclick", () => { fx.look = "none"; delete fx.lut_amount; touch(); renderPanel(); lutSync(); });
     on("#bd-c1", "oninput", (e) => { b.bg_color = e.target.value; touch(); }); on("#bd-c2", "oninput", (e) => { b.bg_color2 = e.target.value; touch(); });
     $$("[data-bd]", panel).forEach((el) => (el.oninput = el.onchange = () => { const k = el.dataset.bd; b[k] = el.type === "checkbox" ? el.checked : el.type === "range" ? +el.value : el.value;
-      const lab = el.closest(".ifield")?.querySelector("label b"); if (lab) lab.textContent = el.value + (k === "bg_speed" ? "×" : ""); touch(); if (el.type === "checkbox") renderPanel(); }));
+      const lab = el.closest(".ifield")?.querySelector("label b"); if (lab) lab.textContent = k === "pop_amt" ? Math.round(el.value * 100) + "%" : el.value + (k === "bg_speed" ? "×" : ""); touch(); if (el.type === "checkbox") renderPanel(); }));
     $$("[data-bdbg]", panel).forEach((el) => (el.onclick = () => { if (b.bg === "image") b.bg_image = el.dataset.bdbg; else b.bg_video = el.dataset.bdbg; touch(); renderPanel(); }));
     on("#bd-bgadv", "ontoggle", (e) => { E.bdBgOpen = e.target.open; });
     on("#bd-up", "onchange", async (e) => { const f = e.target.files[0]; if (!f) return; const d = await libUpload(b.bg === "image" ? "image" : "broll", f); if (d) { if (b.bg === "image") b.bg_image = d.id; else b.bg_video = d.id; touch(); } renderPanel(); });
@@ -2040,30 +2072,63 @@ function libAdd(x, at) {
   E.ctx.toast(`${x.name} जुड़ा`);
 }
 function bindDrops() {
-  // library items, effect cards and filter thumbnails can all be dragged onto the preview or a timeline lane
-  const drag = (e) => { const li = e.target.closest?.("[data-lib],[data-fxadd],[data-gpre]"); if (!li) return;
-    if (li.dataset.lib) e.dataTransfer.setData("text/vivid-lib", li.dataset.lib);
-    else e.dataTransfer.setData("text/vivid-fx", li.dataset.fxadd ? "effect:" + li.dataset.fxadd : "filter:" + li.dataset.gpre);
-    e.dataTransfer.effectAllowed = "copy"; };
-  const panel = $("#ed-panel", E.root); if (panel && !panel._dnd) { panel._dnd = 1; panel.addEventListener("dragstart", drag); }
-  const ours = (e) => [...(e.dataTransfer?.types || [])].some((t) => t === "text/vivid-lib" || t === "text/vivid-fx");
-  const allow = (e) => { if (ours(e)) { e.preventDefault(); e.currentTarget.classList.add("dropon"); } };
-  const leave = (e) => e.currentTarget.classList.remove("dropon");
-  const fxOf = (e) => { const v = e.dataTransfer.getData("text/vivid-fx"); if (!v) return null; const i = v.indexOf(":"); return [v.slice(0, i), v.slice(i + 1)]; };
-  const stage = $("#ovl", E.root)?.parentElement; const tl = $("#tl-scroll", E.root);
-  if (stage && !stage._dnd) { stage._dnd = 1; stage.addEventListener("dragover", allow); stage.addEventListener("dragleave", leave);
-    stage.addEventListener("drop", (e) => { e.preventDefault(); stage.classList.remove("dropon"); const f = fxOf(e); if (f) return addFxClip(f[0], f[1]);
-      const x = libItem(e.dataTransfer.getData("text/vivid-lib")); const fb = E.frameBox; if (!x || !fb) return;
-      const r = $("#ovl", E.root).getBoundingClientRect(); libAdd(x, { free: true, x: +clamp((e.clientX - r.left) / fb.w, 0, 1).toFixed(3), y: +clamp((e.clientY - r.top) / fb.h, 0, 1).toFixed(3) }); }); }
-  if (tl && !tl._dnd) { tl._dnd = 1; tl.addEventListener("dragover", allow); tl.addEventListener("dragleave", leave);
-    tl.addEventListener("drop", (e) => { e.preventDefault(); tl.classList.remove("dropon"); const body = $("#tl-body", E.root); if (!body) return;
-      const src = clamp((e.clientX - body.getBoundingClientRect().left) / E.pps, 0, E.dur);
-      const lane = e.target.closest("[data-track]")?.dataset.track || ""; const [lk, ln] = lane.split(":");
-      const f = fxOf(e); if (f) { seek(src); return addFxClip(f[0], f[1], src, lk === "fx" && ln != null ? +ln : 0); }
-      const x = libItem(e.dataTransfer.getData("text/vivid-lib")); if (!x) return; seek(src);
-      if ((x.kind === "music" || x.kind === "sfx") && lk === "audio" && ln != null) return addAudioClip(x, src, +ln);
-      const n0 = E.rs.effects.broll.length; libAdd(x, { src, free: x.kind === "image" && lk === "broll" });
-      if (lk === "broll" && ln != null && E.rs.effects.broll.length > n0) { E.rs.effects.broll[E.rs.effects.broll.length - 1].track = +ln; touch(); renderTimeline(); } }); }
+  // library items, effect cards and filter thumbnails are dragged onto the preview or a timeline lane with the
+  // POINTER (mouse: move 6 px; touch: hold ~350 ms) — the native HTML5 drag never worked on phones.
+  const panel = $("#ed-panel", E.root); if (!panel || panel._dnd) return; panel._dnd = 1;
+  panel.addEventListener("dragstart", (e) => { if (e.target.closest?.("[data-lib],[data-fxadd],[data-gpre]")) e.preventDefault(); });
+  const payloadOf = (li) => li.dataset.lib ? { lib: libItem(li.dataset.lib) } : { fx: li.dataset.fxadd ? ["effect", li.dataset.fxadd] : ["filter", li.dataset.gpre] };
+  const zones = () => ({ stage: $("#ovl", E.root)?.parentElement, tl: $("#tl-scroll", E.root) });
+  const clearMarks = () => { const { stage, tl } = zones(); stage?.classList.remove("dropon"); tl?.classList.remove("dropon"); $$(".dropmark", E.root).forEach((m) => m.remove()); $$(".tl-track.dropon", E.root).forEach((t) => t.classList.remove("dropon")); };
+  // where would a drop at (x, y) land? → {zone, lane, src, ok, why}
+  const target = (x, y, pl) => {
+    const { stage, tl } = zones(); const el = document.elementFromPoint(x, y); if (!el) return { ok: false };
+    const kind = pl.lib?.kind;
+    if (stage && stage.contains(el)) {
+      if (pl.fx) return { zone: "stage", ok: true };
+      if (["music", "sfx", "font", "voice"].includes(kind)) return { zone: "stage", ok: false, why: "आवाज़ वाली चीज़ें timeline की audio lane पर छोड़ें" };
+      return { zone: "stage", ok: true };
+    }
+    if (tl && tl.contains(el)) {
+      const body = $("#tl-body", E.root); if (!body) return { ok: false };
+      const src = clamp((x - body.getBoundingClientRect().left) / E.pps, 0, E.dur); const laneEl = el.closest("[data-track]"); const lane = laneEl?.dataset.track || ""; const [lk, ln] = lane.split(":");
+      if (pl.fx) return { zone: "tl", ok: true, src, lk, ln, laneEl };
+      if (kind === "music" || kind === "sfx") return { zone: "tl", ok: lk === "audio" || !lane, src, lk, ln, laneEl, why: "music/SFX सिर्फ़ audio lane (A1, A2…) पर" };
+      if (lk === "audio") return { zone: "tl", ok: false, why: "video/image को audio lane पर नहीं — V lane या preview पर छोड़ें" };
+      return { zone: "tl", ok: true, src, lk, ln, laneEl };
+    }
+    return { ok: false, why: "यहाँ नहीं छोड़ सकते — preview या timeline पर छोड़ें" };
+  };
+  const drop = (t, pl) => {
+    if (t.zone === "stage") { if (pl.fx) return addFxClip(pl.fx[0], pl.fx[1]); const x = pl.lib; const fb = E.frameBox; if (!x || !fb) return; const r = $("#ovl", E.root).getBoundingClientRect(); libAdd(x, { free: true, x: +clamp((t.x - r.left) / fb.w, 0, 1).toFixed(3), y: +clamp((t.y - r.top) / fb.h, 0, 1).toFixed(3) }); return; }
+    const { src, lk, ln } = t; if (pl.fx) { seek(src); return addFxClip(pl.fx[0], pl.fx[1], src, lk === "fx" && ln != null ? +ln : 0); }
+    const x = pl.lib; if (!x) return; seek(src);
+    if ((x.kind === "music" || x.kind === "sfx") && lk === "audio" && ln != null) return addAudioClip(x, src, +ln);
+    const n0 = E.rs.effects.broll.length; libAdd(x, { src, free: x.kind === "image" && lk === "broll" });
+    if (lk === "broll" && ln != null && E.rs.effects.broll.length > n0) { E.rs.effects.broll[E.rs.effects.broll.length - 1].track = +ln; touch(); renderTimeline(); }
+  };
+  panel.addEventListener("pointerdown", (e) => {
+    if (!E.canEdit || e.button > 0) return; const li = e.target.closest?.("[data-lib],[data-fxadd],[data-gpre]"); if (!li || !panel.contains(li)) return;
+    const pl = payloadOf(li); if (pl.lib === undefined && !pl.fx) return; if (pl.lib === null) return;
+    const touch_ = e.pointerType === "touch"; const x0 = e.clientX, y0 = e.clientY; let started = false, ghost = null, timer = 0, last = null;
+    const start = () => { if (started) return; started = true; ghost = document.createElement("div"); ghost.className = "dragghost"; ghost.textContent = pl.lib ? pl.lib.name : (pl.fx[1] || "effect"); document.body.appendChild(ghost); document.body.classList.add("dragging"); li.classList.add("lifting"); };
+    const move = (ev) => {
+      last = ev;
+      if (!started) { if (touch_) { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) { clearTimeout(timer); cleanup(); } return; } if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return; start(); }
+      ev.preventDefault(); ghost.style.transform = `translate(${ev.clientX + 12}px,${ev.clientY + 12}px)`;
+      clearMarks(); const t = target(ev.clientX, ev.clientY, pl); ghost.classList.toggle("bad", !t.ok);
+      if (t.zone === "stage" && t.ok) zones().stage.classList.add("dropon");
+      if (t.zone === "tl" && t.ok) { zones().tl.classList.add("dropon"); t.laneEl?.classList.add("dropon"); const body = $("#tl-body", E.root); if (body) { const m = document.createElement("i"); m.className = "dropmark"; m.style.left = (t.src * E.pps).toFixed(1) + "px"; body.appendChild(m); } }
+    };
+    const cleanup = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); clearTimeout(timer); ghost?.remove(); document.body.classList.remove("dragging"); li.classList.remove("lifting"); clearMarks(); };
+    const up = (ev) => {
+      const was = started; cleanup(); if (!was) return;
+      // the pointerup also produces a click on the element under the finger — swallow it once
+      const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); }; window.addEventListener("click", swallow, { capture: true, once: true }); setTimeout(() => window.removeEventListener("click", swallow, true), 400);
+      const t = target(ev.clientX, ev.clientY, pl); if (!t.ok) { E.ctx.toast(t.why || "यहाँ नहीं छोड़ सकते"); return; } drop({ ...t, x: ev.clientX, y: ev.clientY }, pl);
+    };
+    window.addEventListener("pointermove", move, { passive: false }); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+    if (touch_) timer = setTimeout(() => { start(); if (navigator.vibrate) navigator.vibrate(10); }, 350);
+  });
 }
 
 // ---------- effect / filter clips (a time range on an FX track; render applies them only there) ----------

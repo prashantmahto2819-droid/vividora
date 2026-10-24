@@ -29,7 +29,9 @@ from . import keyframes as K
 SHAPES = {
     "circle": "Circle (गोला)", "ellipse": "Ellipse", "rect": "Rectangle (rounded)", "heart": "Heart ❤",
     "star": "Star ⭐", "linear": "Linear / split (wipe)", "mirror": "Mirror band (पट्टी)",
+    "polygon": "Polygon / freehand ✎",
 }
+MAX_VERTS = 400
 DEFAULTS = {"x": 0.5, "y": 0.5, "w": 0.6, "h": 0.6, "rotation": 0.0, "roundness": 0.0, "feather": 0.02,
             "points": 5, "inner": 0.4}
 ANIM_KEYS = ("x", "y", "w", "h", "rotation", "feather", "roundness")
@@ -61,6 +63,17 @@ def clean(spec) -> dict | None:
         except (TypeError, ValueError):
             v = float(DEFAULTS[p["name"]])
         out[p["name"]] = max(p["min"], min(p["max"], v))
+    if shape == "polygon":
+        # vertices as [x, y] fractions of the layer (0..1), at least 3; drawn around (x, y) with w/h = 1 unscaled
+        pts = []
+        for q in (spec.get("pts") or [])[:MAX_VERTS]:
+            try:
+                pts.append((max(-1.0, min(2.0, float(q[0]))), max(-1.0, min(2.0, float(q[1])))))
+            except (TypeError, ValueError, IndexError):
+                continue
+        if len(pts) < 3:
+            return None
+        out["pts"] = pts
     out["kf"] = {k: K.normalize(v, lo=next(p["min"] for p in PARAMS if p["name"] == k),
                                 hi=next(p["max"] for p in PARAMS if p["name"] == k))
                  for k, v in (spec.get("kf") or {}).items() if k in ANIM_KEYS}
@@ -114,6 +127,14 @@ def draw(spec: dict, W: int, H: int, t: float = 0.0) -> np.ndarray:
         q = p["inner"]
         verts = [((a if i % 2 == 0 else a * q) * math.sin(math.pi * i / k), -(b if i % 2 == 0 else b * q) * math.cos(math.pi * i / k))
                  for i in range(2 * k)]
+        sd = _poly_sd(ur, vr, verts)
+    elif shape == "polygon":
+        # vertices are layer fractions; x/y translate the whole shape (0.5 = as drawn), w/h scale it about its centre
+        pts = p["pts"]
+        mx = sum(q[0] for q in pts) / len(pts)
+        my = sum(q[1] for q in pts) / len(pts)
+        sw, sh = p["w"] / 0.6, p["h"] / 0.6  # DEFAULT w/h 0.6 = drawn size
+        verts = [((((q[0] - mx) * sw + mx + (p["x"] - 0.5)) * W - p["x"] * W) / s, (((q[1] - my) * sh + my + (p["y"] - 0.5)) * H - p["y"] * H) / s) for q in pts]
         sd = _poly_sd(ur, vr, verts)
     elif shape == "linear":
         sd = ur
