@@ -31,7 +31,7 @@ const STATUS = {
   review_output: ["मंज़ूरी बाकी", "review"], approved: ["मंज़ूर", "approved"], failed: ["रुक गया", "failed"],
 };
 const WORKING = ["preparing", "transcribing", "cutting", "rendering"];
-const JOBK = { prepare: "जाँच और preview", transcribe: "Transcript", autocut: "कट ढूँढना", render: "Render", shorts_plan: "Shorts ढूँढना", publish: "Publish", montage: "Montage", montage_plan: "Beat plan", matte: "Cutout" };
+const JOBK = { prepare: "जाँच और preview", transcribe: "Transcript", autocut: "कट ढूँढना", render: "Render", shorts_plan: "Shorts ढूँढना", publish: "Publish", montage: "Montage", montage_plan: "Beat plan", matte: "Cutout", yt_shorts: "YouTube → Shorts" };
 
 // ---------- icons (stroke, 24 grid) ----------
 const IC = {
@@ -79,7 +79,7 @@ function toast(msg, ms = 2600) { const t = document.createElement("div"); t.clas
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|characters|scenes|characters3d|scenes3d)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|characters|scenes|characters3d|scenes3d|yt-shorts)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -111,6 +111,7 @@ async function load() {
   if (r.kind === "library") S.lib = await api("GET", `/library?channel=${S.channel}`).catch(() => []);
   if (r.kind === "templates" && !r.id) { const q = S.tplFilter || {}; S.tpls = await api("GET", `/templates?${new URLSearchParams(Object.fromEntries(Object.entries(q).filter(([, v]) => v)))}`).catch(() => ({ templates: [], formats: {}, industries: {}, fields: {} })); if (S.tplTab === "trends") S.trendTpl = await api("GET", "/trends/templates").catch(() => null); }
   if (r.kind === "compress") { const [c, src] = await Promise.all([api("GET", "/compress").catch(() => ({ jobs: [], presets: {} })), api("GET", "/compress/sources").catch(() => [])]); S.comp = c; S.compSrc = src; }
+  if (r.kind === "yt-shorts") { S.ytShorts = await api("GET", "/yt-shorts").catch(() => ({ jobs: [] })); }
   if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
   if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; S.notify = await api("GET", "/notify").catch(() => null); }
   const ids = new Set(S.projects.map((p) => p.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
@@ -121,7 +122,8 @@ function schedulePoll() {
   const busy = S.project && (WORKING.includes(S.project.status) || (S.project.jobs || []).some((j) => ["queued", "running"].includes(j.status)));
   const anyBusy = S.projects.some((p) => WORKING.includes(p.status)) || (S.route.kind === "home" && (S.overview?.jobs || []).length);
   const compBusy = S.route.kind === "compress" && (S.comp?.jobs || []).some((j) => ["queued", "running"].includes(j.status));
-  if (busy || anyBusy || compBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy ? 2500 : 6000);
+  const ytBusy = S.route.kind === "yt-shorts" && (S.ytShorts?.jobs || []).some((j) => ["queued", "running"].includes(j.status));
+  if (busy || anyBusy || compBusy || ytBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy || ytBusy ? 2500 : 6000);
 }
 // a background poll must never wipe a form someone is filling in: the upload/montage page keeps chosen files in memory
 function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "templates", "characters", "scenes", "characters3d", "scenes3d"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
@@ -129,7 +131,7 @@ function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SE
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
-  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["yt-shorts", "#/yt-shorts", "film", "YT → Shorts", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1]]],
   ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
@@ -219,12 +221,12 @@ function render() {
   }
   app.dataset.mode = "shell"; ED.unmount();
   const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, library: libraryView,
-                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView };
+                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView, "yt-shorts": ytShortsView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }) };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
@@ -985,6 +987,67 @@ function libCard(x) {
 // ---------- video compressor (standalone tool) ----------
 const COMP_TARGETS = [10, 20, 25, 50];
 function fmtMB(b) { return b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : (b / 1e6).toFixed(b < 1e7 ? 1 : 0) + " MB"; }
+// ---------- YouTube → Shorts/Reels ----------
+function ytShortsView() {
+  const d = S.ytShorts || { jobs: [] }; const canEdit = S.user.role !== "viewer";
+  const f = S.ytForm || (S.ytForm = { url: "", format: "shorts", auto_edit: true, count: 5, min_len: 25, max_len: 58 });
+  const jobs = d.jobs || [];
+  return `<div class="pghead"><h1>YouTube → Shorts / Reels</h1></div>
+    <p class="muted small">अपनी YouTube video का link डालें — Vividora download करके सबसे दमदार 30–60 सेकंड के हिस्से ढूँढेगा और 9:16 vertical Shorts/Reels बनाने के लिए project बनाएगा।</p>
+    <div class="box" style="border-left:3px solid var(--amber);padding-left:1rem;margin-bottom:1rem">
+      <p class="small"><b>⚠ Copyright:</b> सिर्फ़ अपनी video इस्तेमाल करें। दूसरों की video download करना YouTube की नियमों के ख़िलाफ़ है और copyright claim आ सकता है।</p></div>
+    ${canEdit ? `<div class="box">
+      <div class="ifield"><label>YouTube URL</label><input type="url" id="yt-url" placeholder="https://youtube.com/watch?v=… या youtu.be/…" value="${esc(f.url)}" style="font-size:1rem"></div>
+      <div class="irow">
+        <div class="ifield"><label>Format</label><div class="choices">
+          <label class="chip ${f.format === "shorts" ? "on" : ""}"><input type="radio" name="yt-fmt" value="shorts" ${f.format === "shorts" ? "checked" : ""}>9:16 Shorts</label>
+          <label class="chip ${f.format === "reels" ? "on" : ""}"><input type="radio" name="yt-fmt" value="reels" ${f.format === "reels" ? "checked" : ""}>9:16 Reels</label>
+          <label class="chip ${f.format === "square" ? "on" : ""}"><input type="radio" name="yt-fmt" value="square" ${f.format === "square" ? "checked" : ""}>1:1 Square</label>
+        </div></div>
+        <div class="ifield"><label>Highlights</label><div class="choices">
+          <label class="chip ${f.auto_edit ? "on" : ""}"><input type="checkbox" id="yt-auto" ${f.auto_edit ? "checked" : ""}>Highlights ढूँढें (AI)</label>
+        </div></div>
+      </div>
+      ${f.auto_edit ? `<div class="irow">
+        <div class="ifield"><label>कितने highlights</label><input type="number" id="yt-count" value="${f.count}" min="1" max="10" style="width:70px"></div>
+        <div class="ifield"><label>कम से कम (सेकंड)</label><input type="number" id="yt-min" value="${f.min_len}" min="10" max="60" style="width:70px"></div>
+        <div class="ifield"><label>ज़्यादा से ज़्यादा (सेकंड)</label><input type="number" id="yt-max" value="${f.max_len}" min="20" max="90" style="width:70px"></div>
+      </div>` : ""}
+      <div class="irow" style="justify-content:flex-end;margin-top:.5rem"><button class="btn primary" id="yt-go">${ic("film")} Highlights ढूंढें</button></div>
+    </div>` : ""}
+    <h3>काम</h3>
+    ${jobs.length ? `<ul class="jobs cplist">${jobs.map((j) => { const r = j.result || {};
+      const head = `<b>${esc(r.title || j.url || "YouTube video")}</b> <span class="small muted">${j.format || "shorts"}</span>`;
+      if (j.status === "done") { const hl = (r.highlights || []).length;
+        return `<li class="done"><div>${head}<div class="small">${fmtDur(r.duration || 0)} · ${hl ? hl + " highlights" : "no highlights"}</div>
+          ${r.project ? `<div class="row" style="margin-top:.3rem"><a class="btn small primary" href="#/projects/${r.project.id}">Editor में खोलें</a><span class="small muted">${esc(r.project.title)}</span></div>` : ""}</div></li>`; }
+      if (j.status === "failed") return `<li class="failed"><div>${head}<div class="small" style="color:var(--rose)">असफल — ${esc(((j.error || "").trim().split("\\n").filter(Boolean).slice(-1)[0] || "error").slice(0, 200))}</div></div></li>`;
+      if (j.status === "cancelled") return `<li><div>${head}<div class="small muted">रद्द</div></div></li>`;
+      return `<li><div>${head}<div class="small muted">${j.status === "queued" ? "कतार में" : esc(j.message || "चल रहा है")}</div><div class="progress"><i ${j.status === "queued" ? 'class="indet"' : `style="width:${j.progress || 0}%"`}></i></div></div><span class="small">${j.status === "running" ? (j.progress || 0) + "%" : ""}</span>${canEdit ? `<button class="ibtn" data-ytx="${j.id}" title="रद्द">✕</button>` : ""}</li>`; }).join("")}</ul>` : `<p class="muted small">अभी कोई YouTube import नहीं।</p>`}`;
+}
+function bindYtShorts() {
+  const f = S.ytForm || (S.ytForm = { url: "", format: "shorts", auto_edit: true, count: 5, min_len: 25, max_len: 58 });
+  const canEdit = S.user.role !== "viewer"; if (!canEdit) return;
+  const urlIn = $("#yt-url"); if (urlIn) urlIn.oninput = () => { f.url = urlIn.value; };
+  document.querySelectorAll("input[name=yt-fmt]").forEach((i) => (i.onchange = () => { f.format = i.value; }));
+  const autoChk = $("#yt-auto"); if (autoChk) autoChk.onchange = () => { f.auto_edit = autoChk.checked; render(); };
+  const countIn = $("#yt-count"); if (countIn) countIn.onchange = () => { f.count = +countIn.value || 5; };
+  const minIn = $("#yt-min"); if (minIn) minIn.onchange = () => { f.min_len = +minIn.value || 25; };
+  const maxIn = $("#yt-max"); if (maxIn) maxIn.onchange = () => { f.max_len = +maxIn.value || 58; };
+  document.querySelectorAll("[data-ytx]").forEach((b) => (b.onclick = async () => { if (!confirm("यह import रद्द करें?")) return; try { await api("POST", `/yt-shorts/${b.dataset.ytx}/cancel`); await load(); render(); } catch (e) { toast(e.message); } }));
+  const go = $("#yt-go"); if (go) go.onclick = async () => {
+    const url = ($("#yt-url")?.value || "").trim();
+    if (!url) return toast("YouTube URL डालें");
+    if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be|m\.youtube\.com)/.test(url)) return toast("सही YouTube URL डालें");
+    go.disabled = true; go.textContent = "शुरू हो रहा है…";
+    try {
+      await api("POST", "/yt-shorts", { url, format: f.format, auto_edit: f.auto_edit, count: f.count, min_len: f.min_len, max_len: f.max_len });
+      toast("YouTube import शुरू — download और analysis हो रहा है");
+      f.url = ""; await load(); render();
+    } catch (e) { toast(e.message); go.disabled = false; go.textContent = "Highlights ढूंढें"; }
+  };
+}
+
 function compressView() {
   const c = S.comp || { jobs: [], presets: {} }; const f = S.compForm || (S.compForm = { preset: "whatsapp", target: 16, custom: true, max_h: 720, fps: 30, src: "" });
   const canEdit = S.user.role !== "viewer"; const presets = c.presets || {};

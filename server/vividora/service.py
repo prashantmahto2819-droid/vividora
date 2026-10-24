@@ -662,6 +662,38 @@ def after_job(c, job: dict, result: dict) -> None:
         note += f", {cached} lines cache से)" if cached else ")"
         db.update(c, "projects", pid, {**upd, "status_note": note + " — Audio tab में “इसे इस्तेमाल करें”", "updated_at": db.now()})
 
+    elif kind == "yt_shorts":
+        # YouTube → Shorts converter: the worker downloaded, prepared, and optionally transcribed.
+        # Create a new project from the result and link the uploaded files to it.
+        pl = job.get("payload") or {}
+        title = result.get("title") or "YouTube Import"
+        ws_id = pl.get("workspace_id") or project["workspace_id"]
+        np_id = db.new_id()
+        meta = result.get("meta") or {}
+        meta["yt_import"] = {"video_id": result.get("video_id"), "channel": result.get("channel"),
+                             "thumbnail": result.get("thumbnail", ""), "format": result.get("format", "shorts")}
+        highlights = result.get("highlights") or []
+        if highlights:
+            meta["yt_highlights"] = highlights
+        tr = result.get("transcript") or {}
+        edl = autocut.build_edl(tr, float(meta.get("duration") or result.get("duration") or 0)) if tr.get("segments") else None
+        np_ = {"id": np_id, "workspace_id": ws_id, "title": title[:120],
+               "channel_id": pl.get("channel_id") or "", "kind": "video", "language": "hi",
+               "status": "review_cuts" if edl else "preparing",
+               "status_note": f"YouTube import तैयार — {len(highlights)} highlights मिले" if highlights else "YouTube import तैयार — editor में खोलें",
+               "meta": meta, "settings": {"render": DEFAULT_RENDER},
+               "transcript": tr if tr.get("segments") else None,
+               "edl": edl,
+               "created_by": pl.get("user_id"), "created_at": db.now(), "updated_at": db.now()}
+        db.insert(c, "projects", np_)
+        for f in result.get("files", []):
+            add_asset(c, np_id, f["kind"], f["path"], mime=f.get("mime"), meta=f.get("meta"))
+        db.update(c, "jobs", job["id"], {"result": {**result, "project_id": np_id}})
+        log(c, ws_id, "ytshorts.done", user_id=pl.get("user_id"), project_id=np_id,
+            detail={"title": title, "highlights": len(highlights)})
+        notify.on_event("review_cuts", db.get("projects", np_id))
+        return
+
     elif kind == "render":
         sig = (job.get("payload") or {}).get("edit_sig")
         from . import saas
@@ -692,8 +724,8 @@ def fail_job(c, job: dict, error: str) -> None:
     pid = job["project_id"]
     db.update(c, "jobs", job["id"], {"status": "failed", "error": error[:4000],
                                      "finished_at": db.now()})
-    if job["kind"] == "compress":
-        return  # a tool job: the Compress page shows the error, the hidden tools project stays as is
+    if job["kind"] in ("compress", "yt_shorts"):
+        return  # a tool job: the page shows the error, the hidden tools project stays as is
     if job["kind"] == "matte_lib" and not ((db.get("projects", pid) or {}).get("meta") or {}).get("render_after_matte"):
         # a library clip's cutout is a side job unless a render is waiting for it
         db.update(c, "projects", pid, {"status_note": f"cutout (B-roll) असफल: {error.splitlines()[-1][:160] if error else 'error'}",
