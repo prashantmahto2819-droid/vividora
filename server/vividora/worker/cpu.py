@@ -132,6 +132,9 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
     for key in ("broll", "sfx"):
         out = []
         for item in e.get(key) or []:
+            if isinstance(item, dict) and item.get("lut"):  # per-clip .cube from the library
+                lp = fetch(item["lut"])
+                item["lut_path"] = str(lp) if lp else None
             if isinstance(item, dict) and item.get("id"):
                 p = fetch(item["id"])
                 if p:

@@ -223,7 +223,29 @@ export function clipGeom(b, ot, fb) {
   let op = hasKf(kf, "opacity") ? sample(kf.opacity, t) : +(b.opacity ?? 1);
   const dur = b.end - b.start;
   if (fit === "cover" && b.fade !== false) { const fd = Math.min(0.25, dur / 4); op *= clamp(Math.min(t / fd, (dur - t) / fd), 0, 1); }
+  op *= trFactor(b, ot);
   return { cx, cy, w: bw * sm, h: bh == null ? null : bh * sm, rot, op: clamp(op, 0, 1), fit };
+}
+// ---- transitions between overlay clips on one track (render: engine/compose.apply_transitions; preview: opacity only)
+export const TRANSITIONS = { none: "कोई नहीं", crossfade: "Crossfade", dip: "Dip (काला)", slide_left: "Slide ←", slide_right: "Slide →", slide_up: "Slide ↑", slide_down: "Slide ↓", zoom: "Zoom in", wipe: "Wipe →" };
+export function trPrev(b) {
+  const ed = E(); let best = null;
+  for (const o of ed.rs.effects.broll) { if (o === b || (o.track || 0) !== (b.track || 0)) continue; if (+o.start < +b.start && +o.end >= +b.start - 0.02 && (!best || +o.end > +best.end)) best = o; }
+  return best;
+}
+export function trWindow(b) {
+  const tr = b.tr; if (!tr || !tr.kind || tr.kind === "none") return null;
+  const prev = trPrev(b); if (!prev) return { prev: null, overlap: 0, wd: 0, want: +tr.dur || 0.5 };
+  const overlap = Math.max(0, +prev.end - +b.start); const want = clamp(+tr.dur || 0.5, 0.1, 5);
+  return { prev, overlap, wd: Math.min(want, overlap), want };
+}
+// opacity factor at output time ot: this clip fading in, or the next clip's transition fading this one out
+function trFactor(b, ot) {
+  let f = 1; const w = trWindow(b);
+  if (w && w.prev && w.wd >= 0.08) { const t = ot - b.start; const [a, c] = b.tr.kind === "dip" ? [w.wd / 2, w.wd] : [0, w.wd]; if (t < c) f *= clamp((t - a) / Math.max(0.01, c - a), 0, 1); }
+  for (const n of E().rs.effects.broll) { if (n === b || !n.tr || n.tr.kind === "none" || (n.track || 0) !== (b.track || 0)) continue; const wn = trWindow(n); if (!wn || wn.prev !== b || wn.wd < 0.08) continue;
+    const end = n.tr.kind === "dip" ? +n.start + wn.wd / 2 : +n.start + wn.wd; if (ot >= +n.start && ot < end) f *= clamp(1 - (ot - n.start) / Math.max(0.01, end - n.start), 0, 1); else if (ot >= end) f = 0; }
+  return f;
 }
 const CSS_BLEND = { normal: "", screen: "screen", multiply: "multiply", overlay: "overlay", softlight: "soft-light", hardlight: "hard-light", add: "plus-lighter", lighten: "lighten", darken: "darken", difference: "difference", exclusion: "exclusion", colordodge: "color-dodge", colorburn: "color-burn" };
 const KEY_BLEND = { screen: "screen", black: "screen", white: "multiply" };
@@ -281,6 +303,8 @@ export function maskImage(m, c, lw, lh) {
     else if (sh === "star") { const n = clamp(+(m.points || 5), 3, 12), inn = clamp(+(m.inner || 0.4), 0.1, 0.9); for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n; const rx = (i % 2 ? inn : 1) * w / 2, ry = (i % 2 ? inn : 1) * h / 2; i ? x.lineTo(Math.cos(a) * rx, Math.sin(a) * ry) : x.moveTo(Math.cos(a) * rx, Math.sin(a) * ry); } x.closePath(); }
     else if (sh === "linear") x.rect(-4 * W, -4 * Hh, 4 * W, 8 * Hh);
     else if (sh === "mirror") x.rect(-4 * W, -h / 2, 8 * W, h);
+    else if (sh === "polygon" && (m.pts || []).length >= 3) { const pts = m.pts; const mx = pts.reduce((a, q) => a + +q[0], 0) / pts.length, my = pts.reduce((a, q) => a + +q[1], 0) / pts.length; const sw = +(m.w ?? 0.6) / 0.6, shh = +(m.h ?? 0.6) / 0.6;
+      pts.forEach((q, i) => { const px = ((+q[0] - mx) * sw + mx - 0.5) * W, py = ((+q[1] - my) * shh + my - 0.5) * Hh; i ? x.lineTo(px, py) : x.moveTo(px, py); }); x.closePath(); }
     x.fill(); x.restore();
     if (m.invert) { x.globalCompositeOperation = "xor"; x.fillRect(0, 0, W, Hh); x.globalCompositeOperation = "source-over"; }
   } else x.fillRect(0, 0, W, Hh);
@@ -409,7 +433,7 @@ export function bindColor(root, after) {
 const SHAPE_ICON = {
   circle: '<circle cx="12" cy="12" r="8"/>', ellipse: '<ellipse cx="12" cy="12" rx="9" ry="6"/>', rect: '<rect x="4" y="6" width="16" height="12" rx="3"/>',
   heart: '<path d="M12 20s-7-4.5-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.5-7 10-7 10z"/>', star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/>',
-  linear: '<path d="M4 4h8v16H4z" fill="currentColor" stroke="none" opacity=".5"/><path d="M12 3v18"/>', mirror: '<path d="M3 9h18v6H3z" fill="currentColor" stroke="none" opacity=".5"/><path d="M3 9h18M3 15h18"/>',
+  linear: '<path d="M4 4h8v16H4z" fill="currentColor" stroke="none" opacity=".5"/><path d="M12 3v18"/>', polygon: '<path d="M5 9l7-5 8 6-3 9H7z" fill="currentColor" stroke="none" opacity=".5"/><path d="M5 9l7-5 8 6-3 9H7z"/>', mirror: '<path d="M3 9h18v6H3z" fill="currentColor" stroke="none" opacity=".5"/><path d="M3 9h18M3 15h18"/>',
 };
 export function maskHtml(oid, m, dis, opts = {}) {
   const shapes = PP().masks?.shapes || {}; const o = OWN.get(oid); const sh = m?.shape || "";
@@ -418,16 +442,19 @@ export function maskHtml(oid, m, dis, opts = {}) {
     ${sh ? `<div class="irow"><label class="chk small"><input type="checkbox" data-minv="${oid}" ${m.invert ? "checked" : ""} ${dis}> उल्टा (invert)</label><button class="btn small ${E().maskEdit ? "primary" : "quiet"}" data-medit="${oid}" title="preview पर mask: बीच से खींचें = जगह, कोने = size, ऊपर का गोला = घुमाव" ${dis}>✎ preview पर handles</button></div>
       ${opts.bg ? `<div class="irow">${H.field("mask के बाहर", `<select data-mbg="${oid}" class="small" ${dis}>${[["black", "काला"], ["blur", "blur"], ["color", "रंग"]].map(([v, l]) => `<option value="${v}" ${bgv === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}${bgv === "color" ? H.field("रंग", `<input type="color" data-mbgc="${oid}" value="${m.bg}" ${dis}>`) : ""}</div>` : ""}
       ${["feather", "x", "y", "w", ...(["circle", "linear"].includes(sh) ? [] : ["h"]), "rotation", ...(sh === "rect" ? ["roundness"] : [])].map((p) => kfSlider(o, p, dis)).join("")}
+      ${sh === "polygon" ? `<div class="irow"><button class="btn small ${E().polyMode === "add" ? "primary" : "quiet"}" data-poly="${oid}|add" ${dis} title="preview पर click करके कोने जोड़ें">＋ कोने (click)</button><button class="btn small ${E().polyMode === "draw" ? "primary" : "quiet"}" data-poly="${oid}|draw" ${dis} title="preview पर उँगली/mouse से आकार खींचें">✍ freehand</button><button class="btn small quiet" data-poly="${oid}|clear" ${dis}>साफ़ करें</button><span class="small muted">${(m.pts || []).length} कोने${(m.pts || []).length < 3 ? " — कम से कम 3 चाहिए" : ""} · कोने खींचकर बदलें, double-click = हटाएँ</span></div>` : ""}
       ${sh === "star" ? `<div class="irow">${H.field(`कोने <b>${m.points || 5}</b>`, `<input type="range" data-mstar="${oid}|points" min="3" max="12" step="1" value="${m.points || 5}" ${dis}>`)}${H.field(`अंदर <b>${m.inner || 0.4}</b>`, `<input type="range" data-mstar="${oid}|inner" min="0.1" max="0.9" step="0.01" value="${m.inner || 0.4}" ${dis}>`)}</div>` : ""}` : ""}`;
 }
 export function bindMask(root, getMask, setMask, after) {
   $$("[data-mshape]", root).forEach((b) => (b.onclick = () => { const k = b.dataset.mshape.split("|")[1]; if (!k) { setMask(null); E().maskEdit = false; }
-    else { const m = getMask() || {}; const d = Object.fromEntries((PP().masks?.params || []).filter((x) => x.name !== "points" && x.name !== "inner").map((x) => [x.name, x.default])); setMask({ ...d, ...m, shape: k, enabled: true, ...(k === "linear" ? { w: 1, h: 1 } : {}) }); E().maskEdit = true; }
+    else { const m = getMask() || {}; const d = Object.fromEntries((PP().masks?.params || []).filter((x) => x.name !== "points" && x.name !== "inner").map((x) => [x.name, x.default])); setMask({ ...d, ...m, shape: k, enabled: true, ...(k === "linear" ? { w: 1, h: 1 } : {}), ...(k === "polygon" ? { pts: m.pts || [], w: 0.6, h: 0.6, x: 0.5, y: 0.5, rotation: 0 } : {}) }); E().maskEdit = true; if (k === "polygon" && !(m.pts || []).length) E().polyMode = "add"; }
     H.touch(); after?.(); H.rerender(); H.renderOverlay(); }));
   $$("[data-minv]", root).forEach((el) => (el.onchange = () => { getMask().invert = el.checked; H.touch(); after?.(); }));
   $$("[data-medit]", root).forEach((b) => (b.onclick = () => { E().maskEdit = !E().maskEdit; H.rerender(); H.renderOverlay(); }));
   $$("[data-mbg]", root).forEach((el) => (el.onchange = () => { getMask().bg = el.value === "color" ? "#111111" : el.value; H.touch(); after?.(); H.rerender(); }));
   $$("[data-mbgc]", root).forEach((el) => (el.oninput = () => { getMask().bg = el.value; H.touch(); after?.(); }));
+  $$("[data-poly]", root).forEach((b) => (b.onclick = () => { const k = b.dataset.poly.split("|")[1]; const ed = E(); const m = getMask(); if (!m) return;
+    if (k === "clear") { m.pts = []; ed.polyMode = "add"; } else ed.polyMode = ed.polyMode === k ? "" : k; ed.maskEdit = true; H.touch(); after?.(); H.rerender(); H.renderOverlay(); }));
   $$("[data-mstar]", root).forEach((el) => (el.oninput = () => { const k = el.dataset.mstar.split("|")[1]; getMask()[k] = +el.value; const lb = el.closest(".ifield")?.querySelector("label b"); if (lb) lb.textContent = el.value; H.touch(); after?.(); }));
 }
 
@@ -480,6 +507,8 @@ export function brollInspector(it, dis) {
   h += sec("color", "Colour", `<div class="chips">${[["", "सब"], ...Object.entries(cat.grade_cats || {})].map(([k, l]) => `<button class="${(ed.gCatClip || "") === k ? "on" : ""}" data-gcc="${k}">${esc(l)}</button>`).join("")}</div>
     <div class="looks mini">${[["", { label: "कोई नहीं" }], ...Object.entries(cat.grade_presets).filter(([, p]) => !ed.gCatClip || p.cat === ed.gCatClip)].map(([k, p]) => `<button class="look ${gp === k ? "on" : ""}" data-cgp="${k}" ${dis} title="${esc(p.label)}">${thumb ? `<img src="${thumb}" style="filter:${k ? H.gradeCss(p) : ""}" alt="" loading="lazy">` : `<i></i>`}<small>${esc(p.label)}</small></button>`).join("")}</div>
     ${gp ? H.field(`intensity <b>${Math.round(gs * 100)}%</b>`, `<input type="range" data-cgs min="0" max="1.5" step="0.05" value="${gs}" ${dis}>`) : ""}
+    ${(() => { const luts = (ed.lib || []).filter((x) => x.kind === "lut"); if (!luts.length && !it.lut) return ""; const la = it.lut_amount ?? 1;
+      return `<div class="irow">${H.field("LUT (सिर्फ़ इस clip पर)", `<select data-clut class="small" ${dis}><option value="">कोई नहीं</option>${luts.map((x) => `<option value="${x.id}" ${it.lut === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`)}${it.lut ? H.field(`LUT कितना <b>${Math.round(la * 100)}%</b>`, `<input type="range" data-cla min="0" max="1" step="0.05" value="${la}" ${dis}>`) : ""}</div>${it.lut ? `<p class="small muted rhint">LUT preview में नहीं — <b>render / 🎞 Preview frame</b> में दिखेगी।</p>` : ""}`; })()}
     <details class="insp sub" data-sec="ccol" ${SECS().ccol ? "open" : ""}><summary>Wheels · Curves · HSL · Colour match</summary>${colorHtml("col:" + it._id, dis)}</details>`, gp || !neutralColor(it.color) || renderOnlyColor(it.color) ? "●" : "");
   // --- effects stack (per clip)
   const effs = cat.effects || []; const stack = it.stack || [];
@@ -492,6 +521,10 @@ export function brollInspector(it, dis) {
     ${it.blend_mode === "subtract" ? `<p class="small muted rhint">Subtract का CSS preview नहीं — <b>render में दिखेगा</b></p>` : ""}
     ${kfSlider(o, "opacity", dis)}
     <div class="irow">${H.field("background हटाएँ (keying)", `<select data-k="blend" ${dis}>${Object.entries(ed.ctx.S.presets?.blends || { normal: "Normal" }).map(([k, l]) => `<option value="${k}" ${(it.blend || "normal") === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}${["green", "blue", "black", "white"].includes(it.blend) ? H.field("कितना हटे", `<input type="range" data-k="key_sim" min="0.05" max="0.6" step="0.01" value="${it.key_sim ?? 0.25}" ${dis}>`) : ""}</div>`, it.blend_mode && it.blend_mode !== "normal" ? BM[it.blend_mode] : "");
+  // --- transition from the previous clip on this track
+  { const w = trWindow(it); const prev = trPrev(it); const kind = it.tr?.kind || "none";
+    const warn = kind !== "none" ? (!prev ? `<p class="small muted rhint">⚠ इसी track पर इससे पहले कोई clip नहीं जो इसे छूती/overlap करती हो — transition नहीं लगेगी।</p>` : w.wd < 0.08 ? `<p class="small muted rhint">⚠ handles कम हैं: clips overlap नहीं करतीं — पिछली clip को इसके ऊपर खींचकर ${w.want.toFixed(1)}s overlap दें।</p>` : w.wd < w.want - 0.02 ? `<p class="small muted">overlap सिर्फ़ ${w.overlap.toFixed(2)}s → transition ${w.wd.toFixed(2)}s की होगी।</p>` : `<p class="small muted">preview में opacity crossfade; slide/zoom/wipe render में (🎞 Preview frame)।</p>`) : "";
+    h += sec("tr", "Transition (पिछली clip से)", `<div class="irow">${H.field("किस तरह", `<select data-trk class="small" ${dis}>${Object.entries(TRANSITIONS).map(([k, l]) => `<option value="${k}" ${kind === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}${kind !== "none" ? H.field(`समय <b>${(+it.tr?.dur || 0.5).toFixed(1)}s</b>`, `<input type="range" data-trd min="0.1" max="3" step="0.1" value="${+it.tr?.dur || 0.5}" ${dis}>`) : ""}</div>${warn}`, kind !== "none" ? TRANSITIONS[kind] : ""); }
   // --- mask (+ crop)
   const cr = it.crop || { x: 0, y: 0, w: 1, h: 1 };
   h += sec("mask", "Mask · Crop", maskHtml(mo.id, it.mask, dis) + `<details class="insp sub" data-sec="crop" ${SECS().crop ? "open" : ""}><summary>Crop (clip के किनारे काटें)</summary><div class="irow">${["x", "y", "w", "h"].map((k) => H.field(`${{ x: "बाएँ", y: "ऊपर", w: "चौड़ाई", h: "ऊँचाई" }[k]} <b>${(+(cr[k] ?? (k === "w" || k === "h" ? 1 : 0))).toFixed(2)}</b>`, `<input type="range" data-crop="${k}" min="${k === "w" || k === "h" ? 0.05 : 0}" max="${k === "w" || k === "h" ? 1 : 0.95}" step="0.01" value="${cr[k] ?? (k === "w" || k === "h" ? 1 : 0)}" ${dis}>`)).join("")}</div>${it.crop ? `<button class="btn small quiet" data-act2="cropreset" ${dis}>crop हटाएँ</button>` : ""}</details>`, it.mask?.shape ? (PP().masks?.shapes?.[it.mask.shape] || it.mask.shape).split(" ")[0] : "");
@@ -503,7 +536,7 @@ export function brollInspector(it, dis) {
   h += `${isVid ? H.brollCutoutBox(it, item, dis) : ""}
     <div class="ifield"><label>किस platform पर दिखे (कोई नहीं चुना = सब पर)</label><div class="irow">${["youtube", "instagram", "facebook"].map((pl) => `<label class="chk small"><input type="checkbox" data-plat="${pl}" ${(it.platforms || []).includes(pl) ? "checked" : ""} ${dis}> ${{ youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" }[pl]}</label>`).join("")}</div></div>
     ${previewHints(it)}
-    <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del" ${dis}>${H.ICON.trash} हटाएँ</button></div>`;
+    <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small quiet" data-zorder="up" ${dis} title="ऊपर वाले V track पर — दूसरी clips के आगे दिखेगी">⬆ आगे लाएँ</button><button class="btn small quiet" data-zorder="down" ${dis || (+(it.track || 0) <= 0 ? "disabled" : "")} title="नीचे वाले V track पर — दूसरी clips के पीछे">⬇ पीछे भेजें</button><button class="btn small danger quiet" data-act="del" ${dis}>${H.ICON.trash} हटाएँ</button></div>`;
   return h;
 }
 function previewHints(it) {
@@ -560,6 +593,12 @@ export function bindBrollInspector(ins, it) {
   $$("[data-cgp]", ins).forEach((b) => { b.onclick = () => { if (!ed.canEdit) return; const k = b.dataset.cgp; if (!k) { delete it.grade_preset; delete it.grade; delete it.grade_strength; } else { it.grade_preset = k; it.grade = H.scaledGrade(k, it.grade_strength ?? 1); } re(); };
     b.onmouseenter = () => { const m = $(`#ovl-media .ov-broll[data-bid="${it._id}"] video, #ovl-media .ov-broll[data-bid="${it._id}"] img`, ed.root); if (m) m.style.filter = b.dataset.cgp ? H.gradeCss(H.scaledGrade(b.dataset.cgp, 1)) : ""; };
     b.onmouseleave = () => { const m = $(`#ovl-media .ov-broll[data-bid="${it._id}"] video, #ovl-media .ov-broll[data-bid="${it._id}"] img`, ed.root); if (m) { m._f = null; after(); } }; });
+  $$("[data-zorder]", ins).forEach((b) => (b.onclick = () => { if (!ed.canEdit) return; const fx = ed.rs.effects; const cur = +(it.track || 0); const nt = b.dataset.zorder === "up" ? cur + 1 : Math.max(0, cur - 1); if (nt === cur) return;
+    fx.tracks = { ...(fx.tracks || {}) }; fx.tracks.broll = Math.max(fx.tracks.broll || 1, nt + 1, ...fx.broll.map((x) => (x.track || 0) + 1)); it.track = nt; H.touch(); H.renderTimeline(); H.renderOverlay(); H.renderInspector(); ed.ctx.toast(nt > cur ? `V${nt + 1} पर — अब आगे दिखेगी` : `V${nt + 1} पर — अब पीछे`); }));
+  const trk = $("[data-trk]", ins); if (trk) trk.onchange = () => { if (trk.value === "none") delete it.tr; else it.tr = { ...(it.tr || {}), kind: trk.value, dur: +(it.tr?.dur || 0.5) }; re(); };
+  const trd = $("[data-trd]", ins); if (trd) trd.oninput = () => { it.tr = { ...(it.tr || { kind: "crossfade" }), dur: +trd.value }; const lb = trd.closest(".ifield")?.querySelector("label b"); if (lb) lb.textContent = (+trd.value).toFixed(1) + "s"; H.touch(); after(); };
+  const cl = $("[data-clut]", ins); if (cl) cl.onchange = () => { if (cl.value) it.lut = cl.value; else { delete it.lut; delete it.lut_amount; } re(); };
+  const cla = $("[data-cla]", ins); if (cla) cla.oninput = () => { it.lut_amount = +cla.value; const lb = cla.closest(".ifield")?.querySelector("label b"); if (lb) lb.textContent = Math.round(it.lut_amount * 100) + "%"; H.touch(); };
   const gs = $("[data-cgs]", ins); if (gs) gs.oninput = () => { it.grade_strength = +gs.value; it.grade = H.scaledGrade(it.grade_preset, it.grade_strength); const lb = gs.closest(".ifield")?.querySelector("label b"); if (lb) lb.textContent = Math.round(it.grade_strength * 100) + "%"; H.touch(); after(); };
   const sa = $("[data-stkadd]", ins); if (sa) sa.onchange = () => { if (!sa.value) return; it.stack = it.stack || []; it.stack.push({ id: sa.value, params: {} }); SECS().fx = true; re(); };
   $$("[data-stkdel]", ins).forEach((b) => (b.onclick = () => { it.stack.splice(+b.dataset.stkdel, 1); if (!it.stack.length) delete it.stack; re(); }));
@@ -647,13 +686,49 @@ function maskLayer() {
   if (s.type === "video" || s.type === "seg") { const m = ed.rs.effects.pro?.mask; if (!m?.shape) return null; return { m, cx: fb.w / 2, cy: fb.h / 2, w: fb.w, h: fb.h, rot: 0, t: H.outOf(ed.t), owner: OWN.get("mmask") || maskOwner("mmask", () => ed.rs.effects.pro.mask, 0, H.outDur()) }; }
   return null;
 }
+// polygon vertex (layer fraction) → frame px, honouring the mask's x/y translate, w/h scale and the layer rotation
+function polyPx(L, m, q) {
+  const pts = m.pts || []; const mx = pts.reduce((s_, v) => s_ + +v[0], 0) / (pts.length || 1), my = pts.reduce((s_, v) => s_ + +v[1], 0) / (pts.length || 1);
+  const sw = +(m.w ?? 0.6) / 0.6, sh = +(m.h ?? 0.6) / 0.6; const fx = (+q[0] - mx) * sw + mx + (+(m.x ?? 0.5) - 0.5) - 0.5, fy = (+q[1] - my) * sh + my + (+(m.y ?? 0.5) - 0.5) - 0.5;
+  const a = L.rot * Math.PI / 180; const lx = fx * L.w, ly = fy * L.h; return [L.cx + lx * Math.cos(a) - ly * Math.sin(a), L.cy + lx * Math.sin(a) + ly * Math.cos(a)];
+}
+function polyFrac(L, m, x, y) {   // frame px → vertex fraction as it should be STORED (undo translate / scale)
+  const pts = m.pts || []; const mx = pts.reduce((s_, v) => s_ + +v[0], 0) / (pts.length || 1), my = pts.reduce((s_, v) => s_ + +v[1], 0) / (pts.length || 1);
+  const sw = +(m.w ?? 0.6) / 0.6, sh = +(m.h ?? 0.6) / 0.6; const a = -L.rot * Math.PI / 180; const dx = x - L.cx, dy = y - L.cy;
+  const fx = (dx * Math.cos(a) - dy * Math.sin(a)) / L.w + 0.5 - (+(m.x ?? 0.5) - 0.5), fy = (dx * Math.sin(a) + dy * Math.cos(a)) / L.h + 0.5 - (+(m.y ?? 0.5) - 0.5);
+  return [r3(pts.length ? (fx - mx) / sw + mx : fx), r3(pts.length ? (fy - my) / sh + my : fy)];
+}
+// Ramer–Douglas–Peucker: a drawn stroke → a few vertices
+function simplify(pts, eps) {
+  if (pts.length < 3) return pts; const [a, b] = [pts[0], pts[pts.length - 1]]; let imax = 0, dmax = 0;
+  for (let i = 1; i < pts.length - 1; i++) { const d = Math.abs((b[0] - a[0]) * (a[1] - pts[i][1]) - (a[0] - pts[i][0]) * (b[1] - a[1])) / (Math.hypot(b[0] - a[0], b[1] - a[1]) || 1); if (d > dmax) { dmax = d; imax = i; } }
+  if (dmax <= eps) return [a, b]; const l = simplify(pts.slice(0, imax + 1), eps), r = simplify(pts.slice(imax), eps); return [...l.slice(0, -1), ...r];
+}
 export function maskHandlesHtml() {
   const L = maskLayer(); if (!L) return ""; const m = maskNow(L.m, L.t); const a = L.rot * Math.PI / 180;
+  if (m.shape === "polygon") { const mode = E().polyMode || ""; const pts = L.m.pts || []; const px = pts.map((q) => polyPx(L, L.m, q));
+    const fb = E().frameBox; return `<svg class="mpoly ${mode ? "mode-" + mode : ""}" width="${fb.w}" height="${fb.h}" viewBox="0 0 ${fb.w} ${fb.h}" data-polysvg title="${mode === "add" ? "click = कोना जोड़ें" : mode === "draw" ? "खींचकर आकार बनाएँ" : "कोने खींचें · double-click = हटाएँ"}">${px.length ? `<polygon points="${px.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ")}" data-pmove/>` : ""}${px.map((p, i) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="7" data-pv="${i}"/>`).join("")}<text x="${(px[0]?.[0] ?? 12).toFixed(1)}" y="${((px[0]?.[1] ?? 12) - 12).toFixed(1)}">mask · ${mode === "add" ? "click = कोना" : mode === "draw" ? "freehand" : pts.length + " कोने"}</text></svg>`; }
   const lx = (+(m.x ?? 0.5) - 0.5) * L.w, ly = (+(m.y ?? 0.5) - 0.5) * L.h; const cx = L.cx + lx * Math.cos(a) - ly * Math.sin(a), cy = L.cy + lx * Math.sin(a) + ly * Math.cos(a);
   const w = +(m.w ?? 0.6) * L.w, h = m.shape === "circle" ? w : m.shape === "linear" ? L.h * 1.2 : +(m.h ?? 0.6) * L.h; const r = L.rot + +(m.rotation || 0);
   return `<div class="mbox ${m.shape}" style="left:${(cx - w / 2).toFixed(1)}px;top:${(cy - h / 2).toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;transform:rotate(${r}deg)" title="mask: खींचें = जगह · कोने = size · गोला = घुमाव">${m.shape === "linear" ? "" : ["nw", "ne", "se", "sw"].map((k) => `<i class="hh h-${k}" data-mh="${k}"></i>`).join("")}<i class="hrot" data-mh="rot"></i><span class="mtag">mask</span></div>`;
 }
 export function bindMaskHandles(L0) {
+  const svg = $("svg.mpoly", L0);
+  if (svg) {
+    svg.onpointerdown = (e) => {
+      if (e.button > 0 || !E().canEdit) return; e.preventDefault(); e.stopPropagation(); const ed = E(); const L = maskLayer(); if (!L) return; const m = L.m; m.pts = m.pts || [];
+      const fr = $("#frame", ed.root).getBoundingClientRect(); const P = (ev) => [ev.clientX - fr.left, ev.clientY - fr.top]; const mode = ed.polyMode || ""; const vi = e.target.dataset.pv;
+      if (vi != null && mode !== "draw") { // drag one vertex
+        const i = +vi; H.track(e, (ev) => { const [x, y] = P(ev); m.pts[i] = polyFrac(L, m, x, y); H.renderOverlay(); H.renderHandles?.(); }, (moved) => { if (moved) { H.touch(); H.renderInspector(); } }, 2); return; }
+      if (mode === "add") { const [x, y] = P(e); m.pts.push(polyFrac(L, m, x, y)); H.touch(); H.renderOverlay(); H.rerender(); return; }
+      if (mode === "draw") { const raw = [P(e)]; H.track(e, (ev) => { raw.push(P(ev)); svg.dataset.n = raw.length; }, () => { const eps = Math.max(3, Math.min(L.w, L.h) * 0.012); const sp = simplify(raw, eps).slice(0, 120); if (sp.length >= 3) { m.pts = sp.map(([x, y]) => polyFrac(L, { ...m, pts: [] }, x, y)); ed.polyMode = ""; H.touch(); } H.renderOverlay(); H.rerender(); }, 1); return; }
+      if (e.target.dataset.pmove != null) { // drag the whole shape = x/y (keyframable)
+        const o = L.owner; const m0 = maskNow(m, L.t); const [x0, y0] = P(e); const a = L.rot * Math.PI / 180;
+        H.track(e, (ev) => { const [x, y] = P(ev); const dx = x - x0, dy = y - y0; setVal(o, "x", r3(+(m0.x ?? 0.5) + (dx * Math.cos(a) + dy * Math.sin(a)) / L.w)); setVal(o, "y", r3(+(m0.y ?? 0.5) + (-dx * Math.sin(a) + dy * Math.cos(a)) / L.h)); H.renderOverlay(); if (o.id === "mmask") H.applyVideoCss(); refreshKfUi(); }, (moved) => { if (moved) { H.touch(); H.renderInspector(); } }, 2); }
+    };
+    svg.ondblclick = (e) => { const vi = e.target.dataset.pv; const L = maskLayer(); if (vi == null || !L || !E().canEdit) return; e.preventDefault(); if ((L.m.pts || []).length <= 3) { E().ctx.toast("कम से कम 3 कोने चाहिए"); return; } L.m.pts.splice(+vi, 1); H.touch(); H.renderOverlay(); H.rerender(); };
+    return;
+  }
   const box = $(".mbox", L0); if (!box) return;
   box.onpointerdown = (e) => {
     if (e.button > 0 || !E().canEdit) return; e.preventDefault(); e.stopPropagation(); const L = maskLayer(); if (!L) return; const mode = e.target.dataset.mh || "move";

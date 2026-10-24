@@ -40,7 +40,7 @@ const FS_COMP = `precision mediump float; varying vec2 v;
 uniform sampler2D tVid, tMask, tBg, tBgBlur, tShadow, tGlow, tStroke;
 uniform int uMode; uniform float uOverlay;
 uniform vec3 uC1, uC2, uTint, uStrokeC, uGlowC; uniform float uTintAmt, uDim, uZoom, uBgBright, uBgSat, uGradT;
-uniform vec2 uBgScale, uBgOff; uniform float uBgContain, uBgBlurOn;
+uniform vec2 uBgScale, uBgOff; uniform float uBgContain, uBgBlurOn; uniform float uSepia, uCool;
 uniform float uScale, uFlipX; uniform vec2 uMove; uniform vec2 uAnimOff; uniform float uAnimK, uVisible;
 uniform float uShadowOn, uShadowOp; uniform vec2 uShadowOff; uniform float uGlowOn, uGlowK, uStrokeOn; uniform int uClones; uniform float uCloneStep;
 vec2 pv(vec2 q){ q = 0.5 + (q - 0.5 - uAnimOff) / uAnimK; q = (q - 0.5 - uMove) / uScale + 0.5; if (uFlipX > 0.5) q.x = 1.0 - q.x; return q; }
@@ -51,7 +51,7 @@ vec3 bgSample(vec2 q){
   vec2 b = (q - 0.5) / (1.0 + uZoom) + 0.5;
   if (uMode == 0) return texture2D(tVid, b).rgb;
   if (uMode == 1) return texture2D(tBgBlur, b).rgb;
-  if (uMode == 2) return texture2D(tVid, b).rgb;
+  if (uMode == 2 || uMode == 7) return texture2D(tVid, b).rgb;
   if (uMode == 3) return uC1;
   if (uMode == 4) { float k = clamp(dot(b - 0.5, vec2(0.7071)) * 0.7071 + 0.5 + 0.08 * sin(uGradT), 0.0, 1.0); return mix(uC1, uC2, k); }
   vec2 s = (b - 0.5) / uBgScale + 0.5 + uBgOff;
@@ -63,6 +63,8 @@ void main(){
   if (uOverlay > 0.5) { vec3 c = texture2D(tVid, q).rgb; gl_FragColor = vec4(c * m, m); return; }
   vec3 col = bgSample(v);
   col = sat(col + uBgBright, uBgSat);
+  if (uSepia > 0.0) col = mix(col, vec3(dot(col, vec3(.393,.769,.189)), dot(col, vec3(.349,.686,.168)), dot(col, vec3(.272,.534,.131))), uSepia);
+  if (uCool > 0.0) col = mix(col, col * vec3(0.9, 0.98, 1.18), uCool);
   col = mix(col, uTint, uTintAmt);
   if (uVisible > 0.5) {
     if (uShadowOn > 0.5) { float s = mk(tShadow, pv(v - uShadowOff)) * uShadowOp; col = mix(col, vec3(0.0), s); }
@@ -76,7 +78,7 @@ void main(){
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-const MODES = { none: 0, blur: 1, dim: 2, flat: 3, gradient: 4, image: 5, video: 6 };
+const MODES = { none: 0, blur: 1, dim: 2, flat: 3, gradient: 4, image: 5, video: 6, bw: 7 };
 const hex = (h, d = "#000000") => { const s = String(h || d).replace("#", "").padEnd(6, "0"); return [0, 2, 4].map((i) => parseInt(s.slice(i, i + 2), 16) / 255); };
 const ready = (el) => !!el && (el.tagName === "IMG" ? el.complete && el.naturalWidth > 0 : el.readyState >= 2 && el.videoWidth > 0);
 
@@ -146,7 +148,8 @@ function glCompositor(canvas, overlay) {
         gl.uniform1i(u.uMode, mode); gl.uniform1f(u.uOverlay, overlay ? 1 : 0);
         gl.uniform3fv(u.uC1, hex(b.color, "#111111")); gl.uniform3fv(u.uC2, hex(b.color2, "#f2b33d")); gl.uniform3fv(u.uTint, hex(b.tint, "#f2b33d"));
         gl.uniform1f(u.uTintAmt, overlay ? 0 : Math.min(0.9, b.tintAmt || 0)); gl.uniform1f(u.uZoom, overlay ? 0 : (b.zoomNow || 0)); gl.uniform1f(u.uGradT, (s.t || 0) * 0.6);
-        const dim = Math.min(0.9, b.dim || 0); const base = mode === 1 ? -0.04 : mode === 2 ? -0.35 : 0; const bsat = mode === 2 ? 0.6 : 1;
+        const dim = Math.min(0.9, b.dim || 0); const base = mode === 1 ? -0.04 : mode === 2 ? -0.35 : 0; const pop = mode === 7 ? Math.min(1, Math.max(0, b.popAmt ?? 1)) : 0; const bsat = mode === 2 ? 0.6 : mode === 7 ? 1 - pop : 1;
+        gl.uniform1f(u.uSepia, mode === 7 && b.popTone === "sepia" ? pop : 0); gl.uniform1f(u.uCool, mode === 7 && b.popTone === "cool" ? pop : 0);
         gl.uniform1f(u.uBgBright, overlay ? 0 : base - 0.5 * dim); gl.uniform1f(u.uBgSat, overlay ? 1 : bsat * (1 - 0.4 * dim));
         gl.uniform2f(u.uBgScale, scale[0], scale[1]); gl.uniform2f(u.uBgOff, 0, 0); gl.uniform1f(u.uBgContain, contain); gl.uniform1f(u.uBgBlurOn, bgOn);
         const p = s.person || {}; gl.uniform1f(u.uScale, Math.max(0.3, Math.min(2, p.scale || 1))); gl.uniform1f(u.uFlipX, p.flip ? 1 : 0); gl.uniform2f(u.uMove, p.x || 0, p.y || 0);
@@ -190,7 +193,7 @@ function c2dCompositor(canvas, overlay) {
       else {
         const z = 1 + (b.zoomNow || 0); ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-W / 2, -H / 2);
         const dim = Math.min(0.9, b.dim || 0);
-        const f = [b.mode === "blur" ? `blur(${((b.blur ?? 18) * k720).toFixed(1)}px) brightness(.96)` : "", b.mode === "dim" ? "brightness(.65) saturate(.6)" : "", b.blur2 ? `blur(${(b.blur2 * k720).toFixed(1)}px)` : "", dim ? `brightness(${1 - 0.5 * dim}) saturate(${1 - 0.4 * dim})` : ""].filter(Boolean).join(" ");
+        const f = [b.mode === "blur" ? `blur(${((b.blur ?? 18) * k720).toFixed(1)}px) brightness(.96)` : "", b.mode === "dim" ? "brightness(.65) saturate(.6)" : "", b.mode === "bw" ? `saturate(${(1 - Math.min(1, Math.max(0, b.popAmt ?? 1))).toFixed(2)})${b.popTone === "sepia" ? ` sepia(${Math.min(1, b.popAmt ?? 1).toFixed(2)})` : ""}` : "", b.blur2 ? `blur(${(b.blur2 * k720).toFixed(1)}px)` : "", dim ? `brightness(${1 - 0.5 * dim}) saturate(${1 - 0.4 * dim})` : ""].filter(Boolean).join(" ");
         ctx.filter = f || "none";
         if (b.mode === "flat") { ctx.fillStyle = b.color || "#111111"; ctx.fillRect(0, 0, W, H); }
         else if (b.mode === "gradient") { const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, b.color || "#1b1f3a"); g.addColorStop(1, b.color2 || "#f2b33d"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
@@ -241,7 +244,7 @@ export function bodyState(b, ot, outDur, el) {
   }
   if (b.anim === "blink") { const P = +b.blink_period || 0.4; an.hidden = (ot % P) >= P * 0.55; }
   return {
-    bg: { mode: b.bg || "blur", blur: +b.bg_blur || 18, color: b.bg_color, color2: b.bg_color2, el, fit: b.bg_fit, blur2: +b.bg_blur2 || 0, dim: +b.bg_dim || 0,
+    bg: { mode: b.bg || "blur", blur: +b.bg_blur || 18, popAmt: b.pop_amt == null ? 1 : +b.pop_amt, popTone: b.pop_tone || "gray", color: b.bg_color, color2: b.bg_color2, el, fit: b.bg_fit, blur2: +b.bg_blur2 || 0, dim: +b.bg_dim || 0,
       tint: b.bg_tint, tintAmt: +b.bg_tint_amt || 0, zoomNow: (+b.bg_zoom || 0) * Math.min(1, ot / Math.max(0.1, outDur)) },
     person: { scale: +b.subj_scale || 1, x: +b.subj_x || 0, y: +b.subj_y || 0, flip: !!b.flip },
     edge: { shrink: +b.edge_shrink || 0, feather: +b.edge_feather || 0 },

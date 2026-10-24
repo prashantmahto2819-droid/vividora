@@ -33,6 +33,51 @@ KINDS = {
 MAX_SIZE = 2 * 1024 ** 3
 
 
+def check_cube(path: Path) -> dict:
+    """Validate a .cube LUT (Adobe/Resolve text format). Raises ApiError with a plain reason for a bad file."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as ex:
+        raise ApiError(422, f"LUT पढ़ नहीं सकी: {ex}")
+    size = None
+    dim = None
+    rows = 0
+    for ln in text.splitlines():
+        t = ln.strip()
+        if not t or t.startswith("#") or t.startswith("TITLE") or t.startswith("DOMAIN_"):
+            continue
+        if t.startswith("LUT_3D_SIZE"):
+            dim = 3
+            try:
+                size = int(t.split()[1])
+            except (IndexError, ValueError):
+                raise ApiError(422, "LUT ख़राब है: LUT_3D_SIZE के बाद संख्या चाहिए")
+            continue
+        if t.startswith("LUT_1D_SIZE"):
+            dim = 1
+            try:
+                size = int(t.split()[1])
+            except (IndexError, ValueError):
+                raise ApiError(422, "LUT ख़राब है: LUT_1D_SIZE के बाद संख्या चाहिए")
+            continue
+        parts = t.split()
+        if len(parts) != 3:
+            raise ApiError(422, f"LUT ख़राब है: हर पंक्ति में 3 संख्याएँ चाहिए (मिला: “{t[:40]}”)")
+        try:
+            [float(x) for x in parts]
+        except ValueError:
+            raise ApiError(422, f"LUT ख़राब है: संख्या नहीं पढ़ी गई (“{t[:40]}”)")
+        rows += 1
+    if not size or dim is None:
+        raise ApiError(422, "LUT ख़राब है: LUT_3D_SIZE (या LUT_1D_SIZE) नहीं मिला — .cube format ही चलेगा")
+    want = size ** 3 if dim == 3 else size
+    if rows != want:
+        raise ApiError(422, f"LUT अधूरी है: {want} पंक्तियाँ चाहिए, {rows} मिलीं")
+    if dim == 3 and not (2 <= size <= 65):
+        raise ApiError(422, f"LUT size {size} नहीं चलेगा (2–65)")
+    return {"lut_dim": dim, "lut_size": size}
+
+
 def _probe_meta(path: Path, kind: str) -> dict:
     if kind == "font":
         try:  # family name as libass / CSS will know it
@@ -41,7 +86,7 @@ def _probe_meta(path: Path, kind: str) -> dict:
             fam = ""
         return {"family": fam or path.stem}
     if kind == "lut":
-        return {}
+        return check_cube(path)
     try:
         out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format",
                               "-show_streams", str(path)], capture_output=True, text=True, timeout=60)
@@ -291,9 +336,14 @@ async def upload(request: Request, user: dict):
                 path.unlink(missing_ok=True)
                 raise ApiError(413, "file too large")
             f.write(part)
+    try:
+        meta = _probe_meta(path, kind)
+    except ApiError:
+        path.unlink(missing_ok=True)  # a rejected LUT never stays in the library
+        raise
     item = {"id": item_id, "workspace_id": user["workspace_id"], "kind": kind, "name": name,
             "path": rel, "size": written, "mime": storage.guess_mime(rel),
-            "meta": _probe_meta(path, kind), "created_by": user["id"], "created_at": db.now(),
+            "meta": meta, "created_by": user["id"], "created_at": db.now(),
             "tags": (request.query_params.get("tags") or "")[:200], "source": "upload", "license": "own",
             "channel_id": request.query_params.get("channel") or None}
     with db.tx() as c:

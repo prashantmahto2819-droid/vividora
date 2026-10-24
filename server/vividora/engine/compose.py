@@ -49,7 +49,7 @@ SPEED_WARP = {"off": "बंद · Off", "fast": "Fast (frame blend)", "balanced
               "best": "Best (optical flow, full res — slow)"}
 KF_PARAMS = {"x": (-1.0, 2.0), "y": (-1.0, 2.0), "scale": (0.01, 10.0), "rotation": (-3600.0, 3600.0), "opacity": (0.0, 1.0)}
 PRO_KEYS = ("trim_in", "trim_out", "speed", "speed_ramp", "speed_warp", "volume", "color", "grade", "grade_preset",
-            "stack", "mask", "crop", "blend_mode", "kf")
+            "stack", "mask", "crop", "blend_mode", "kf", "lut", "lut_path", "tr")
 
 
 def is_pro(item: dict) -> bool:
@@ -191,6 +191,105 @@ def _kf(item: dict, dur: float, x0: float, y0: float) -> dict[str, list[dict]]:
     return out
 
 
+# ------------------------------------------------------------------ transitions between overlay clips
+TRANSITIONS = {"crossfade": "Crossfade", "dip": "Dip (काला)", "slide_left": "Slide ←", "slide_right": "Slide →",
+               "slide_up": "Slide ↑", "slide_down": "Slide ↓", "zoom": "Zoom in", "wipe": "Wipe →"}
+
+
+def _tr_prev(items: list[dict], it: dict) -> dict | None:
+    """The clip this one takes over from: the latest-ending clip on the same track that starts earlier."""
+    best = None
+    for o in items:
+        if o is it or (o.get("track") or 0) != (it.get("track") or 0):
+            continue
+        if float(o.get("start", 0)) < float(it.get("start", 0)):
+            if best is None or float(o.get("end", 0)) > float(best.get("end", 0)):
+                best = o
+    return best
+
+
+def transition_window(items: list[dict], it: dict) -> tuple[dict | None, float, float]:
+    """(previous clip, overlap seconds, transition seconds actually possible)."""
+    tr = it.get("tr") or {}
+    if not isinstance(tr, dict) or not tr.get("kind") or tr.get("kind") == "none":
+        return None, 0.0, 0.0
+    prev = _tr_prev(items, it)
+    if prev is None:
+        return None, 0.0, 0.0
+    overlap = max(0.0, float(prev.get("end", 0)) - float(it.get("start", 0)))
+    want = max(0.1, min(5.0, float(tr.get("dur", 0.5) or 0.5)))
+    return prev, overlap, min(want, overlap)
+
+
+def _kf_point(lst: list[dict], t: float, v: float) -> None:
+    lst.append({"t": round(t, 4), "v": round(v, 4), "ease": "linear"})
+
+
+def apply_transitions(items: list[dict]) -> tuple[list[dict], list[str]]:
+    """Materialise `tr` on a clip as keyframes on COPIES of it and of the clip before it on the same
+    track. Returns (new items, notes). A transition longer than the overlap is shortened; no overlap → note."""
+    out = [dict(x) for x in items]
+    notes: list[str] = []
+    for it in out:
+        prev, overlap, wd = transition_window(out, it)
+        if prev is None:
+            if it.get("tr", {}).get("kind") not in (None, "", "none") if isinstance(it.get("tr"), dict) else False:
+                notes.append("transition: पिछली clip नहीं मिली (उसी track पर, छूती या overlap करती हुई)")
+            continue
+        if wd < 0.08:
+            notes.append("transition: clips overlap नहीं करतीं — handles कम हैं, transition छोड़ी")
+            continue
+        kind = it["tr"]["kind"]
+        s_it, s_pv = float(it["start"]), float(prev["start"])
+        op_it = float(it.get("opacity", 1.0) if it.get("opacity") is not None else 1.0)
+        op_pv = float(prev.get("opacity", 1.0) if prev.get("opacity") is not None else 1.0)
+        kf_it = {k: [dict(p) for p in v] for k, v in (it.get("kf") or {}).items()}
+        kf_pv = {k: [dict(p) for p in v] for k, v in (prev.get("kf") or {}).items()}
+        # the previous clip always fades out over the window (dip: in the first half)
+        pv_a, pv_b = s_it - s_pv, s_it - s_pv + (wd / 2 if kind == "dip" else wd)
+        kf_pv.setdefault("opacity", [])
+        if not any(abs(float(p.get("t", 0))) < 1e-6 for p in kf_pv["opacity"]):
+            _kf_point(kf_pv["opacity"], 0.0, op_pv)
+        _kf_point(kf_pv["opacity"], pv_a, op_pv)
+        _kf_point(kf_pv["opacity"], pv_b, 0.0)
+        kf_pv["opacity"].sort(key=lambda p: p["t"])
+        # the new clip comes in
+        it_a, it_b = (wd / 2, wd) if kind == "dip" else (0.0, wd)
+        kf_it.setdefault("opacity", [])
+        if kind in ("crossfade", "dip", "zoom"):
+            _kf_point(kf_it["opacity"], it_a, 0.0)
+            _kf_point(kf_it["opacity"], it_b, op_it)
+        if kind == "zoom":
+            sc = float(it.get("scale", 1.0) or 1.0)
+            kf_it.setdefault("scale", [])
+            _kf_point(kf_it["scale"], 0.0, sc * 0.6)
+            _kf_point(kf_it["scale"], wd, sc)
+        if kind.startswith("slide_"):
+            x0, y0 = float(it.get("x", 0.5) or 0.5), float(it.get("y", 0.5) or 0.5)
+            d = {"slide_left": ("x", x0 + 1.0), "slide_right": ("x", x0 - 1.0), "slide_up": ("y", y0 + 1.0), "slide_down": ("y", y0 - 1.0)}[kind]
+            kf_it.setdefault(d[0], [])
+            _kf_point(kf_it[d[0]], 0.0, d[1])
+            _kf_point(kf_it[d[0]], wd, x0 if d[0] == "x" else y0)
+            if it.get("fit") != "free":
+                it["fit"] = "free"
+                it.setdefault("x", x0)
+                it.setdefault("y", y0)
+                it.setdefault("scale", it.get("scale") or 1.0)
+        if kind == "wipe":
+            if it.get("mask"):
+                notes.append("wipe: clip पर पहले से mask है — crossfade लगाया")
+                _kf_point(kf_it["opacity"], 0.0, 0.0)
+                _kf_point(kf_it["opacity"], wd, op_it)
+            else:
+                it["mask"] = {"shape": "rect", "x": 0.5, "y": 0.5, "w": 1.0, "h": 1.0, "rotation": 0, "roundness": 0, "feather": 0.02, "enabled": True,
+                              "kf": {"x": [{"t": 0.0, "v": -0.5, "ease": "linear"}, {"t": round(wd, 4), "v": 0.5, "ease": "linear"}]}}
+        for k in list(kf_it):
+            kf_it[k].sort(key=lambda p: p["t"])
+        it["kf"] = {k: v for k, v in kf_it.items() if v}
+        prev["kf"] = {k: v for k, v in kf_pv.items() if v}
+    return out, notes
+
+
 # ------------------------------------------------------------------ main builder
 def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path) -> dict:
     """Filter graph for one pro overlay clip.
@@ -243,6 +342,10 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
         v += _key(item)  # the person matte replaces colour keying (as on the legacy path)
     # --- look: colour LUT, grade, effects (on the colour planes; alpha kept aside)
     looks = []
+    lp = item.get("lut_path")
+    if lp and Path(lp).exists():  # a library .cube on this clip only, with its own intensity
+        from . import effects as _fx
+        looks.append(_fx.lut_mix(f"lut3d=file='{escape_filter_path(Path(lp))}':interp=tetrahedral", item.get("lut_amount")))
     lut = colorpro.lut_filter(item.get("color"), work, f"clip{idx}")
     if lut:
         looks.append(lut)
