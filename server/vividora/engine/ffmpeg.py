@@ -116,6 +116,21 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
     track(proc)
     last = -1.0
     assert proc.stdout is not None
+    # stderr is drained on its own thread: a chatty run (timestamp warnings on a concatenated file) would
+    # otherwise fill the 64 KB pipe while we read progress from stdout and ffmpeg would block forever
+    import threading
+    err_buf: list[str] = []
+
+    def _drain() -> None:
+        try:
+            for ln in proc.stderr:  # type: ignore[union-attr]
+                err_buf.append(ln)
+                if len(err_buf) > 400:
+                    del err_buf[:200]
+        except (ValueError, OSError):
+            pass
+    th = threading.Thread(target=_drain, daemon=True)
+    th.start()
     try:
         for line in proc.stdout:
             if on_progress and duration and line.startswith("out_time_ms="):
@@ -127,8 +142,8 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
                 if frac - last >= 0.02:
                     last = frac
                     on_progress(frac, label)
-        err = proc.stderr.read() if proc.stderr else ""
         rc = proc.wait()
+        th.join(timeout=5)
     except BaseException:
         # a cancel raised from the progress callback (or anything else): never leave ffmpeg running on its own
         try:
@@ -142,7 +157,7 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
     if CANCEL.is_set():
         raise Cancelled("रद्द किया")
     if rc != 0:
-        tail = "\n".join(err.strip().splitlines()[-15:])
+        tail = "\n".join("".join(err_buf).strip().splitlines()[-15:])
         raise FFmpegError(f"{label} failed:\n{tail}")
 
 

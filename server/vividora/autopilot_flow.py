@@ -107,6 +107,11 @@ def begin(c, project: dict) -> None:
     db.update(c, "projects", project["id"], {"meta": meta})
 
 
+def skipped(project: dict | None) -> bool:
+    """"Transcript छोड़ें" project: speech never transcribed (cuts from silence + scenes; words can come later)."""
+    return bool(((project or {}).get("transcript") or {}).get("skipped"))
+
+
 def no_speech(c, project: dict) -> None:
     """No audio track: nothing to transcribe or cut — edit and render straight away."""
     warn(c, project["id"], "वीडियो में आवाज़ नहीं — captions/कट नहीं")
@@ -230,7 +235,8 @@ def start_shorts(c, project: dict) -> None:
         start_finish(c, pid, why)
         return
     if not ((project.get("transcript") or {}).get("segments")):
-        warn(c, pid, "बोले शब्द नहीं मिले — Shorts नहीं बने")
+        warn(c, pid, "transcript नहीं है — Shorts बाद में «Transcript बनाएँ» के बाद बनेंगे" if skipped(project)
+             else "बोले शब्द नहीं मिले — Shorts नहीं बने")
         start_finish(c, pid)
         return
     enter(c, pid, "shorts_plan", f"{n} Shorts ढूँढ रहे हैं")
@@ -340,7 +346,8 @@ def finish(pid: str) -> None:
             if not made:
                 warn(c, pid, "thumbnail नहीं बना — Thumbnail tab से बनाएँ")
             _save_state(c, pid, thumbnails=made)
-            enter(c, pid, "metadata", "AI से title/description" if llm.available() else "transcript से title/description (AI key नहीं)")
+            enter(c, pid, "metadata", "title/description सिर्फ़ project title से (transcript नहीं)" if skipped(db.get("projects", pid))
+                  else "AI से title/description" if llm.available() else "transcript से title/description (AI key नहीं)")
         stage = "metadata"
     if stage == "metadata" and _still(pid, "metadata"):
         p = db.get("projects", pid)
@@ -481,13 +488,18 @@ def resume(c, project: dict) -> str:
     if stage == "prepare" or not meta.get("duration"):
         service.start_pipeline(c, db.get("projects", pid))
         return "prepare"
-    if (stage == "transcribe" or not project.get("transcript")) and meta.get("has_audio"):
+    skip = bool((project.get("settings") or {}).get("skip_transcript")) and meta.get("has_audio")
+    if skip and (stage == "transcribe" or not project.get("transcript")):
+        db.update(c, "projects", pid, {"transcript": dict(service.SKIPPED_TRANSCRIPT),
+                                       "meta": {**meta, "transcript_skipped": True}})
+        stage = "autocut"
+    if not skip and (stage == "transcribe" or not project.get("transcript")) and meta.get("has_audio"):
         enter(c, pid, "transcribe")
         queue.enqueue(c, pid, "transcribe", service.transcribe_payload(project))
         return "transcribe"
     if stage == "autocut" or not project.get("edl"):
-        enter(c, pid, "autocut")
-        queue.enqueue(c, pid, "autocut", {"options": (project.get("settings") or {}).get("autocut", {})})
+        enter(c, pid, "autocut", "transcript छोड़ा — चुप्पी/scene से कट" if skip else "")
+        queue.enqueue(c, pid, "autocut", {"options": (project.get("settings") or {}).get("autocut", {}), **({"visual": True} if skip else {})})
         return "autocut"
     if stage in ("plan", "preflight", "render"):
         plan_and_render(c, db.get("projects", pid))

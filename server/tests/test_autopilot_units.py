@@ -182,10 +182,78 @@ def test_sequence_and_one_ai_call():
     assert p["status"] == "review_output"
 
 
+def test_skip_transcript():
+    """"Transcript छोड़ें": prepare → autocut (visual, no transcribe job) → plan/render; scenes become markers;
+    "Transcript बाद में बनाएँ" fills the words without touching cuts, status or autopilot."""
+    ws, ch = setup()
+    notify.send = lambda text: None
+    p = project(ws, ch, 120)
+    with db.tx() as c:
+        db.update(c, "projects", p["id"], {"transcript": None, "edl": None,
+                                           "settings": {**p["settings"], "skip_transcript": True}})
+        job = queue.enqueue(c, p["id"], "prepare", {})
+        service.after_job(c, {**job, "status": "running"}, {"meta": {"duration": 120, "has_audio": True}, "files": []})
+    p = db.get("projects", p["id"])
+    assert p["transcript"].get("skipped") and p["meta"].get("transcript_skipped")
+    assert p["status"] == "cutting" and "transcript छोड़ा" in p["status_note"], p["status_note"]
+    kinds = [r[0] for r in db.conn().execute("SELECT kind FROM jobs WHERE project_id = ? AND status = 'queued' AND kind != 'prepare'", (p["id"],))]
+    assert kinds == ["autocut"], kinds
+    ac = db.rows(db.conn().execute("SELECT * FROM jobs WHERE project_id = ? AND kind = 'autocut'", (p["id"],)))[0]
+    assert ac["payload"].get("visual") is True
+    assert any("transcript नहीं" in w for w in p["meta"]["autopilot"]["warnings"]), p["meta"]["autopilot"]["warnings"]
+    # autocut (silence-based) done, with scene changes → markers in output time, plan + render queued
+    from vividora.engine import autocut
+    edl = autocut.build_edl({"segments": []}, 120, [(10.0, 12.0), (60.0, 63.0)])
+    assert edl["stats"]["cuts"] == 2
+    with db.tx() as c:
+        c.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (ac["id"],))
+        service.after_job(c, ac, {"edl": edl, "scenes": [{"t": 5.0, "score": 0.5}, {"t": 11.0, "score": 0.6}, {"t": 30.0, "score": 0.4}]})
+    p = db.get("projects", p["id"])
+    marks = p["settings"]["render"]["markers"]
+    assert len(marks) == 2 and marks[0]["t"] == 5.0 and 27.5 < marks[1]["t"] < 29, marks  # 11.0 lies inside a cut; 30.0 shifts by the cut
+    assert len(p["meta"]["scenes"]) == 3
+    assert p["status_note"].startswith("6/11 · "), p["status_note"]
+    assert not db.conn().execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'transcribe'", (p["id"],)).fetchone()[0]
+    # render done → no Shorts (no words), finish runs, project lands in review_output
+    renders = db.rows(db.conn().execute("SELECT * FROM jobs WHERE project_id = ? AND kind = 'render' AND status = 'queued'", (p["id"],)))
+    (TMP / "media" / "o").mkdir(parents=True, exist_ok=True)
+    (TMP / "media" / "o" / "skip.mp4").write_bytes(b"x" * 10)
+    for r in renders:
+        with db.tx() as c:
+            c.execute("UPDATE jobs SET status = 'done' WHERE id = ?", (r["id"],))
+            service.after_job(c, r, {"files": [{"kind": "render", "path": "o/skip.mp4", "label": r["payload"]["preset"], "meta": {}}], "warnings": []})
+    autopilot_flow.finish(p["id"])
+    p = db.get("projects", p["id"])
+    assert p["status"] == "review_output", (p["status"], p["status_note"])
+    assert any("Shorts बाद में" in w for w in p["meta"]["autopilot"]["warnings"]), p["meta"]["autopilot"]["warnings"]
+    cuts_before = p["edl"]["cuts"]
+    # transcript later: independent job, words land, nothing else changes
+    with db.tx() as c:
+        pl = service.transcribe_payload(p)
+        pl.update(later=True, retranscribe=False)
+        j = queue.enqueue(c, p["id"], "transcribe", pl)
+        c.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (j["id"],))
+        service.after_job(c, j, {"transcript": transcript(120)})
+    p = db.get("projects", p["id"])
+    assert p["status"] == "review_output" and "transcript बन गया" in p["status_note"], p["status_note"]
+    assert not p["transcript"].get("skipped") and len(p["transcript"]["segments"]) > 5
+    assert not p["meta"].get("transcript_skipped")
+    assert p["edl"]["cuts"] == cuts_before
+    assert not db.conn().execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'autocut' AND created_at > ?",
+                                 (p["id"], j["created_at"])).fetchone()[0], "autocut must not run again"
+    # resume on a skip project never asks for a transcribe job
+    with db.tx() as c:
+        db.update(c, "projects", p["id"], {"transcript": None, "edl": None})
+        step = autopilot_flow.resume(c, db.get("projects", p["id"]))
+    assert step == "autocut", step
+    assert not db.conn().execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'transcribe' AND status = 'queued'", (p["id"],)).fetchone()[0]
+
+
 if __name__ == "__main__":
     try:
         test_switches_and_channel()
         test_sequence_and_one_ai_call()
+        test_skip_transcript()
         print("OK")
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

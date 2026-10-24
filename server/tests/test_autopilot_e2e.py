@@ -70,7 +70,7 @@ def make_video(path: Path, seconds: int, size: str, audio: bool = True) -> None:
     subprocess.run(cmd, check=True)
 
 
-def fake_transcribe(audio: Path, *, language: str = "hi", prompt: str | None = None, on_progress=None) -> dict:
+def fake_transcribe(audio: Path, *, language: str = "hi", prompt: str | None = None, on_progress=None, **_kw) -> dict:  # window/alternatives/model: ignored
     """Words where the recording actually has sound (ffmpeg silencedetect), sentences end with ।/?."""
     from vividora.engine import ffmpeg
     dur = ffmpeg.probe(audio)["duration"]

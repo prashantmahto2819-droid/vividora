@@ -16,7 +16,12 @@ from . import db, notify, queue, storage
 from .config import settings
 from .engine import autocut, autopilot
 from .engine import encode
+from .engine.autoedit import _to_out
 from .engine.presets import caption_styles, platforms
+
+# "Transcript छोड़ें": the transcript slot of a project whose speech was never transcribed
+# (truthy so the editing flow runs; `skipped` lets the UI offer "Transcript बनाएँ")
+SKIPPED_TRANSCRIPT = {"segments": [], "text": "", "skipped": True}
 
 DEFAULT_EFFECTS = {
     "zoom": {"enabled": False, "strength": 1.0},     # auto punch-in on cuts
@@ -302,7 +307,17 @@ def after_job(c, job: dict, result: dict) -> None:
         for f in result.get("files", []):
             replace_assets(c, pid, f["kind"], keep_path=f["path"])
             add_asset(c, pid, f["kind"], f["path"], mime=f.get("mime"), meta=f.get("meta"))
-        if meta.get("has_audio"):
+        skip = bool((project.get("settings") or {}).get("skip_transcript")) and meta.get("has_audio")
+        if skip:
+            # "Transcript छोड़ें": no speech-to-text — cuts from silence + scene changes, captions/AI text later on request
+            meta["transcript_skipped"] = True
+            db.update(c, "projects", pid, {"meta": meta, "transcript": dict(SKIPPED_TRANSCRIPT), "updated_at": db.now()})
+            set_status(c, pid, "cutting", "transcript छोड़ा — चुप्पी और scene से कट ढूँढे जा रहे हैं")
+            if ap_on:
+                apf.warn(c, pid, "transcript नहीं है — captions, text-edit, Shorts और AI title/description बाद में «Transcript बनाएँ» से")
+                apf.enter(c, pid, "autocut", "transcript छोड़ा — चुप्पी/scene से कट")
+            queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {}), "visual": True})
+        elif meta.get("has_audio"):
             set_status(c, pid, "transcribing", "transcript बन रहा है (GPU worker)")
             if ap_on:
                 apf.enter(c, pid, "transcribe", f"{round(float(meta.get('duration') or 0) / 60, 1)} मिनट की recording")
@@ -332,10 +347,19 @@ def after_job(c, job: dict, result: dict) -> None:
             db.update(c, "projects", pid, {"transcript": merged, "updated_at": db.now(),
                                            "status_note": f"line दोबारा बनी ✓ ({n} शब्द)" if n else "line में कोई शब्द नहीं सुनाई दिया"})
             return
-        tr = retranscribe.bump(tr, cur, {"full": True, "at": db.now()})
+        tr = retranscribe.bump(tr, cur if not (cur or {}).get("skipped") else None, {"full": True, "at": db.now()})
         changes = {"transcript": tr, "updated_at": db.now()}
         if tr.get("language"):
             changes["language"] = tr["language"]  # detected when the project was set to auto
+        if pl.get("later"):
+            # "Transcript बाद में बनाएँ": the words arrive, everything else (cuts, overlays, music, status) stays as it is
+            meta = {**(project.get("meta") or {})}
+            meta.pop("transcript_skipped", None)
+            nw = sum(len(s_.get("words") or []) for s_ in tr.get("segments") or [])
+            changes.update(meta=meta, status_note=f"transcript बन गया ✓ ({nw} शब्द) — captions और text-edit अब उपलब्ध"
+                           if nw else "transcript बना, पर कोई बोला हुआ शब्द नहीं मिला")
+            db.update(c, "projects", pid, changes)
+            return
         db.update(c, "projects", pid, changes)
         again = bool(pl.get("retranscribe")) and bool(project.get("edl"))
         set_status(c, pid, "cutting", "नए transcript से कट ढूँढे जा रहे हैं (आपके manual कट रहेंगे)" if again else "कट ढूँढे जा रहे हैं")
@@ -356,7 +380,22 @@ def after_job(c, job: dict, result: dict) -> None:
             set_status(c, pid, "review_cuts", f"transcript दोबारा बना ✓ · {st.get('cuts', 0)} कट"
                        + (f" ({st['kept_manual']} manual रखे)" if st.get("kept_manual") else "") + " — जाँचें")
             return
-        db.update(c, "projects", pid, {"edl": edl, "updated_at": db.now()})
+        upd = {"edl": edl, "updated_at": db.now()}
+        if result.get("scenes") is not None:
+            # transcript-free cut: scene changes become timeline markers (output time) + meta.scenes (source time)
+            from .engine import markers as mk
+            scenes = [s for s in result["scenes"] if isinstance(s, dict)][:200]
+            keep = autocut.keep_segments(edl)
+            to_out = _to_out(keep)
+            marks = [{"id": f"sc{i + 1}", "t": round(t, 3), "label": f"Scene {i + 1}", "kind": "note", "color": "#5FB3F2"}
+                     for i, t in enumerate(t for t in (to_out(float(s["t"])) for s in scenes) if t is not None)][:60]
+            settings = {**(project.get("settings") or {})}
+            rs = {**(settings.get("render") or {})}
+            old = [m for m in mk.clean(rs.get("markers")) if not str(m["id"]).startswith("sc")]
+            rs["markers"] = old + marks
+            settings["render"] = rs
+            upd.update(meta={**(project.get("meta") or {}), "scenes": scenes}, settings=settings)
+        db.update(c, "projects", pid, upd)
         st = edl.get("stats", {})
         if ap_on:
             apf.plan_and_render(c, db.get("projects", pid))
@@ -538,6 +577,11 @@ def fail_job(c, job: dict, error: str) -> None:
     if job["kind"] == "transcribe" and (job.get("payload") or {}).get("range"):
         # one line: the project stays in the editor; only the note says it did not work
         db.update(c, "projects", pid, {"status_note": f"line दोबारा नहीं बनी: {error.splitlines()[-1][:160] if error else 'error'}",
+                                       "updated_at": db.now()})
+        return
+    if job["kind"] == "transcribe" and (job.get("payload") or {}).get("later"):
+        # a later transcript did not work: the edit stays as it was, the note says so
+        db.update(c, "projects", pid, {"status_note": f"transcript नहीं बना ({error.splitlines()[-1][:140] if error else 'error'}) — फिर कोशिश करें",
                                        "updated_at": db.now()})
         return
     if job["kind"] in ("transcribe", "autocut") and (job.get("payload") or {}).get("retranscribe"):
