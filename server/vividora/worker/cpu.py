@@ -513,7 +513,8 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                                  encoder_preset=os.getenv("X264_PRESET") or None, on_progress=prog,
                                  text_style=th.get("text_style") if p.get("theme_text", True) else None,
                                  text_mode="beats" if p.get("text_mode") in ("beats", "names") else "bars",
-                                 intro_text=str(p.get("intro_text") or ""), outro_text=str(p.get("outro_text") or ""))
+                                 intro_text=str(p.get("intro_text") or ""), outro_text=str(p.get("outro_text") or ""),
+                                 beat_only=bool(p.get("beat_only", False)), keep_clip_audio=bool(p.get("keep_clip_audio", False)))
             warns = _montage_voice(client, p, assets, out, tmp)
             files = []
             for f in out["files"]:

@@ -917,7 +917,8 @@ def request_montage(c, project: dict, opts: dict) -> dict:
                "pins": [str(x) for x in (opts.get("pins") or []) if any(cl["id"] == x for cl in clips)][:20],
                "text_mode": opts.get("text_mode") if opts.get("text_mode") in ("bars", "beats", "names") else "bars",
                "intro": bool(opts.get("intro", False)), "outro": bool(opts.get("outro", False)),
-               "intro_text": str(opts.get("intro_text") or "")[:80], "outro_text": str(opts.get("outro_text") or "")[:80]}
+               "intro_text": str(opts.get("intro_text") or "")[:80], "outro_text": str(opts.get("outro_text") or "")[:80],
+               "beat_only": bool(opts.get("beat_only", False)), "keep_clip_audio": bool(opts.get("keep_clip_audio", False))}
     # AI voice-over (Script mode) chosen in the Audio tab → mixed over the montage, music ducked under it
     r_eff = ((project.get("settings", {}).get("render") or {}).get("effects") or {})
     vt = r_eff.get("voice_track")
