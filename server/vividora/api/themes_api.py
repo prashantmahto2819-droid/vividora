@@ -77,8 +77,48 @@ async def delete_theme(request: Request, user: dict):
     return ok({"deleted": tid})
 
 
+@require("editor")
+async def analyze_ref(request: Request, user: dict):
+    """Theme Analyzer: {library_id} or {asset_id} (a video of this project / the library) → measured numbers,
+    guessed mapping and an editable theme; {save: "name"} stores it as a saved theme right away.
+    Only parameters are taken from the reference — nothing of it is copied."""
+    from starlette.concurrency import run_in_threadpool
+    from .. import storage
+    from ..engine import refanalyze
+    p = own_project(request, user)
+    data = await body(request)
+    src = None
+    if data.get("library_id"):
+        it = db.get("library", str(data["library_id"]))
+        if not it or it["workspace_id"] != user["workspace_id"] or it["kind"] not in ("broll", "music"):
+            raise ApiError(404, "library की video नहीं मिली")
+        src = it["path"]
+    elif data.get("asset_id"):
+        a = db.get("assets", str(data["asset_id"]))
+        if not a or a["project_id"] != p["id"] or a["kind"] not in ("raw", "proxy", "render", "clip"):
+            raise ApiError(404, "video नहीं मिली")
+        src = a["path"]
+    else:
+        src = (service.asset_of(p["id"], "proxy") or service.asset_of(p["id"], "raw") or {}).get("path")
+    if not src:
+        raise ApiError(422, "reference video चुनें (library की clip या इस project की video)")
+    try:
+        res = await run_in_threadpool(refanalyze.analyze, storage.abs_path(src))
+    except ValueError as e:
+        raise ApiError(422, str(e))
+    except Exception as e:  # noqa: BLE001 — a missing/unreadable file is the user's problem to see, not a 500
+        raise ApiError(422, f"reference video पढ़ी नहीं गई: {str(e)[:160]}")
+    if data.get("save"):
+        with db.tx() as c:
+            t = themes.save(c, user["workspace_id"], str(data["save"])[:60], res["theme"], user_id=user["id"])
+            service.log(c, user["workspace_id"], "theme.from_ref", user_id=user["id"], detail={"theme": t["id"]})
+        res["saved"] = themes._public(t)
+    return ok(res)
+
+
 routes = [
     Route("/presets/themes", list_themes),
+    Route("/projects/{project_id}/analyze-ref", analyze_ref, methods=["POST"]),
     Route("/projects/{project_id}/theme", apply_theme, methods=["POST"]),
     Route("/themes", save_theme, methods=["POST"]),
     Route("/themes/{theme_id}", delete_theme, methods=["DELETE"]),

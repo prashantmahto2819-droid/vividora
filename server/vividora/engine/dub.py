@@ -22,7 +22,7 @@ import re
 from . import llm
 from .autocut import keep_segments, norm
 from .render import out_timeline
-from .tts import LANGS, VOICE_PRESETS, voice_preset
+from .tts import LANGS, VOICE_PRESETS, speakers_in, voice_preset
 
 MODES = {"revoice": "आवाज़ बदलें / साफ़ AI आवाज़", "dub": "Dub (दूसरी भाषा)", "script": "Script से voice-over"}
 _DEVA = re.compile(r"[ऀ-ॿ]")
@@ -163,6 +163,81 @@ def mix_voice_over(video, voice, out, *, duck: bool = True) -> list[str]:
     return [f"AI voice-over {vdur:.0f}s का है, वीडियो {dur:.0f}s — बाकी आवाज़ कट गई (montage लंबा करें)"] if vdur > dur + 0.5 else []
 
 
+def cast_payload(cast: dict | None, lang: str) -> dict:
+    """settings.render.voice_cast {name: {voice, description, pitch}} → {name: {voice: <voice dict>, pitch}}."""
+    out: dict = {}
+    for name, cfg in (cast or {}).items():
+        name = str(name).strip()
+        if not name or not isinstance(cfg, dict):
+            continue
+        try:
+            v = resolve_voice(cfg.get("voice"), cfg.get("description"), lang)
+        except ValueError:
+            continue
+        try:
+            pitch = max(-12.0, min(12.0, float(cfg.get("pitch") or 0)))
+        except (TypeError, ValueError):
+            pitch = 0.0
+        out[name] = {"voice": v, "pitch": pitch}
+    return out
+
+
+def fixes_map(raw) -> dict:
+    """Pronunciation fixes from settings: a dict, or text lines `word = spelling`."""
+    if isinstance(raw, dict):
+        return {str(k).strip(): str(v).strip() for k, v in raw.items() if str(k).strip() and str(v).strip()}
+    out: dict = {}
+    for line in str(raw or "").splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            if k.strip() and v.strip():
+                out[k.strip()] = v.strip()
+    return out
+
+
+def redo_payload(asset: dict, edits: list[dict], *, redo_all: bool = False) -> dict:
+    """A finished dub + per-line edits → the payload of a new `dub` job that re-makes only what changed
+    (every untouched line comes from the worker's line cache) and replaces the old track."""
+    import random
+    m = asset.get("meta") or {}
+    segs = m.get("segments") or []
+    if not segs:
+        raise ValueError("इस voice track की lines नहीं मिलीं — नया voice-over बनाएँ")
+    by_i = {int(e.get("i", -1)): e for e in edits if isinstance(e, dict)}
+    lang = m.get("language") or "hi"
+    out_segs: list[dict] = []
+    changed = 0
+    for seg in segs:
+        i = int(seg.get("i", len(out_segs)))
+        e = by_i.get(i, {})
+        ns: dict = {"text": str(e.get("text") if e.get("text") is not None else seg.get("text") or "").strip()}
+        if seg.get("slot_start") is not None and seg.get("slot_end") is not None:
+            ns["start"], ns["end"] = float(seg["slot_start"]), float(seg["slot_end"])
+        for k in ("speaker", "pause", "pitch", "voice", "seed"):
+            if seg.get(k) is not None:
+                ns[k] = seg[k]
+        if e.get("pause") is not None:
+            ns["pause"] = max(0.0, min(5.0, float(e["pause"])))
+        if e.get("pitch") is not None:
+            ns["pitch"] = max(-12.0, min(12.0, float(e["pitch"])))
+        if e.get("voice") or e.get("description"):
+            ns["voice"] = resolve_voice(e.get("voice"), e.get("description"), lang)
+        if e.get("clear_voice"):
+            ns.pop("voice", None)
+        if e.get("redo") or redo_all or (e and ns["text"] != str(seg.get("text") or "").strip()):
+            if e.get("redo") or redo_all:
+                ns["seed"] = random.randint(1, 2 ** 30)
+            changed += 1
+        if ns["text"]:
+            out_segs.append(ns)
+    if not changed and not redo_all:
+        raise ValueError("कोई बदलाव नहीं — text बदलें या “फिर बोलो” दबाएँ")
+    return {"mode": m.get("mode") or "script", "language": lang, "source_language": m.get("source_language") or lang,
+            "segments": out_segs, "total": m.get("total") or 0, "sig": m.get("sig"), "voice": m.get("voice") or {},
+            "speed": m.get("speed", 1.0), "pitch": m.get("pitch", 0), "speakers": m.get("speakers") or {},
+            "replace": asset["id"], "changed": changed}
+
+
 def plan(project: dict, *, mode: str, language: str | None, script: str = "", effects: dict | None = None) -> dict:
     """→ {mode, language, source_language, segments, total, sig}. Raises ValueError with a Hindi message."""
     if mode not in MODES:
@@ -178,7 +253,8 @@ def plan(project: dict, *, mode: str, language: str | None, script: str = "", ef
         if len(text) > 20000:
             raise ValueError("script बहुत लंबी है (20,000 अक्षर तक)")
         lang = language if language in LANGS else detect_lang(text)
-        return {"mode": mode, "language": lang, "source_language": lang, "segments": script_lines(text), "total": 0, "sig": sig}
+        return {"mode": mode, "language": lang, "source_language": lang, "segments": script_lines(text), "total": 0, "sig": sig,
+                "speakers_found": speakers_in(text)}
     tr = project.get("transcript") or {}
     if not (tr.get("segments") or []):
         raise ValueError("इस project में transcript नहीं है — “Script से voice-over” चुनें")

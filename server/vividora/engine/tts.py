@@ -24,6 +24,8 @@ loudness-normalises it.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import os
 import re
@@ -242,14 +244,93 @@ def split_sentences(text: str, max_chars: int = 220) -> list[str]:
     return out
 
 
+_SPEAKER = re.compile(r"^\s*(?:\[([^\]\n]{1,40})\]|([^:\n\[\]]{1,40}):)\s+(?=\S)")
+_PAUSE = re.compile(r"\[\s*(?:pause|रुको|ठहरो)\s*(\d+(?:\.\d+)?)?\s*\]", re.I)
+_EMPH = re.compile(r"\*([^*\n]{1,80})\*")
+
+
+def speaker_of(line: str) -> tuple[str | None, str]:
+    """`Rohit: text` or `[Rohit] text` → ("Rohit", "text"); anything else → (None, line)."""
+    m = _SPEAKER.match(line)
+    if not m:
+        return None, line
+    name = (m.group(1) or m.group(2) or "").strip()
+    rest = line[m.end():].strip()
+    # "Note: this is …" / "http: …" are not speakers — a speaker tag is a short name
+    if not rest or len(name.split()) > 3 or name.lower() in ("http", "https", "note", "नोट"):
+        return None, line
+    return name, rest
+
+
+def apply_fixes(text: str, fixes: dict | None) -> str:
+    """Pronunciation fixes: {"Vividora": "विविडोरा", "SEO": "एस ई ओ"} — whole words, case-insensitive."""
+    for k, v in (fixes or {}).items():
+        k = str(k).strip()
+        if not k:
+            continue
+        text = re.sub(r"(?<!\w)" + re.escape(k) + r"(?!\w)", str(v), text, flags=re.I)
+    return text
+
+
 def script_lines(script: str) -> list[dict]:
-    """Script → [{text, pause_after}] — a blank line is a longer pause (new paragraph)."""
+    """Script → [{text, pause, speaker?}] — a blank line is a longer pause (new paragraph);
+    `Name: …` / `[Name] …` tags the speaker; `[pause 0.8]` inside a line is kept for the synthesiser."""
     items: list[dict] = []
     for para in re.split(r"\n\s*\n", script.strip()):
-        sents = [x for line in para.splitlines() for x in split_sentences(line)]
-        for i, s in enumerate(sents):
-            items.append({"text": s, "pause": 0.65 if i == len(sents) - 1 else 0.28})
+        cur: str | None = None
+        sents: list[tuple[str | None, str]] = []
+        for line in para.splitlines():
+            sp, rest = speaker_of(line)
+            if sp:
+                cur = sp
+            sents += [(cur, x) for x in split_sentences(rest)]
+        for i, (sp, s) in enumerate(sents):
+            it = {"text": s, "pause": 0.65 if i == len(sents) - 1 else 0.28}
+            if sp:
+                it["speaker"] = sp
+            items.append(it)
     return items
+
+
+def speakers_in(script: str) -> list[str]:
+    seen: list[str] = []
+    for line in script.splitlines():
+        sp, _ = speaker_of(line)
+        if sp and sp not in seen:
+            seen.append(sp)
+    return seen
+
+
+def parse_pieces(text: str) -> list[dict]:
+    """A line → pieces: {text, emph: bool} and {gap: seconds} for `[pause 0.5]` markers; `*word*` = emphasis."""
+    out: list[dict] = []
+    pos = 0
+    for m in _PAUSE.finditer(text):
+        if m.start() > pos:
+            out += _emph_pieces(text[pos:m.start()])
+        out.append({"gap": max(0.1, min(5.0, float(m.group(1) or 0.6)))})
+        pos = m.end()
+    if pos < len(text):
+        out += _emph_pieces(text[pos:])
+    return [x for x in out if x.get("gap") or x.get("text", "").strip()]
+
+
+def _emph_pieces(text: str) -> list[dict]:
+    out: list[dict] = []
+    pos = 0
+    for m in _EMPH.finditer(text):
+        if m.start() > pos:
+            out.append({"text": text[pos:m.start()].strip(), "emph": False})
+        out.append({"text": m.group(1).strip(), "emph": True})
+        pos = m.end()
+    if pos < len(text):
+        out.append({"text": text[pos:].strip(), "emph": False})
+    return out
+
+
+def plain_text(text: str) -> str:
+    """The line as it will be heard (markers stripped) — for captions."""
+    return re.sub(r"\s{2,}", " ", _EMPH.sub(r"\1", _PAUSE.sub(" ", text))).strip()
 
 
 def word_times(text: str, start: float, end: float) -> list[dict]:
@@ -303,19 +384,100 @@ def stretch(src: Path, dst: Path, rate: float) -> float:
     return wav_seconds(dst)
 
 
-def synth_text(backend, text: str, voice: dict, lang: str, speed: float, work: Path, tag: str) -> Path:
-    """Long text → several model calls joined with short breaths → one clean 48 kHz wav."""
-    chunks = split_sentences(text)
+_HAVE_RB: bool | None = None
+
+
+def _have_rubberband() -> bool:
+    global _HAVE_RB
+    if _HAVE_RB is None:
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True)
+        _HAVE_RB = " rubberband " in (r.stdout or "")
+    return _HAVE_RB
+
+
+def pitch_filter(semitones: float) -> str:
+    """Pitch shift keeping the length: rubberband when ffmpeg has it, else asetrate+atempo."""
+    st = max(-12.0, min(12.0, float(semitones or 0)))
+    if abs(st) < 0.05:
+        return ""
+    f = 2 ** (st / 12.0)
+    if _have_rubberband():
+        return f"rubberband=pitch={f:.5f}"
+    return f"asetrate={int(SR * f)},aresample={SR},{_atempo(1 / f)}"
+
+
+def cache_dir() -> Path | None:
+    """Where finished lines are kept (TTS_LINE_CACHE, else under TTS_CACHE / WHISPER_CACHE / ~/.cache); None = no cache."""
+    d = os.getenv("TTS_LINE_CACHE") or (os.path.join(os.getenv("TTS_CACHE"), "lines") if os.getenv("TTS_CACHE") else "")
+    if not d:
+        d = os.path.join(os.getenv("WHISPER_CACHE") or os.path.join(os.path.expanduser("~"), ".cache", "vividora"), "tts_lines")
+    try:
+        p = Path(d)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    except OSError:
+        return None
+
+
+def line_key(text: str, voice: dict, lang: str, speed: float, pitch: float, engine: str) -> str:
+    vk = {k: voice.get(k) for k in ("id", "engine", "description", "kokoro_voice", "kokoro_lang", "seed") if voice.get(k)}
+    raw = json.dumps({"t": text, "v": vk, "l": lang, "s": round(speed, 3), "p": round(float(pitch or 0), 2), "e": engine},
+                     sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(raw.encode()).hexdigest()
+
+
+def synth_text(backend, text: str, voice: dict, lang: str, speed: float, work: Path, tag: str, pitch: float = 0.0) -> Path:
+    """Long text → several model calls joined with short breaths → one clean 48 kHz wav.
+    `*word*` pieces are spoken a little slower and louder (emphasis); `[pause 0.5]` inserts silence."""
     pcm = bytearray()
-    for k, ch in enumerate(chunks):
-        raw = backend.synth(ch, voice, lang, speed, work / f"{tag}_{k}_raw.wav")
-        cl = work / f"{tag}_{k}.wav"
-        clean_piece(raw, cl)
-        data, _ = read_pcm(cl)
-        if pcm:
-            pcm += b"\x00\x00" * int(SR * 0.12)
-        pcm += data
-    return write_wav(work / f"{tag}.wav", bytes(pcm), SR)
+    k = 0
+    for piece in parse_pieces(text):
+        if piece.get("gap"):
+            pcm += b"\x00\x00" * int(SR * piece["gap"])
+            continue
+        for ch in split_sentences(piece["text"]):
+            raw = backend.synth(ch, voice, lang, speed, work / f"{tag}_{k}_raw.wav")
+            cl = work / f"{tag}_{k}.wav"
+            clean_piece(raw, cl)
+            if piece.get("emph"):
+                em = work / f"{tag}_{k}_em.wav"
+                _ff(["-i", str(cl), "-af", f"{_atempo(0.9)},volume=2.5dB", "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", str(em)])
+                cl = em
+            data, _ = read_pcm(cl)
+            if pcm:
+                pcm += b"\x00\x00" * int(SR * (0.06 if piece.get("emph") else 0.12))
+            pcm += data
+            k += 1
+    out = work / f"{tag}.wav"
+    write_wav(out, bytes(pcm), SR)
+    pf = pitch_filter(pitch)
+    if pf:
+        shifted = work / f"{tag}_p.wav"
+        _ff(["-i", str(out), "-af", pf, "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", str(shifted)])
+        shutil.copyfile(shifted, out)
+    return out
+
+
+def synth_line(backend, text: str, voice: dict, lang: str, speed: float, work: Path, tag: str, pitch: float = 0.0,
+               use_cache: bool = True) -> tuple[Path, bool]:
+    """One line → clean wav, from the line cache when the same words/voice/pitch were made before. → (path, cached)"""
+    cd = cache_dir() if use_cache else None
+    key = line_key(text, voice, lang, speed, pitch, getattr(backend, "name", "parler"))
+    if cd:
+        hit = cd / f"{key}.wav"
+        if hit.exists() and hit.stat().st_size > 1000:
+            dst = work / f"{tag}.wav"
+            shutil.copyfile(hit, dst)
+            return dst, True
+    out = synth_text(backend, text, voice, lang, speed, work, tag, pitch)
+    if cd:
+        try:
+            tmp = cd / f"{key}.tmp"
+            shutil.copyfile(out, tmp)
+            tmp.replace(cd / f"{key}.wav")
+        except OSError:
+            pass
+    return out, False
 
 
 def fit_rate(natural: float, slot: float, speed: float = 1.0) -> float:
@@ -340,11 +502,15 @@ def build_track(payload: dict, work: Path, on_progress: ProgressFn | None = None
     backend = backend_for(engine)
     lang = payload.get("language") or "hi"
     speed = max(0.7, min(1.4, float(payload.get("speed") or 1.0)))
+    pitch_all = float(payload.get("pitch") or 0)
+    fixes = payload.get("fixes") or {}
+    cast = payload.get("speakers") or {}      # name → {voice, pitch} for dialogue scripts
     mode = payload.get("mode") or "revoice"
     segs = [s for s in (payload.get("segments") or []) if str(s.get("text") or "").strip()]
     if not segs:
         raise ValueError("बोलने के लिए कोई text नहीं मिला")
     prog = on_progress or (lambda f, m: None)
+    cached_n = 0
 
     placed: list[dict] = []
     pcm = bytearray()          # the assembled track, 48 kHz mono s16
@@ -354,9 +520,19 @@ def build_track(payload: dict, work: Path, on_progress: ProgressFn | None = None
     t = 0.35 if not timed else 0.0
     for i, s in enumerate(segs):
         prog(0.05 + 0.85 * i / len(segs), f"AI आवाज़: line {i + 1}/{len(segs)}")
-        text = str(s["text"]).strip()
-        nat_speed = speed if backend.native_speed and not timed else 1.0
-        raw = synth_text(backend, text, voice, lang, nat_speed, work, f"s{i}")
+        text = apply_fixes(str(s["text"]).strip(), fixes)
+        # this line's voice: an explicit override, else the speaker's cast voice, else the track voice
+        sp_cfg = cast.get(s.get("speaker") or "") or {}
+        lv = dict(s.get("voice") or sp_cfg.get("voice") or voice)
+        if s.get("seed") is not None:
+            lv["seed"] = int(s["seed"])            # "फिर बोलो" bumps the seed → a fresh take
+        line_pitch = float(s["pitch"] if s.get("pitch") is not None else (sp_cfg.get("pitch") if sp_cfg.get("pitch") is not None else pitch_all) or 0)
+        lb = backend_for(lv.get("engine") or engine)
+        if lb.name != backend.name:
+            check_ready(lv.get("engine") or engine)
+        nat_speed = speed if lb.native_speed and not timed else 1.0
+        raw, hit = synth_line(lb, text, lv, lang, nat_speed, work, f"s{i}", line_pitch, use_cache=payload.get("cache", True) is not False)
+        cached_n += 1 if hit else 0
         natural = wav_seconds(raw)
         if timed:
             slot_a, slot_b = float(s["start"]), float(s["end"])
@@ -382,9 +558,15 @@ def build_track(payload: dict, work: Path, on_progress: ProgressFn | None = None
             drift_max = max(drift_max, start - slot_a)
         else:
             t = end + float(s.get("pause", 0.3))
-        placed.append({"i": i, "text": text, "start": round(start, 3), "end": round(end, 3),
-                       "slot_start": slot_a, "slot_end": slot_b, "rate": round(rate, 3),
-                       "words": word_times(text, start, end)})
+        heard = plain_text(text)
+        placed.append({"i": i, "text": str(s["text"]).strip(), "start": round(start, 3), "end": round(end, 3),
+                       "slot_start": slot_a, "slot_end": slot_b, "rate": round(rate, 3), "cached": hit,
+                       **({"speaker": s["speaker"]} if s.get("speaker") else {}),
+                       **({"pitch": s["pitch"]} if s.get("pitch") is not None else {}),
+                       **({"voice": {k: lv.get(k) for k in ("id", "label", "description") if lv.get(k)}} if s.get("voice") else {}),
+                       **({"seed": s["seed"]} if s.get("seed") is not None else {}),
+                       **({"pause": s["pause"]} if s.get("pause") is not None else {}),
+                       "words": word_times(heard, start, end)})
         for f in work.glob(f"s{i}_*"):
             f.unlink(missing_ok=True)
     total = max(cursor + (0.5 if not timed else 0.0), float(payload.get("total") or 0))
@@ -398,7 +580,7 @@ def build_track(payload: dict, work: Path, on_progress: ProgressFn | None = None
          "-ac", "1", "-ar", str(SR), "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out)])
     raw_track.unlink(missing_ok=True)
     return {"path": out, "duration": round(total, 3), "segments": placed, "drift_max": round(drift_max, 3),
-            "engine": backend.name}
+            "engine": backend.name, "cached": cached_n}
 
 
 def handle_job(client, job: dict, work: Path, on_progress: ProgressFn | None = None) -> dict:
@@ -413,6 +595,10 @@ def handle_job(client, job: dict, work: Path, on_progress: ProgressFn | None = N
     v = p.get("voice") or {}
     meta = {"mode": p.get("mode"), "language": lang, "source_language": p.get("source_language"),
             "voice": {k: v.get(k) for k in ("id", "label", "engine", "description", "kokoro_voice") if v.get(k)},
-            "engine": r["engine"], "speed": p.get("speed", 1.0), "duration": r["duration"], "drift_max": r["drift_max"],
-            "sig": p.get("sig"), "segments": r["segments"]}
+            "engine": r["engine"], "speed": p.get("speed", 1.0), "pitch": p.get("pitch", 0), "duration": r["duration"],
+            "drift_max": r["drift_max"], "cached": r.get("cached", 0), "sig": p.get("sig"), "segments": r["segments"],
+            "speakers": {k: {"voice": {kk: vv for kk, vv in (v.get("voice") or {}).items()
+                                       if kk in ("id", "label", "engine", "description", "kokoro_voice", "kokoro_lang")},
+                             "pitch": v.get("pitch", 0)} for k, v in (p.get("speakers") or {}).items()},
+            "total": p.get("total"), "replace": p.get("replace")}
     return {"files": [{"kind": "dub", "path": up["path"], "mime": "audio/mp4", "label": lang, "meta": meta}]}

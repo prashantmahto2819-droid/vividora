@@ -10,6 +10,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse
 from starlette.routing import Route
@@ -138,14 +139,17 @@ STARTER = Path(__file__).resolve().parent.parent.parent / "starter"
 
 
 def _add_file(workspace_id: str, user_id: str | None, kind: str, src: Path, *, name: str, tags: str, source: str,
-              license: str, channel_id: str | None = None, move: bool = False) -> dict:
+              license: str, channel_id: str | None = None, move: bool = False, analyse: bool = True) -> dict:
     import shutil
     item_id = db.new_id()
     rel = str(Path(f"ws_{workspace_id}") / "library" / kind / f"{item_id[:8]}_{storage.safe_name(src.name)}")
     dst = storage.ensure_parent(rel)
     (shutil.move if move else shutil.copy2)(str(src), str(dst))
+    meta = _probe_meta(dst, kind)
+    if kind == "music" and analyse:
+        meta = {**meta, **_music_meta(dst, name, tags)}
     item = {"id": item_id, "workspace_id": workspace_id, "kind": kind, "name": name[:120], "path": rel,
-            "size": dst.stat().st_size, "mime": storage.guess_mime(rel), "meta": _probe_meta(dst, kind),
+            "size": dst.stat().st_size, "mime": storage.guess_mime(rel), "meta": meta,
             "created_by": user_id, "created_at": db.now(), "tags": tags, "source": source, "license": license,
             "channel_id": channel_id}
     with db.tx() as c:
@@ -179,7 +183,7 @@ def install_starter(workspace_id: str, user_id: str | None = None, only_new_sinc
             if folder == "frames":
                 extra = ["vertical" if f.stem.endswith("_v") else "horizontal"]
             _add_file(workspace_id, user_id, cfg["kind"], f, name=nice, tags=",".join([*cfg["tags"].split(","), sub, *extra]),
-                      source="starter", license=cfg["license"])
+                      source="starter", license=cfg["license"], analyse=False)  # music is tagged lazily (Audio tab)
             n += 1
     return n
 
@@ -341,16 +345,64 @@ async def upload(request: Request, user: dict):
     except ApiError:
         path.unlink(missing_ok=True)  # a rejected LUT never stays in the library
         raise
+    tags = (request.query_params.get("tags") or "")[:200]
+    if kind == "music":
+        meta = {**meta, **(await run_in_threadpool(_music_meta, path, name, tags))}
     item = {"id": item_id, "workspace_id": user["workspace_id"], "kind": kind, "name": name,
             "path": rel, "size": written, "mime": storage.guess_mime(rel),
             "meta": meta, "created_by": user["id"], "created_at": db.now(),
-            "tags": (request.query_params.get("tags") or "")[:200], "source": "upload", "license": "own",
+            "tags": tags, "source": "upload", "license": "own",
             "channel_id": request.query_params.get("channel") or None}
     with db.tx() as c:
         db.insert(c, "library", item)
         service.log(c, user["workspace_id"], "library.add", user_id=user["id"],
                     detail={"kind": kind, "name": name})
     return ok(_view(item), 201)
+
+
+def _music_meta(path: Path, name: str = "", tags: str = "") -> dict:
+    """bpm / mood / genre tags for a music file; never fails the upload."""
+    from ..engine import musictag
+    try:
+        return musictag.analyze(path, name, tags)
+    except Exception as e:  # noqa: BLE001
+        return {"analysed": False, "analyse_error": str(e)[:160]}
+
+
+@require("editor")
+async def analyze_music(request: Request, user: dict):
+    """Tag every music item that has no analysis yet (or one item: {id}, or all again: {force: true})."""
+    data = json.loads(await request.body() or b"{}")
+    q = "SELECT * FROM library WHERE workspace_id = ? AND kind = 'music'"
+    args: list = [user["workspace_id"]]
+    if data.get("id"):
+        q += " AND id = ?"
+        args.append(str(data["id"]))
+    rows = db.rows(db.conn().execute(q + " ORDER BY created_at DESC LIMIT 400", args))
+    todo = [r for r in rows if data.get("force") or data.get("id") or not (r.get("meta") or {}).get("analysed")]
+
+    def work() -> list[dict]:
+        done = []
+        for r in todo[:60]:   # a big library is tagged over a few calls
+            try:
+                m = _music_meta(storage.abs_path(r["path"]), r["name"], r.get("tags") or "")
+            except (ValueError, OSError):
+                m = {"analysed": False}
+            with db.tx() as c:
+                db.update(c, "library", r["id"], {"meta": {**(r.get("meta") or {}), **m}})
+            done.append({"id": r["id"], **{k: m.get(k) for k in ("bpm", "moods", "genres", "analysed")}})
+        return done
+    done = await run_in_threadpool(work)
+    return ok({"analysed": done, "left": max(0, len(todo) - len(done))})
+
+
+@require("viewer")
+async def music_filters(request: Request, user: dict):
+    """Vocabulary for the Audio tab filters (+ which licences count as commercial-safe)."""
+    from ..engine import musictag
+    rows = db.rows(db.conn().execute("SELECT id, license, meta FROM library WHERE workspace_id = ? AND kind = 'music'", (user["workspace_id"],)))
+    return ok({"moods": musictag.MOODS, "genres": musictag.GENRES,
+               "commercial": {r["id"]: musictag.commercial_ok(r.get("license")) for r in rows}})
 
 
 def _item(request: Request, user: dict | None = None) -> dict:
@@ -474,6 +526,8 @@ routes = [
     Route("/library/starter", starter, methods=["POST"]),
     Route("/library/search", search_free),
     Route("/library/import", import_free, methods=["POST"]),
+    Route("/library/analyze-music", analyze_music, methods=["POST"]),
+    Route("/library/music-filters", music_filters),
     Route("/library", list_items),
     Route("/library", upload, methods=["PUT"]),
     Route("/library/{item_id}", rename, methods=["PATCH"]),

@@ -526,11 +526,32 @@ def after_job(c, job: dict, result: dict) -> None:
 
     elif kind == "dub":
         # a side job: adds a voice track, never changes the project's status
+        upd: dict = {}
         for f in result.get("files", []):
-            add_asset(c, pid, "dub", f["path"], label=f.get("label"), mime=f.get("mime") or "audio/mp4", meta=f.get("meta"))
+            meta = dict(f.get("meta") or {})
+            old_id = meta.pop("replace", None)
+            new = add_asset(c, pid, "dub", f["path"], label=f.get("label"), mime=f.get("mime") or "audio/mp4", meta=meta)
+            if old_id:
+                # a per-line redo: the new track takes the old one's place (and its "use this voice" selection)
+                old = db.get("assets", old_id)
+                if old and old["project_id"] == pid and old["kind"] == "dub":
+                    try:
+                        storage.abs_path(old["path"]).unlink(missing_ok=True)
+                    except (ValueError, OSError):
+                        pass
+                    c.execute("DELETE FROM assets WHERE id = ?", (old_id,))
+                    st = (db.get("projects", pid) or {}).get("settings") or {}
+                    rs = dict(st.get("render") or {})
+                    eff = dict(rs.get("effects") or {})
+                    if eff.get("voice_track") == old_id:
+                        eff["voice_track"] = new["id"]
+                        rs["effects"] = eff
+                        upd["settings"] = {**st, "render": rs}
         m = (result.get("files") or [{}])[0].get("meta") or {}
-        db.update(c, "projects", pid, {"status_note": f"AI voice-over तैयार ({m.get('language', '')}, {round(float(m.get('duration') or 0))}s) — Audio tab में “इसे इस्तेमाल करें”",
-                                       "updated_at": db.now()})
+        cached = int(m.get("cached") or 0)
+        note = f"AI voice-over तैयार ({m.get('language', '')}, {round(float(m.get('duration') or 0))}s"
+        note += f", {cached} lines cache से)" if cached else ")"
+        db.update(c, "projects", pid, {**upd, "status_note": note + " — Audio tab में “इसे इस्तेमाल करें”", "updated_at": db.now()})
 
     elif kind == "render":
         sig = (job.get("payload") or {}).get("edit_sig")

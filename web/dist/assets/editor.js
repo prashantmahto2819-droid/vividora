@@ -1371,7 +1371,14 @@ function renderPanel() {
     if (!kinds.includes(E.libKind)) E.libKind = kinds[0];
     const subTags = { sticker: ["", "popup", "emoji", "social", "shape"], music: ["", "motivational", "emotional", "lofi", "upbeat", "cinematic", "story", "energetic", "news"], frame: ["", "vertical", "horizontal"], broll: ["", "background", "overlay"] }[E.libKind] || [];
     const lq = (E.libQ || "").toLowerCase();
-    const items = (E.lib || []).filter((x) => x.kind === E.libKind && (!E.libTag || (`,${x.tags},`).includes(`,${E.libTag},`)) && (!lq || x.name.toLowerCase().includes(lq) || (x.tags || "").includes(lq)));
+    const MF = (E.libMF = E.libMF || { mood: "", genre: "", bpmMin: 0, bpmMax: 0, dur: 0, comm: false, fav: false });
+    const musicOk = (x) => { if (E.libKind !== "music") return true; const m = x.meta || {};
+      if (MF.mood && !(m.moods || []).includes(MF.mood) && !(`,${x.tags},`).includes(`,${MF.mood},`)) return false;
+      if (MF.genre && !(m.genres || []).includes(MF.genre) && !(`,${x.tags},`).includes(`,${MF.genre},`)) return false;
+      if (MF.bpmMin && (m.bpm || 0) < MF.bpmMin) return false; if (MF.bpmMax && (m.bpm || 999) > MF.bpmMax) return false;
+      if (MF.dur && (m.duration || 0) > MF.dur) return false; if (MF.fav && !m.fav) return false;
+      if (MF.comm && E.musicComm && E.musicComm[x.id] === false) return false; return true; };
+    const items = (E.lib || []).filter((x) => x.kind === E.libKind && (!E.libTag || (`,${x.tags},`).includes(`,${E.libTag},`)) && (!lq || x.name.toLowerCase().includes(lq) || (x.tags || "").includes(lq)) && musicOk(x));
     const music = fx.music, wm = fx.watermark;
     const pclips = E.p.assets.filter((a) => a.kind === "clip").sort((a, b) => (a.meta?.order || 0) - (b.meta?.order || 0));
     const clipBox = t === "media" && !E.montage ? `<div class="box"><div class="row between"><b>Project clips · ${pclips.length || 1}</b>${E.canEdit ? `<label class="btn small">+ clip जोड़ें<input type="file" id="clip-file" accept="video/*,.mkv,.mts" multiple hidden></label>` : ""}</div>
@@ -1384,6 +1391,7 @@ function renderPanel() {
       <div id="lib-progress"></div>
       <div class="irow"><input id="lib-q" placeholder="खोजें…" value="${esc(E.libQ || "")}" style="flex:1"><a class="btn small quiet" href="#/library" title="पूरी library">⤢</a></div>
       ${subTags.length ? `<div class="seg wrap" style="flex-wrap:wrap;margin:.3rem 0">${subTags.map((tg) => `<button data-ltag="${tg}" class="${(E.libTag || "") === tg ? "on" : ""}">${tg || "सब"}</button>`).join("")}</div>` : ""}
+      ${E.libKind === "music" ? musicFilterHtml(MF, fx) : ""}
       ${t === "audio" ? audioControls(dis) + PRO.musicFitHtml(dis) + dubBox(dis) : ""}
       ${t === "overlay" && E.libKind === "logo" ? `<div class="box"><b>Watermark</b>${wm.id ? `<p class="small">${esc(libItem(wm.id)?.name || "")}</p>` : `<p class="small muted">logo चुनकर “लगाएँ”</p>`}
         <div class="irow">${field("पारदर्शिता", `<input type="range" id="wm-op" min="0.1" max="1" step="0.05" value="${wm.opacity}" ${dis}>`)}${field("आकार", `<input type="range" id="wm-size" min="0.06" max="0.3" step="0.01" value="${wm.size}" ${dis}>`)}</div>
@@ -1394,7 +1402,8 @@ function renderPanel() {
       ${t === "overlay" && E.libKind === "lut" ? `<p class="small muted">LUT (.cube) लगाने पर Effects का look बदल जाता है। अभी: <b>${fx.look?.startsWith("lut:") ? esc(libItem(fx.look.slice(4))?.name || "LUT") : "कोई नहीं"}</b></p>` : ""}
       <ul class="lib ${["sticker", "image", "frame", "logo"].includes(E.libKind) ? "grid" : ""}">${E.lib === null ? `<li class="muted small">लोड हो रहा…</li>` : items.map((x) => `<li data-lib="${x.id}" draggable="${E.canEdit ? "true" : "false"}" title="खींचकर preview या timeline पर छोड़ें">
         ${["image", "logo", "sticker", "frame"].includes(x.kind) ? `<img src="${x.url}" alt="" loading="lazy" style="object-fit:contain;background:repeating-conic-gradient(#1a2130 0 25%,#222b3b 0 50%) 50%/10px 10px">` : x.kind === "broll" ? `<video src="${x.url}#t=0.5" muted preload="metadata"></video>` : `<i class="libicon">${ICON.audio}</i>`}
-        <div class="grow"><b class="small">${esc(x.name)}</b><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}${x.meta?.width ? ` · ${x.meta.width}×${x.meta.height}` : ""}</span></div>
+        <div class="grow"><b class="small">${esc(x.name)}</b><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}${x.meta?.width ? ` · ${x.meta.width}×${x.meta.height}` : ""}${x.kind === "music" && x.meta?.bpm ? ` · ${Math.round(x.meta.bpm)} BPM` : ""}${x.kind === "music" && x.meta?.moods?.length ? ` · ${x.meta.moods.slice(0, 2).join(", ")}` : ""}${x.kind === "music" && E.musicComm && E.musicComm[x.id] === false ? ` · <span style="color:var(--rose)">NC</span>` : ""}</span></div>
+        ${x.kind === "music" ? `<button class="ibtn" data-fav="${x.id}" title="पसंदीदा">${x.meta?.fav ? "★" : "☆"}</button>` : ""}
         ${x.kind === "music" || x.kind === "sfx" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
         ${x.kind === "music" ? `<button class="btn small" data-addclip="${x.id}" title="किसी audio track पर clip की तरह (playhead से)" ${dis}>+ clip</button>` : ""}<button class="btn small primary" data-add="${x.id}" ${dis}>${{ music: "लगाएँ", logo: "लगाएँ", lut: "लगाएँ", frame: "लगाएँ" }[x.kind] || "+ जोड़ें"}</button>
         <button class="ibtn" data-del="${x.id}" title="library से हटाएँ" ${dis}>${ICON.trash}</button></li>`).join("") || `<li class="muted small">अभी कुछ नहीं — ऊपर से upload करें।</li>`}</ul>`;
@@ -1457,6 +1466,7 @@ function renderPanel() {
       ${E.canEdit ? `<div class="box"><div class="irow">${field("kind", `<select id="ref-kind">${Object.entries(RK).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>`)}${field("link", `<input id="ref-url" placeholder="https://… (Instagram/YouTube/TikTok)">`)}</div>
         ${field("note", `<textarea id="ref-note" rows="2" placeholder="क्या चाहिए: 'इस audio पर 0:08 वाला beat drop', 'यह zoom effect'…"></textarea>`)}
         <div class="irow"><label class="chk small"><input type="checkbox" id="ref-global"> सब projects के लिए (swipe file)</label><span class="grow"></span><button class="btn small primary" id="ref-add">+ जोड़ें</button></div></div>` : ""}
+      ${refAnalyzerHtml()}
       <ul class="plist refs">${refs.map((r) => `<li><span class="small">${RK[r.kind] || "📌"}</span><div class="grow" style="display:flex;flex-direction:column;min-width:0">${r.url ? `<a class="small" href="${esc(r.url)}" target="_blank" rel="noopener" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.url.replace(/^https?:\/\//, ""))}</a>` : ""}${r.note ? `<span class="small">${esc(r.note)}</span>` : ""}${!r.project_id ? `<span class="small muted">swipe file</span>` : ""}</div>${E.canEdit ? `<button class="ibtn" data-refdel="${r.id}">${ICON.trash}</button>` : ""}</li>`).join("") || `<li class="muted small">अभी कुछ नहीं</li>`}</ul>`;
   } else if (t === "shorts") {
     const planning = E.p.jobs?.some((j) => j.kind === "shorts_plan" && ["queued", "running"].includes(j.status));
@@ -1626,6 +1636,9 @@ function bindPanel() {
   $$("[data-ltag]", panel).forEach((b) => (b.onclick = () => { E.libTag = b.dataset.ltag; renderPanel(); }));
   on("#lib-q", "oninput", (e) => { E.libQ = e.target.value; const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; const i = $("#lib-q", panel); i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
   on("#lib-file", "onchange", async (e) => { for (const f of e.target.files) await libUpload(E.libKind, f); renderPanel(); });
+  musicFilterBind(panel);
+  $$("[data-fav]", panel).forEach((b) => (b.onclick = async () => { const x = libItem(b.dataset.fav); if (!x) return; const fav = !x.meta?.fav; x.meta = { ...(x.meta || {}), fav };
+    b.textContent = fav ? "★" : "☆"; try { await api("PATCH", `/library/${x.id}`, { meta: { fav } }); } catch (e) { toast(e.message); } }));
   $$("[data-prev]", panel).forEach((b) => (b.onclick = () => { const x = libItem(b.dataset.prev); if (E.audio) { E.audio.pause(); if (E.audio.src === x.url) { E.audio = null; return; } } E.audio = new Audio(x.url); E.audio.play(); }));
   $$("[data-add]", panel).forEach((b) => (b.onclick = () => libAdd(libItem(b.dataset.add))));
   $$("[data-addclip]", panel).forEach((b) => (b.onclick = () => addAudioClip(libItem(b.dataset.addclip), E.t, 0)));
@@ -1700,6 +1713,7 @@ function bindPanel() {
   on("#ref-add", "onclick", async () => { const body = { kind: $("#ref-kind", panel).value, url: $("#ref-url", panel).value.trim(), note: $("#ref-note", panel).value.trim(), project_id: $("#ref-global", panel).checked ? null : E.pid };
     try { await api("POST", "/refs", body); await loadRefs(); } catch (err) { toast(err.message); } });
   $$("[data-refdel]", panel).forEach((b) => (b.onclick = async () => { await api("DELETE", `/refs/${b.dataset.refdel}`); await loadRefs(); }));
+  refAnalyzerBind(panel);
   // shorts
   on("#sh-plan", "onclick", async () => { await flush(); try { await api("POST", `/projects/${E.pid}/shorts/plan`, { options: { count: +$("#sh-count", panel).value } }); toast("Shorts ढूँढे जा रहे हैं"); E.shortsDirty = false; await load(); renderPanel(); } catch (err) { toast(err.message); } });
   on("#sh-add", "onclick", () => { if (E.markIn == null || E.markOut == null) return toast("पहले I और O से हिस्सा चुनें"); const sc = { id: "m" + uid().slice(0, 4), start: +E.markIn.toFixed(2), end: +E.markOut.toFixed(2), title: "", hook: "", selected: true }; E.shorts.push(sc); E.shortsDirty = true; E.markIn = E.markOut = null; $("#t-marks", E.root).textContent = ""; touch(); select({ type: "short", id: sc.id }); renderPanel(); });
@@ -1930,7 +1944,7 @@ function audioControls(dis) {
 // AI voice-over / dubbing box (Audio tab). dubBox(dis) → HTML; dubBox(null, panel) → binds it.
 function dubBox(dis, panel) {
   const { esc, api, toast } = E.ctx; const fx = E.rs.effects; const D = E.ctx.S.presets?.dub || { voices: [], langs: { hi: "हिन्दी", en: "English" }, modes: {} };
-  const st = (E.dub = E.dub || { mode: E.montage ? "script" : "revoice", lang: E.p.language === "en" ? "en" : "hi", voice: "", speed: 1, script: "", desc: "" });
+  const st = (E.dub = E.dub || { mode: E.montage ? "script" : "revoice", lang: E.p.language === "en" ? "en" : "hi", voice: "", speed: 1, script: "", desc: "", pitch: 0, lines: null, linesFor: "", edits: {} });
   if (E.montage) st.mode = "script";
   const tracks = E.p.assets.filter((a) => a.kind === "dub");
   const job = (E.p.jobs || []).filter((j) => j.kind === "dub").sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))[0];
@@ -1940,7 +1954,13 @@ function dubBox(dis, panel) {
   if (panel) {
     const box = $("#dub-box", panel); if (!box) return;
     const q = (s) => $(s, box);
-    const keep = () => { st.mode = q("#dub-mode")?.value || st.mode; st.lang = q("#dub-lang")?.value || st.lang; st.voice = q("#dub-voice")?.value ?? st.voice; st.speed = +(q("#dub-speed")?.value || st.speed); st.script = q("#dub-script")?.value ?? st.script; st.desc = q("#dub-desc")?.value ?? st.desc; };
+    const keep = () => { st.mode = q("#dub-mode")?.value || st.mode; st.lang = q("#dub-lang")?.value || st.lang; st.voice = q("#dub-voice")?.value ?? st.voice; st.speed = +(q("#dub-speed")?.value || st.speed); st.script = q("#dub-script")?.value ?? st.script; st.desc = q("#dub-desc")?.value ?? st.desc; st.pitch = +(q("#dub-pitch")?.value ?? st.pitch); };
+    const pt = q("#dub-pitch"); if (pt) pt.oninput = () => { keep(); q("#dub-pitch-v").textContent = (st.pitch > 0 ? "+" : "") + st.pitch; };
+    const fxs = q("#dub-fixes"); if (fxs) fxs.onchange = () => { E.rs.tts_fixes = fxs.value; touch(); };
+    const scr = q("#dub-script"); if (scr) scr.oninput = () => { keep(); const names = dubSpeakers(st.script); const box2 = q("#dub-cast"); if (box2 && names.join("|") !== (box2.dataset.names || "")) renderPanel(); };
+    $$("[data-castv]", box).forEach((el) => (el.onchange = () => { const n = el.dataset.castv; E.rs.voice_cast = E.rs.voice_cast || {}; E.rs.voice_cast[n] = { ...(E.rs.voice_cast[n] || {}), voice: el.value }; touch(); }));
+    $$("[data-castp]", box).forEach((el) => (el.onchange = () => { const n = el.dataset.castp; E.rs.voice_cast = E.rs.voice_cast || {}; E.rs.voice_cast[n] = { ...(E.rs.voice_cast[n] || {}), pitch: +el.value }; touch(); }));
+    dubLinesBind(box, tracks);
     ["#dub-mode", "#dub-lang"].forEach((s) => { const el = q(s); if (el) el.onchange = () => { keep(); st.voice = ""; renderPanel(); }; });
     ["#dub-voice", "#dub-script", "#dub-desc"].forEach((s) => { const el = q(s); if (el) el.oninput = el.onchange = keep; });
     const sp = q("#dub-speed"); if (sp) sp.oninput = () => { keep(); q("#dub-speed-v").textContent = st.speed.toFixed(2) + "×"; };
@@ -1948,7 +1968,8 @@ function dubBox(dis, panel) {
       keep(); if (st.mode === "script" && st.script.trim().length < 3) return toast("पहले script लिखें");
       go.disabled = true; go.textContent = st.mode === "dub" ? "translate हो रहा…" : "भेज रहे…";
       try { await flush();
-        const r = await api("POST", `/projects/${E.pid}/dub`, { mode: st.mode, language: st.mode === "revoice" ? null : st.lang, voice: st.voice || null, description: st.desc || null, speed: st.speed, script: st.mode === "script" ? st.script : "" });
+        const r = await api("POST", `/projects/${E.pid}/dub`, { mode: st.mode, language: st.mode === "revoice" ? null : st.lang, voice: st.voice || null, description: st.desc || null, speed: st.speed, pitch: st.pitch || 0, script: st.mode === "script" ? st.script : "" });
+        if (r.missing_cast?.length) toast(`${r.missing_cast.join(", ")} के लिए आवाज़ नहीं चुनी — default आवाज़ लगेगी`);
         E.p.jobs = [{ ...r.job, status: "queued", created_at: new Date().toISOString() }, ...(E.p.jobs || [])];
         toast(`AI voice-over शुरू · ${r.lines} lines${r.translated?.length ? ` · “${r.translated[0].slice(0, 40)}…”` : ""}`); E.ctx.load().catch(() => {});
       } catch (er) { toast(er.message); }
@@ -1977,15 +1998,139 @@ function dubBox(dis, panel) {
     <div class="irow">${field("क्या बनाना है", `<select id="dub-mode" ${dis}>${(E.montage ? ["script"] : ["revoice", "dub", "script"]).map((m) => `<option value="${m}" ${st.mode === m ? "selected" : ""}>${esc(D.modes[m] || m)}</option>`).join("")}</select>`)}
       ${field("भाषा", st.mode === "revoice" ? `<select disabled><option>${esc(D.langs[lang] || lang)} (transcript जैसी)</option></select>` : `<select id="dub-lang" ${dis}>${Object.entries(D.langs).map(([k, l]) => `<option value="${k}" ${st.lang === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}</div>
     ${field("आवाज़", `<select id="dub-voice" ${dis}>${voices.map((v) => `<option value="${v.id}" ${st.voice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>`)}
-    <div class="irow">${field(`speed <b id="dub-speed-v">${(+st.speed).toFixed(2)}×</b>`, `<input type="range" id="dub-speed" min="0.8" max="1.25" step="0.05" value="${st.speed}" ${dis}>`)}</div>
+    <div class="irow">${field(`speed <b id="dub-speed-v">${(+st.speed).toFixed(2)}×</b>`, `<input type="range" id="dub-speed" min="0.8" max="1.25" step="0.05" value="${st.speed}" ${dis}>`)}
+      ${field(`pitch <b id="dub-pitch-v">${st.pitch > 0 ? "+" : ""}${st.pitch || 0}</b> semitone`, `<input type="range" id="dub-pitch" min="-6" max="6" step="1" value="${st.pitch || 0}" ${dis}>`)}</div>
+    <p class="small muted">line में <code>*शब्द*</code> = ज़ोर (धीरे, ऊँचा) · <code>[pause 0.8]</code> = रुकना · script में <code>रोहित: …</code> = उस किरदार की आवाज़</p>
+    ${dubCastHtml(st, voices, dis)}
+    <details><summary class="small">उच्चारण सुधार (शब्द = कैसे बोले)</summary><textarea id="dub-fixes" rows="3" placeholder="Vividora = विविडोरा&#10;SEO = एस ई ओ" ${dis}>${esc(E.rs.tts_fixes || "")}</textarea></details>
     <details><summary class="small">अपनी आवाज़ का description (English में, Parler)</summary><input id="dub-desc" value="${esc(st.desc)}" placeholder="Rohit speaks with a deep, confident, warm tone at a moderate pace, very clear audio" ${dis}></details>
     ${st.mode === "script" ? field("Script", `<textarea id="dub-script" rows="6" placeholder="यहाँ script लिखें या paste करें… (खाली line = नया paragraph, थोड़ा लंबा रुकना)" ${dis}>${esc(st.script)}</textarea>`) : ""}
     ${st.mode === "dub" ? `<p class="small muted">transcript एक ही AI call में translate होता है (server में GEMINI_API_KEY चाहिए), फिर हर line अपनी जगह fit होती है।</p>` : ""}
     <div class="irow"><button class="btn small primary" id="dub-go" ${dis || (active ? "disabled" : "")}>🎙 बनाएँ</button><span class="small muted grow" id="dub-prog">${esc(progText(job))}</span></div>
-    ${tracks.length ? `<ul class="plist">${tracks.map((a) => `<li><button class="ibtn" data-dubplay="${a.id}" title="सुनें">${ICON.play}</button><span class="grow small">${esc(vlabel(a))}${a.meta?.mode ? ` <span class="muted">· ${esc(D.modes[a.meta.mode] || a.meta.mode)}</span>` : ""}</span>${E.canEdit ? `<button class="ibtn" data-dubdel="${a.id}" title="हटाएँ">${ICON.trash}</button>` : ""}</li>`).join("")}</ul>` : ""}
+    ${tracks.length ? `<ul class="plist">${tracks.map((a) => `<li><button class="ibtn" data-dubplay="${a.id}" title="सुनें">${ICON.play}</button><span class="grow small">${esc(vlabel(a))}${a.meta?.mode ? ` <span class="muted">· ${esc(D.modes[a.meta.mode] || a.meta.mode)}</span>` : ""}</span>${E.canEdit ? `<button class="btn small quiet" data-dublines="${a.id}" title="हर line देखें, बदलें, फिर बोलें">✏ lines</button><button class="ibtn" data-dubdel="${a.id}" title="हटाएँ">${ICON.trash}</button>` : ""}</li>`).join("")}</ul>${dubLinesHtml(st, tracks, voices, active)}` : ""}
     ${field("इसे इस्तेमाल करें (render की आवाज़)", `<select id="dub-use" ${dis}><option value="original" ${curVal === "original" ? "selected" : ""}>${E.montage ? "कोई voice-over नहीं (सिर्फ़ music)" : "मूल आवाज़ (original)"}</option>${tracks.map((a) => `<option value="${a.id}" ${curVal === a.id ? "selected" : ""}>🗣 ${esc(vlabel(a))}</option>${E.montage ? "" : `<option value="both:${a.id}" ${curVal === "both:" + a.id ? "selected" : ""}>दोनों: ${esc(D.langs[a.label] || a.label)} AI + original धीमी</option>`}`).join("")}</select>`)}
     ${curVal.startsWith("both:") ? field(`original कितनी <b id="dub-under-v">${Math.round((fx.voice_track_under ?? 0.25) * 100)}%</b>`, `<input type="range" id="dub-under" min="0" max="0.8" step="0.05" value="${fx.voice_track_under ?? 0.25}" ${dis}>`) : ""}
     ${cur !== "original" ? `<p class="small muted">captions अब AI आवाज़ के शब्दों से बनेंगे। कट/speed बदलें तो dub दोबारा बनाएँ।</p>` : ""}</div>`;
+}
+// dialogue scripts: `नाम: …` lines → a voice per character (settings.render.voice_cast)
+function dubSpeakers(script) {
+  const seen = [];
+  for (const line of String(script || "").split("\n")) {
+    const m = line.match(/^\s*(?:\[([^\]\n]{1,40})\]|([^:\n\[\]]{1,40}):)\s+(?=\S)/);
+    if (!m) continue; const n = (m[1] || m[2] || "").trim(); const rest = line.slice(m[0].length).trim();
+    if (!rest || n.split(/\s+/).length > 3 || ["http", "https", "note", "नोट"].includes(n.toLowerCase())) continue;
+    if (!seen.includes(n)) seen.push(n);
+  }
+  return seen;
+}
+function dubCastHtml(st, voices, dis) {
+  const { esc } = E.ctx; if (st.mode !== "script") return "";
+  const names = dubSpeakers(st.script); const cast = E.rs.voice_cast || {};
+  if (!names.length) return `<div id="dub-cast" data-names=""></div>`;
+  return `<div id="dub-cast" class="box" data-names="${esc(names.join("|"))}"><b>🎭 किरदार (${names.length})</b>
+    ${names.map((n) => `<div class="irow"><span class="small" style="min-width:90px"><b>${esc(n)}</b></span><select data-castv="${esc(n)}" ${dis}><option value="">(मुख्य आवाज़)</option>${voices.map((v) => `<option value="${v.id}" ${cast[n]?.voice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
+      <select data-castp="${esc(n)}" title="pitch" ${dis}>${[-4, -2, 0, 2, 4].map((x) => `<option value="${x}" ${(cast[n]?.pitch || 0) === x ? "selected" : ""}>${x > 0 ? "+" : ""}${x} st</option>`).join("")}</select></div>`).join("")}</div>`;
+}
+// per-line panel of a finished voice track: edit words / pitch / pause / voice, "फिर बोलो" one line, A/B raw vs processed
+function dubLinesHtml(st, tracks, voices, active) {
+  const { esc } = E.ctx; const a = tracks.find((x) => x.id === st.linesFor); if (!a) return "";
+  if (!st.lines || st.lines.for !== a.id) return `<div class="box" id="dub-lines"><span class="small muted">lines आ रही हैं…</span></div>`;
+  const L = st.lines; const ed = st.edits; const n = Object.keys(ed).length;
+  return `<div class="box" id="dub-lines"><div class="row between"><b>✏ lines · ${esc(a.meta?.voice?.label || "")}${L.cached ? ` <span class="small muted">· ${L.cached} cache से</span>` : ""}</b><button class="ibtn" id="dub-lines-x">✕</button></div>
+    <p class="small muted">शब्द बदलें, pitch/रुकना चुनें, या 🔁 से वही line नई take में — बाकी lines दोबारा नहीं बनतीं (cache)। ▶ = सुनें, A/B = असली vs processed</p>
+    <ul class="plist caps">${L.segments.map((sg) => { const e = ed[sg.i] || {}; return `<li data-dl="${sg.i}" style="flex-wrap:wrap"><span class="small muted" style="min-width:52px">${fmt(sg.start)}</span>
+      <button class="ibtn" data-dlplay="${sg.i}" title="सुनें">${ICON.play}</button>
+      <input value="${esc(e.text ?? sg.text)}" data-dltext="${sg.i}" style="flex:1 1 220px" ${E.canEdit ? "" : "disabled"}>
+      ${sg.speaker ? `<span class="tag">${esc(sg.speaker)}</span>` : ""}
+      <select data-dlpitch="${sg.i}" title="pitch" style="width:64px">${[-4, -2, 0, 2, 4].map((x) => `<option value="${x}" ${(e.pitch ?? sg.pitch ?? 0) === x ? "selected" : ""}>${x > 0 ? "+" : ""}${x}</option>`).join("")}</select>
+      ${L.mode === "script" ? `<input type="number" data-dlpause="${sg.i}" value="${e.pause ?? sg.pause ?? 0.3}" min="0" max="5" step="0.1" title="बाद में रुकना (s)" style="width:62px">` : ""}
+      <select data-dlvoice="${sg.i}" title="इस line की आवाज़" style="width:110px"><option value="">(वही)</option>${voices.map((v) => `<option value="${v.id}" ${(e.voice ?? sg.voice?.id) === v.id ? "selected" : ""}>${esc(v.label.split(" — ")[0])}</option>`).join("")}</select>
+      <button class="btn small ${e.redo ? "primary" : "quiet"}" data-dlredo="${sg.i}" title="यही line नई take में">🔁</button>
+      <button class="btn small quiet" data-dlab="${sg.i}" title="A/B: असली आवाज़ vs enhancement के साथ">A/B</button></li>`; }).join("")}</ul>
+    <div class="row between"><span class="small muted">${n ? `${n} line बदली` : "कोई बदलाव नहीं"}</span><button class="btn small primary" id="dub-lines-go" ${E.canEdit && n && !active ? "" : "disabled"}>🎙 बदली lines फिर बनाएँ</button></div></div>`;
+}
+function dubLinesBind(box, tracks) {
+  const st = E.dub; const { api, toast } = E.ctx; const q = (s) => $(s, box);
+  $$("[data-dublines]", box).forEach((b) => (b.onclick = async () => { const id = b.dataset.dublines; st.linesFor = st.linesFor === id ? "" : id; st.edits = {}; st.lines = null; renderPanel();
+    if (!st.linesFor) return; try { const r = await api("GET", `/projects/${E.pid}/dub/${id}/lines`); st.lines = { ...r, for: id }; } catch (e) { toast(e.message); st.linesFor = ""; } renderPanel(); }));
+  const x = q("#dub-lines-x"); if (x) x.onclick = () => { st.linesFor = ""; st.lines = null; st.edits = {}; renderPanel(); };
+  const L = st.lines; if (!L || !q("#dub-lines")) return;
+  const seg = (i) => L.segments.find((s) => s.i === +i);
+  const edit = (i, k, v) => { const sg = seg(i); const e = st.edits[i] || {}; const same = k === "text" ? v === sg.text : k === "pitch" ? v === (sg.pitch ?? 0) : k === "pause" ? v === (sg.pause ?? 0.3) : k === "voice" ? v === (sg.voice?.id || "") : false;
+    if (same) delete e[k]; else e[k] = v; if (Object.keys(e).length) st.edits[i] = e; else delete st.edits[i];
+    const n = Object.keys(st.edits).length; const go = q("#dub-lines-go"); if (go) go.disabled = !n; const lbl = go?.previousElementSibling; if (lbl) lbl.textContent = n ? `${n} line बदली` : "कोई बदलाव नहीं"; };
+  $$("[data-dltext]", box).forEach((el) => (el.onchange = () => edit(el.dataset.dltext, "text", el.value.trim())));
+  $$("[data-dlpitch]", box).forEach((el) => (el.onchange = () => edit(el.dataset.dlpitch, "pitch", +el.value)));
+  $$("[data-dlpause]", box).forEach((el) => (el.onchange = () => edit(el.dataset.dlpause, "pause", +el.value)));
+  $$("[data-dlvoice]", box).forEach((el) => (el.onchange = () => edit(el.dataset.dlvoice, "voice", el.value)));
+  $$("[data-dlredo]", box).forEach((el) => (el.onclick = () => { const i = el.dataset.dlredo; const e = st.edits[i] || {}; if (e.redo) delete e.redo; else e.redo = true; if (Object.keys(e).length) st.edits[i] = e; else delete st.edits[i]; el.classList.toggle("primary", !!e.redo); el.classList.toggle("quiet", !e.redo);
+    const n = Object.keys(st.edits).length; const go = q("#dub-lines-go"); if (go) go.disabled = !n; }));
+  let au = null; const a = tracks.find((x) => x.id === st.linesFor);
+  $$("[data-dlplay]", box).forEach((el) => (el.onclick = () => { const sg = seg(el.dataset.dlplay); if (!sg || !a) return; if (au) au.pause(); au = new Audio(a.url); au.currentTime = sg.start; au.play().catch((e) => toast(e.message));
+    const stopAt = sg.end + 0.05; au.ontimeupdate = () => { if (au.currentTime >= stopAt) au.pause(); }; }));
+  $$("[data-dlab]", box).forEach((el) => (el.onclick = async () => { const sg = seg(el.dataset.dlab); if (!sg || !a) return; el.disabled = true; el.textContent = "…";
+    try { const secs = Math.max(3, Math.min(20, sg.end - sg.start + 0.3)); const [pr, rw] = await Promise.all([true, false].map((raw) => fetch(`/api/projects/${E.pid}/audio-preview`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + E.ctx.S.token }, body: JSON.stringify({ t: sg.start, seconds: secs, raw, src: "dub:" + a.id }) }).then((r) => { if (!r.ok) throw new Error("preview नहीं बना"); return r.blob(); })));
+      if (au) au.pause(); let isRaw = true; au = new Audio(URL.createObjectURL(pr)); au.play(); el.textContent = "A ↔ B"; el.disabled = false;
+      el.onclick = () => { const t = au.currentTime; au.pause(); isRaw = !isRaw; au = new Audio(URL.createObjectURL(isRaw ? pr : rw)); au.currentTime = t; au.play(); el.textContent = isRaw ? "A (असली)" : "B (processed)"; };
+    } catch (e) { toast(e.message); el.textContent = "A/B"; el.disabled = false; } }));
+  const go = q("#dub-lines-go"); if (go) go.onclick = async () => { if (!a) return; go.disabled = true; go.textContent = "भेज रहे…";
+    const edits = Object.entries(st.edits).map(([i, e]) => ({ i: +i, ...e }));
+    try { await flush(); const r = await api("POST", `/projects/${E.pid}/dub/${a.id}/lines`, { edits }); E.p.jobs = [{ ...r.job, status: "queued", created_at: new Date().toISOString() }, ...(E.p.jobs || [])]; toast(`${r.changed} line फिर बन रही है — बाकी cache से`); st.edits = {}; E.ctx.load().catch(() => {}); }
+    catch (e) { toast(e.message); } renderPanel(); };
+}
+// Audio tab: music filters (mood / genre / BPM / length / commercial / ★) — tags come from engine/musictag (guessed, editable)
+function musicFilterHtml(MF, fx) {
+  const { esc } = E.ctx; const V = E.musicVocab || { moods: [], genres: [] };
+  const lib = (E.lib || []).filter((x) => x.kind === "music"); const un = lib.filter((x) => !x.meta?.analysed).length;
+  const mood = fx.music?.mood || E.rs.theme_music_mood || "";
+  return `<div class="box" id="mfilt"><div class="row between"><b>🎵 Filter</b><span class="small muted">${un ? `${un} गाने अभी tag नहीं हुए…` : "tags अनुमानित हैं — बदल सकते हैं"}</span></div>
+    <div class="irow"><select data-mf="mood" title="mood"><option value="">mood: सब</option>${V.moods.map((m) => `<option value="${m}" ${MF.mood === m ? "selected" : ""}>${m}</option>`).join("")}</select>
+      <select data-mf="genre" title="genre"><option value="">genre: सब</option>${V.genres.map((m) => `<option value="${m}" ${MF.genre === m ? "selected" : ""}>${m}</option>`).join("")}</select>
+      <select data-mf="bpm" title="BPM"><option value="">BPM: सब</option>${[["0-85", "धीमा <85"], ["85-115", "मध्यम 85–115"], ["115-999", "तेज़ >115"]].map(([v, l]) => `<option value="${v}" ${(MF.bpmMin || MF.bpmMax) && `${MF.bpmMin}-${MF.bpmMax || 999}` === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <select data-mf="dur" title="लंबाई"><option value="0">लंबाई: सब</option>${[[35, "≤30 s"], [65, "≤60 s"], [185, "≤3 min"]].map(([v, l]) => `<option value="${v}" ${MF.dur === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="irow"><label class="chk small"><input type="checkbox" data-mf="comm" ${MF.comm ? "checked" : ""}> सिर्फ़ commercial-safe</label><label class="chk small"><input type="checkbox" data-mf="fav" ${MF.fav ? "checked" : ""}> ★ पसंदीदा</label>
+      ${mood ? `<button class="btn small quiet" id="mf-theme" title="theme / music mood: ${esc(mood)}">theme के mood से (${esc(mood)})</button>` : ""}${MF.mood || MF.genre || MF.bpmMin || MF.bpmMax || MF.dur || MF.comm || MF.fav ? `<button class="btn small quiet" id="mf-clear">✕ साफ़</button>` : ""}</div></div>`;
+}
+function musicFilterBind(panel) {
+  const box = $("#mfilt", panel); if (!box) return; const { api } = E.ctx; const MF = E.libMF;
+  if (!E.musicVocab) api("GET", "/library/music-filters").then((r) => { E.musicVocab = { moods: r.moods, genres: r.genres }; E.musicComm = r.commercial; if (E.libKind === "music") renderPanel(); }).catch(() => {});
+  const lib = (E.lib || []).filter((x) => x.kind === "music");
+  if (lib.some((x) => !x.meta?.analysed) && !E.musicTagging) { E.musicTagging = true;
+    api("POST", "/library/analyze-music", {}).then((r) => { for (const d of r.analysed || []) { const x = libItem(d.id); if (x) x.meta = { ...(x.meta || {}), bpm: d.bpm, moods: d.moods, genres: d.genres, analysed: d.analysed }; } E.musicTagging = false; if (E.libKind === "music") renderPanel(); }).catch(() => { E.musicTagging = false; }); }
+  $$("[data-mf]", box).forEach((el) => (el.onchange = () => { const k = el.dataset.mf;
+    if (k === "bpm") { const [a, b] = (el.value || "0-0").split("-").map(Number); MF.bpmMin = a || 0; MF.bpmMax = b === 999 ? 0 : (b || 0); }
+    else if (k === "dur") MF.dur = +el.value; else if (k === "comm" || k === "fav") MF[k] = el.checked; else MF[k] = el.value; renderPanel(); }));
+  const th = $("#mf-theme", box); if (th) th.onclick = () => { MF.mood = (E.rs.effects.music?.mood || E.rs.theme_music_mood || "").split(/[ ,]/)[0]; renderPanel(); };
+  const cl = $("#mf-clear", box); if (cl) cl.onclick = () => { Object.assign(MF, { mood: "", genre: "", bpmMin: 0, bpmMax: 0, dur: 0, comm: false, fav: false }); renderPanel(); };
+}
+// Theme Analyzer: a reference video (library clip or this project's video) → measured numbers + an editable theme "इस video जैसा"
+function refAnalyzerHtml() {
+  const { esc } = E.ctx; const R = E.refAn || {}; const vids = (E.lib || []).filter((x) => x.kind === "broll");
+  const m = R.res?.measured, g = R.res?.guessed;
+  const row = (k, v, tag) => `<div class="ikv"><span>${k}</span><b>${v ?? "—"}</b><span class="tag ${tag === "measured" ? "manual" : "filler"}" title="${tag === "measured" ? "file से मापा" : "अनुमान"}">${tag === "measured" ? "मापा" : "अनुमान"}</span></div>`;
+  return `<div class="box" id="refan"><div class="row between"><b>🔍 Theme Analyzer</b><span class="small muted">reference video → उसके जैसी settings</span></div>
+    <p class="small muted">सिर्फ़ numbers लिए जाते हैं (cut की रफ़्तार, रंग, motion, music का tempo) — video का कुछ copy नहीं होता। Captions/text style नहीं पढ़ी जाती (OCR नहीं है)।</p>
+    <div class="irow"><select id="refan-src" style="flex:1"><option value="">इस project की video</option>${vids.map((v) => `<option value="${v.id}" ${R.src === v.id ? "selected" : ""}>library: ${esc(v.name)}</option>`).join("")}</select>
+      <button class="btn small primary" id="refan-go" ${R.busy || !E.canEdit ? "disabled" : ""}>${R.busy ? "देख रहे…" : "जाँचें"}</button></div>
+    ${m ? `<div style="margin-top:.4rem">${row("cuts / minute", m.cuts_per_minute, "measured")}${row("औसत shot", m.avg_shot + " s", "measured")}${row("motion", Math.round((m.motion || 0) * 100) + "%", "measured")}
+      ${m.picture?.saturation != null ? row("रंग (sat / warmth)", `${Math.round(m.picture.saturation * 100)}% / ${(m.picture.warmth >= 0 ? "+" : "") + m.picture.warmth}`, "measured") : ""}
+      ${m.music ? row("music", `${Math.round(m.music.bpm || 0)} BPM · energy ${Math.round((m.music.energy || 0) * 100)}%`, "measured") : row("music", "audio नहीं", "measured")}
+      ${row("pace", g.pace, "guessed")}${row("look", g.grade_preset || "neutral", "guessed")}${row("music mood", g.music_mood || "—", "guessed")}${row("effects", g.effects_level, "guessed")}${row("transition", g.transition, "guessed")}
+      <div class="irow" style="margin-top:.4rem"><input id="refan-name" value="${esc(R.name || "इस video जैसा")}" style="flex:1"><button class="btn small primary" id="refan-save" ${E.canEdit ? "" : "disabled"}>theme की तरह save</button><button class="btn small" id="refan-apply" ${E.canEdit ? "" : "disabled"}>अभी लगाएँ</button></div>
+      <p class="small muted">save के बाद 🎨 Theme में मिलेगा — वहाँ हर हिस्सा बदल सकते हैं।</p></div>` : R.err ? `<p class="small" style="color:var(--rose)">${esc(R.err)}</p>` : ""}</div>`;
+}
+function refAnalyzerBind(panel) {
+  const box = $("#refan", panel); if (!box) return; const { api, toast } = E.ctx; const R = (E.refAn = E.refAn || {});
+  const src = $("#refan-src", box); if (src) src.onchange = () => { R.src = src.value; };
+  const go = $("#refan-go", box); if (go) go.onclick = async () => { R.busy = true; R.err = ""; renderPanel();
+    try { R.res = await api("POST", `/projects/${E.pid}/analyze-ref`, R.src ? { library_id: R.src } : {}); } catch (e) { R.err = e.message; R.res = null; }
+    R.busy = false; renderPanel(); };
+  const sv = $("#refan-save", box); if (sv) sv.onclick = async () => { const name = $("#refan-name", box).value.trim() || "इस video जैसा"; R.name = name;
+    try { const r = await api("POST", "/themes", { name, theme: R.res.theme }); toast(`theme «${name}» save हुआ — 🎨 Theme में देखें`); E.themes = null; if (r.theme) R.saved = r.theme.id; } catch (e) { toast(e.message); } };
+  const ap = $("#refan-apply", box); if (ap) ap.onclick = async () => { ap.disabled = true;
+    try { const name = $("#refan-name", box).value.trim() || "इस video जैसा"; const r = await api("POST", "/themes", { name, theme: R.res.theme }); const tid = r.theme?.id; if (!tid) throw new Error("theme save नहीं हुआ");
+      await flush(); await api("POST", `/projects/${E.pid}/theme`, { id: tid }); toast("theme लगा — settings बदल गईं"); await E.ctx.load(); E.ctx.render(); }
+    catch (e) { toast(e.message); ap.disabled = false; } };
 }
 function showHooks() {
   const box = $("#hk-body", E.root); const h = E.hk; if (!box || !h) return; const { esc } = E.ctx; const col = h.score >= 75 ? "#46a758" : h.score >= 50 ? "#f2b33d" : "#e5484d";

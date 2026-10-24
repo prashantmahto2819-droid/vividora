@@ -214,6 +214,12 @@ async def audio_preview(request: Request, user: dict):
     voice = {"preset": "off"} if raw else (eff.get("voice") or {})
     src = None if voice.get("denoise") in ("light", "off") else service.asset_of(p["id"], "audio_clean")
     src = src or service.asset_of(p["id"], "raw")
+    if str(data.get("src") or "").startswith("dub:"):
+        # A/B of an AI voice line: the dub track itself (its timing is the output timeline)
+        a = db.get("assets", str(data["src"])[4:])
+        if not a or a["project_id"] != p["id"] or a["kind"] != "dub":
+            raise ApiError(404, "voice track नहीं मिला")
+        src = a
     if not src:
         raise ApiError(400, "आवाज़ नहीं मिली")
 
