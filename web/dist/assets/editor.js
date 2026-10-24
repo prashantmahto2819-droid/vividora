@@ -1186,10 +1186,10 @@ function renderPanel() {
         <input type="checkbox" ${c.enabled !== false ? "checked" : ""} ${dis}><span class="tag ${c.reason}">${{ silence: "चुप्पी", filler: "अं-आं", retake: "retake", manual: "आपका" }[c.reason] || c.reason}</span><span class="grow small">${esc(c.text || "")}</span><button class="ibtn mbtn ${morphOn(c) ? "on" : ""}" data-cmorph="${c.id}" title="🌗 Morph cut — इस jump cut को smooth करें" ${dis}>🌗</button><span class="small muted">${fmt(c.start)}</span></li>`).join("")}</ul>
       <p class="small muted">अपना कट: वीडियो में I दबाएँ, फिर O, फिर X (या “हटाएँ”)।</p>`;
   } else if (t === "captions" && E.capMode === "text") {
-    h = `<div class="seg capmode"><button data-capmode="style">💬 Captions</button><button data-capmode="text" class="on">✂ Text से edit</button></div>${PRO.textDocHtml(dis)}`;
+    h = `<div class="seg capmode"><button data-capmode="style">💬 Captions</button><button data-capmode="text" class="on">✂ Text से edit</button></div>${noTranscriptBox()}${PRO.textDocHtml(dis)}`;
   } else if (t === "captions") {
     const ov = E.rs.captions;
-    h = `<div class="seg capmode"><button data-capmode="style" class="on">💬 Captions</button><button data-capmode="text" title="transcript को document की तरह edit करें — शब्द हटाओ, वीडियो कटे">✂ Text से edit</button></div><div class="ph"><h3>Caption style</h3><label class="chk small"><input type="checkbox" id="burn" ${E.rs.burn_captions !== false ? "checked" : ""} ${dis}> वीडियो में जलाएँ</label></div>
+    h = `<div class="seg capmode"><button data-capmode="style" class="on">💬 Captions</button><button data-capmode="text" title="transcript को document की तरह edit करें — शब्द हटाओ, वीडियो कटे">✂ Text से edit</button></div>${noTranscriptBox()}<div class="ph"><h3>Caption style</h3><label class="chk small"><input type="checkbox" id="burn" ${E.rs.burn_captions !== false ? "checked" : ""} ${dis}> वीडियो में जलाएँ</label></div>
       <div class="styles">${(S.presets?.caption_styles || []).map((cs) => stylePreview(cs, E.rs.caption_style === cs.id)).join("")}</div>
       <h4>अपने हिसाब से</h4>
       <div class="irow">${field("आकार", `<input type="range" id="cap-size" min="0.6" max="1.8" step="0.05" value="${ov.size_scale ?? 1}" ${dis}>`)}${field("जगह", `<select id="cap-pos" ${dis}><option value="">style जैसी</option>${["bottom", "center", "top"].map((p) => `<option value="${p}" ${ov.position === p ? "selected" : ""}>${{ bottom: "नीचे", center: "बीच", top: "ऊपर" }[p]}</option>`).join("")}</select>`)}</div>
@@ -1445,6 +1445,7 @@ function bindPanel() {
     const strip = (w) => w.replace(/[।॥,.!?;:"'“”‘’()\[\]…-]/g, "").toLowerCase(); let n = 0;
     for (const seg of E.tr.segments) { for (const w of seg.words || []) if (strip(w.w) === strip(f)) { w.w = w.w.replace(new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), r); if (strip(w.w) !== strip(r)) w.w = r; n++; } seg.text = (seg.words || []).map((w) => w.w).join(" "); }
     syncWords(); if (n) { E.transcriptDirty = true; touch(); renderPanel(); renderOverlay(); } toast(n ? `${n} जगह बदला` : "नहीं मिला"); });
+  on("#tr-later", "onclick", async () => { try { await flush(); await E.ctx.api("POST", `/projects/${E.pid}/retranscribe`, { later: true }); toast("transcript पीछे बन रहा है — editing जारी रखें"); E.ctx.load().then(() => E && E.ctx.render()); } catch (e) { toast(e.message || "नहीं हुआ"); } });
   on("#re-asr", "onclick", async () => { if (!confirm("transcript दोबारा बनेगा और कट फिर से ढूँढे जाएँगे (आपकी editing settings रहेंगी)। आगे बढ़ें?")) return; try { await flush(); await E.ctx.api("POST", `/projects/${E.pid}/retranscribe`); E.ctx.load().then(() => E && E.ctx.render()); toast("transcript दोबारा बन रहा है — कुछ मिनट"); } catch (e) { toast(e.message || "नहीं हुआ"); } });
   on("#hook-edit", "onclick", () => { if (!E.rs.hook.text) { E.rs.hook.text = "अपनी heading लिखें"; touch(); } seek(0); select({ type: "hook", id: "h" }); setTimeout(() => { const t = $('#inspector [data-k="text"]', E.root); if (t) { t.focus(); t.select(); } }, 40); });
   // text
@@ -2268,5 +2269,12 @@ function bindPublishForm(m) {
     if (conn?.platform === "youtube") { body.ai_content = !!f.synth; body.playlist_id = (f.pl || "").trim(); if (f.fc !== undefined) body.first_comment = f.fc; }
     if (!confirm(`${PLAT[conn?.platform]} · ${conn?.name} पर upload करें?\n"${body.title}"`)) return;
     try { await api("POST", `/projects/${E.pid}/publications`, body); toast("upload queue में"); E.pubFor = null; await loadPublishData(); } catch (e) { toast(e.message); } };
+}
+function noTranscriptBox() {
+  // "Transcript छोड़ें" project: say plainly what is missing and offer the one-click later transcript
+  if (!E.p.transcript?.skipped) return "";
+  const busy = (E.p.jobs || []).some((j) => j.kind === "transcribe" && ["queued", "running"].includes(j.status));
+  return `<div class="box" id="no-tr"><b>📝 transcript नहीं है</b><p class="small muted">upload पर “Transcript छोड़ें” चुना था — कट चुप्पी और scene से बने हैं। captions, text से edit, Shorts और AI title/description transcript के बाद ही बनेंगे; आपके कट/overlay/music वैसे ही रहेंगे।</p>
+    <button class="btn small primary" id="tr-later" ${busy || !E.canEdit ? "disabled" : ""}>${busy ? "⏳ transcript बन रहा है…" : "🎙 Transcript अब बनाएँ"}</button></div>`;
 }
 function renderAll() { renderTop(); renderPanel(); renderInspector(); renderTimeline(); layoutFrame(); renderOverlay(); renderPlayhead(); }

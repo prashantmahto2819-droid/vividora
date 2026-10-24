@@ -206,7 +206,7 @@ function pcard(p, opts = {}) {
       <span class="pc-status ${cls}">${label}</span>${p.meta?.duration ? `<span class="pc-dur">${fmtDur(p.meta.duration)}</span>` : ""}${p.settings?.autopilot ? `<span class="pc-ap">✈ Autopilot</span>` : ""}
       ${WORKING.includes(p.status) ? `<div class="pc-prog"><i class="indet"></i></div>` : ""}
       ${canEdit ? `<label class="pc-check" title="चुनें"><input type="checkbox" data-sel="${p.id}" ${S.sel.has(p.id) ? "checked" : ""}></label>` : ""}
-      ${opts.hover !== false ? `<div class="pc-hover"><a class="btn small" href="#/projects/${p.id}">खोलें</a>${S.user.role !== "viewer" ? `<a class="btn small quiet" href="#/thumbs/${p.id}">Thumbnail</a>` : ""}</div>` : ""}</div>
+      ${opts.hover !== false ? `<div class="pc-hover"><a class="btn small" href="#/projects/${p.id}">खोलें</a>${S.user.role !== "viewer" ? `<a class="btn small quiet" href="#/thumbs/${p.id}">Thumbnail</a>` : ""}${canEdit && p.meta?.transcript_skipped && !WORKING.includes(p.status) ? `<button class="btn small quiet" data-trlater="${p.id}" title="transcript छोड़ा था — अब बनाएँ (कट/music वैसे ही रहेंगे)">🎙 Transcript</button>` : ""}</div>` : ""}</div>
     <div class="pc-body"><div class="pc-title"><a href="${href}" title="${esc(p.title)}">${esc(p.title)}</a>${opts.menu !== false ? `<button class="ibtn pc-more" data-menu="${p.id}" aria-label="और विकल्प">${ic("dots")}</button>` : ""}</div>
       <span class="small muted">${ch ? `<i class="dot" style="background:${esc(ch.color || "#F2B33D")}"></i>${esc(ch.name)} · ` : ""}${relTime(p.updated_at)}</span></div></div>`;
 }
@@ -268,6 +268,8 @@ async function projAction(act, p) {
 }
 function bindCards(root = document) {
   $$("[data-menu]", root).forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openMenu(b.dataset.menu, b); }));
+  $$("[data-trlater]", root).forEach((b) => (b.onclick = async (e) => { e.preventDefault(); e.stopPropagation(); b.disabled = true;
+    try { await api("POST", `/projects/${b.dataset.trlater}/retranscribe`, { later: true }); toast("transcript पीछे बन रहा है — कट/music वैसे ही रहेंगे"); } catch (err) { toast(err.message); b.disabled = false; } }));
   $$("[data-sel]", root).forEach((cb) => (cb.onchange = () => { cb.checked ? S.sel.add(cb.dataset.sel) : S.sel.delete(cb.dataset.sel); cb.closest("[data-pid]")?.classList.toggle("picked", cb.checked); updateBulk(); }));
 }
 function updateBulk() {
@@ -435,6 +437,11 @@ function newView() {
       <label class="chk" style="margin:.5rem 0;display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="mo-auto" checked> <span><b>✨ Auto beat-edit तुरंत शुरू करें</b> — beat पर cut, effects, color, auto-crop। बाद में हर cut बदल सकते हैं।</span></label>
     </div>
     <label class="chk" id="ap-row" style="margin:.5rem 0;display:flex;gap:.5rem;align-items:center"><input type="checkbox" name="autopilot" checked> <span><b>✈ Autopilot</b> — upload के बाद पूरा edit अपने-आप होगा (cuts, captions, zoom, music, Shorts, titles)। आपको बस देखकर मंज़ूरी देनी है।</span></label>
+    <div class="field" id="tr-row"><label>Transcript (बोले शब्द)</label>
+      <div class="chips" style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <label class="chip on" style="flex:1;min-width:240px"><input type="radio" name="transcript_mode" value="make" checked> <b>Transcript बनाएँ</b><br><span class="small muted">captions, text से edit, AI title/description, Shorts — सब इसी से बनते हैं</span></label>
+        <label class="chip" style="flex:1;min-width:240px"><input type="radio" name="transcript_mode" value="skip"> <b>Transcript छोड़ें</b><br><span class="small muted">सिर्फ़ visual/beat edit — चुप्पी और scene से कट, बिना captions। बाद में एक click से transcript बन सकता है</span></label>
+      </div></div>
     <div id="up-progress"></div>
     <div class="actionbar"><a class="btn quiet" href="#/">रद्द करें</a><button class="btn primary" id="start" disabled>Upload शुरू करें</button></div></form>`;
 }
@@ -448,8 +455,9 @@ function bindNew() {
   function pick() { if (!chosen) return; $("#fname").innerHTML = chosenAll.length > 1 ? chosenAll.map((f, i) => `${i + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : `${esc(chosen.name)} · ${gb(chosen.size)}`; $("#start").disabled = false; }
   let ptype = "talking_head";
   const moBox = $("#mo-new"), moFiles = []; let moSong = null;
+  document.querySelectorAll("input[name=transcript_mode]").forEach((i) => (i.onchange = () => document.querySelectorAll("#tr-row .chip").forEach((c) => c.classList.toggle("on", c.contains(i) && i.checked))));
   document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage";
-    drop.style.display = mont ? "none" : ""; moBox.hidden = !mont; $("#ap-row").style.display = mont ? "none" : "flex"; $("#start").textContent = mont ? "Montage बनाएँ" : "Upload शुरू करें"; $("#start").disabled = mont ? false : !chosen;
+    drop.style.display = mont ? "none" : ""; moBox.hidden = !mont; $("#ap-row").style.display = mont ? "none" : "flex"; $("#tr-row").style.display = mont ? "none" : ""; $("#start").textContent = mont ? "Montage बनाएँ" : "Upload शुरू करें"; $("#start").disabled = mont ? false : !chosen;
     if (mont && !moBox.dataset.lib) { moBox.dataset.lib = "1"; api("GET", "/library").then((lib) => { $("#mo-libsong").innerHTML += lib.filter((x) => x.kind === "music").map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join(""); }).catch(() => {}); } }));
   const moDrop = $("#mo-drop"), moIn = $("#mo-files");
   const moShow = () => { $("#mo-fnames").innerHTML = moFiles.length ? moFiles.map((f, n) => `${n + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : ""; };
@@ -482,7 +490,7 @@ function bindNew() {
     if (!chosen) return;
     $("#start").disabled = true;
     try {
-      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, channel_id: S.channel });
+      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, skip_transcript: f.transcript_mode.value === "skip", channel_id: S.channel });
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
       if (chosenAll.length > 1) {
         for (let i = 0; i < chosenAll.length; i++) { const f = chosenAll[i]; await uploadFile(p.id, f, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">Clip ${i + 1}/${chosenAll.length} — ${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; }, { clip: true, start: i === chosenAll.length - 1 }); }

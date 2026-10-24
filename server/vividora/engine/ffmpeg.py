@@ -63,6 +63,21 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
     proc = subprocess.Popen(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     last = -1.0
     assert proc.stdout is not None
+    # stderr is drained on its own thread: a chatty run (timestamp warnings on a concatenated file) would
+    # otherwise fill the 64 KB pipe while we read progress from stdout and ffmpeg would block forever
+    import threading
+    err_buf: list[str] = []
+
+    def _drain() -> None:
+        try:
+            for ln in proc.stderr:  # type: ignore[union-attr]
+                err_buf.append(ln)
+                if len(err_buf) > 400:
+                    del err_buf[:200]
+        except (ValueError, OSError):
+            pass
+    th = threading.Thread(target=_drain, daemon=True)
+    th.start()
     for line in proc.stdout:
         if on_progress and duration and line.startswith("out_time_ms="):
             try:
@@ -73,9 +88,10 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
             if frac - last >= 0.02:
                 last = frac
                 on_progress(frac, label)
-    err = proc.stderr.read() if proc.stderr else ""
-    if proc.wait() != 0:
-        tail = "\n".join(err.strip().splitlines()[-15:])
+    rc = proc.wait()
+    th.join(timeout=5)
+    if rc != 0:
+        tail = "\n".join("".join(err_buf).strip().splitlines()[-15:])
         raise FFmpegError(f"{label} failed:\n{tail}")
 
 

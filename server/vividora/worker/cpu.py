@@ -228,7 +228,18 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             audio = _fetch(client, assets, "audio_asr", tmp, required=False)
             sil = ffmpeg.silences(audio) if audio else []
             edl = autocut.build_edl(transcript, duration, sil, job["payload"].get("options"))
-            return {"edl": edl}
+            if not job["payload"].get("visual"):
+                return {"edl": edl}
+            # transcript-free cut: scene changes (on the 720p proxy) become markers; long dead air is cut by the silences above
+            from ..engine import scenes as scn
+            proxy = _fetch(client, assets, "proxy", tmp, required=False) or _fetch(client, assets, "raw", tmp, required=False)
+            found = []
+            if proxy:
+                try:
+                    found = scn.detect(proxy, threshold=float(job["payload"].get("scene_threshold") or 0.35), min_gap=1.0)
+                except Exception as ex:  # noqa: BLE001 — markers are a help, never a reason to fail the cut
+                    log.warning("scene detect failed: %s", ex)
+            return {"edl": edl, "scenes": found}
 
         if kind == "render":
             p = job["payload"]

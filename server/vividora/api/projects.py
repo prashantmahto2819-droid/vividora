@@ -77,7 +77,9 @@ async def create_project(request: Request, user: dict):
          "meta": {}, "transcript": None, "edl": None,
          "settings": {"render": {**brand_render, **(ws_settings.get("render_defaults", {}) or {}), **data.get("render", {})},
                       "autocut": data.get("autocut", {}),
-                      "autopilot": bool(data.get("autopilot", False)) and data.get("kind") != "montage"},
+                      "autopilot": bool(data.get("autopilot", False)) and data.get("kind") != "montage",
+                      # "Transcript छोड़ें": no speech-to-text; cuts come from silence + scenes, captions/AI text later on request
+                      "skip_transcript": bool(data.get("skip_transcript", False)) and data.get("kind") != "montage"},
          "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
     with db.tx() as c:
         db.insert(c, "projects", p)
@@ -392,6 +394,14 @@ async def retranscribe(request: Request, user: dict):
         for j in busy:
             db.update(c, "jobs", j["id"], {"status": "cancelled", "finished_at": db.now(),
                                            "message": "नया transcript माँगा गया"})
+        if data.get("later") or (p.get("transcript") or {}).get("skipped"):
+            # "Transcript बाद में बनाएँ": an independent job — the project keeps its status, cuts, overlays and music;
+            # only the words are filled in (no autocut / autopilot afterwards)
+            payload.update(later=True, retranscribe=False)
+            job = queue.enqueue(c, p["id"], "transcribe", payload)
+            db.update(c, "projects", p["id"], {"status_note": "transcript पीछे बन रहा है — editing जारी रखें", "updated_at": db.now()})
+            service.log(c, user["workspace_id"], "project.transcribe_later", user_id=user["id"], project_id=p["id"])
+            return ok({"job": job, "later": True})
         service.set_status(c, p["id"], "transcribing", "transcript दोबारा बन रहा है")
         job = queue.enqueue(c, p["id"], "transcribe", payload)
         service.log(c, user["workspace_id"], "project.retranscribe", user_id=user["id"], project_id=p["id"])
