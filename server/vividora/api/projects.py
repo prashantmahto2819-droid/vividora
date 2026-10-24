@@ -79,7 +79,9 @@ async def create_project(request: Request, user: dict):
                       "autocut": data.get("autocut", {}),
                       "autopilot": bool(data.get("autopilot", False)) and data.get("kind") != "montage",
                       # "Transcript छोड़ें": no speech-to-text; cuts come from silence + scenes, captions/AI text later on request
-                      "skip_transcript": bool(data.get("skip_transcript", False)) and data.get("kind") != "montage"},
+                      "skip_transcript": bool(data.get("skip_transcript", False)) and data.get("kind") != "montage",
+                      # one-click theme (presets/themes or a saved one) — autopilot applies it at the plan stage
+                      "theme_id": str(data.get("theme_id") or "")[:40]},
          "approved_by": None, "approved_at": None, "created_at": db.now(), "updated_at": db.now()}
     with db.tx() as c:
         db.insert(c, "projects", p)

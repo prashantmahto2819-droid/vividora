@@ -436,7 +436,8 @@ function newView() {
         <div class="field" style="flex:1;min-width:220px"><label>Song / music</label><label class="btn small" style="display:inline-flex">गाना चुनें (mp3, m4a, या reel का mp4)<input type="file" id="mo-song" accept="audio/*,video/mp4,.m4a,.mp3,.wav" hidden></label> <span id="mo-songname" class="small muted"></span>
           <select id="mo-libsong" style="margin-top:.4rem"><option value="">…या library का music</option></select></div>
         <div class="field"><label>Format</label><select id="mo-preset"><option value="ig-reel">9:16 Reel / Short</option><option value="yt-short">9:16 YouTube Short</option><option value="yt-long">16:9 YouTube</option></select></div>
-        <div class="field"><label>लंबाई</label><select id="mo-len">${[10, 15, 20, 30, 45, 60].map((n) => `<option value="${n}" ${n === 30 ? "selected" : ""}>${n}s</option>`).join("")}</select></div>
+        <div class="field"><label>लंबाई</label><select id="mo-len">${[[15, "15s"], [30, "30s"], [60, "60s"], [0, "पूरा song"]].map(([n, l]) => `<option value="${n}" ${n === 30 ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+        <div class="field"><label>🎨 Theme</label><select id="mo-theme"><option value="">Auto (song के हिसाब से)</option></select></div>
       </div>
       <label class="chk" style="margin:.5rem 0;display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="mo-auto" checked> <span><b>✨ Auto beat-edit तुरंत शुरू करें</b> — beat पर cut, effects, color, auto-crop। बाद में हर cut बदल सकते हैं।</span></label>
     </div>
@@ -446,6 +447,7 @@ function newView() {
         <label class="chip on" style="flex:1;min-width:240px"><input type="radio" name="transcript_mode" value="make" checked> <b>Transcript बनाएँ</b><br><span class="small muted">captions, text से edit, AI title/description, Shorts — सब इसी से बनते हैं</span></label>
         <label class="chip" style="flex:1;min-width:240px"><input type="radio" name="transcript_mode" value="skip"> <b>Transcript छोड़ें</b><br><span class="small muted">सिर्फ़ visual/beat edit — चुप्पी और scene से कट, बिना captions। बाद में एक click से transcript बन सकता है</span></label>
       </div></div>
+    <div class="field" id="theme-row"><label>🎨 Theme (optional) <span class="small muted">— रंग, captions, text, transitions, effects, music का mood एक साथ; autopilot इसे लगाएगा</span></label><select name="theme_id" id="up-theme"><option value="">— कोई theme नहीं (channel defaults) —</option></select></div>
     <div id="up-progress"></div>
     <div class="actionbar"><a class="btn quiet" href="#/">रद्द करें</a><button class="btn primary" id="start" disabled>Upload शुरू करें</button></div></form>`;
 }
@@ -459,6 +461,7 @@ function bindNew() {
   function pick() { if (!chosen) return; $("#fname").innerHTML = chosenAll.length > 1 ? chosenAll.map((f, i) => `${i + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : `${esc(chosen.name)} · ${gb(chosen.size)}`; $("#start").disabled = false; }
   let ptype = "talking_head";
   const moBox = $("#mo-new"), moFiles = []; let moSong = null;
+  api("GET", "/presets/themes").then((r) => { const opts = (r.themes || []).map((t) => `<option value="${t.id}">${t.emoji || ""} ${esc(t.label)}${t.saved ? " ⭐" : ""}</option>`).join(""); for (const id of ["#up-theme", "#mo-theme"]) { const el = $(id); if (el) el.innerHTML += opts; } }).catch(() => {});
   document.querySelectorAll("input[name=transcript_mode]").forEach((i) => (i.onchange = () => document.querySelectorAll("#tr-row .chip").forEach((c) => c.classList.toggle("on", c.contains(i) && i.checked))));
   document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage";
     drop.style.display = mont ? "none" : ""; moBox.hidden = !mont; $("#ap-row").style.display = mont ? "none" : "flex"; $("#tr-row").style.display = mont ? "none" : ""; $("#start").textContent = mont ? "Montage बनाएँ" : "Upload शुरू करें"; $("#start").disabled = mont ? false : !chosen;
@@ -486,7 +489,7 @@ function bindNew() {
           const d = await libPut(kind, fl, (pc) => { prog.innerHTML = `<p class="small muted">Clip ${n + 1}/${moFiles.length} upload — ${pc}%</p><div class="progress"><i style="width:${pc}%"></i></div>`; }); ids.push({ id: d.id, duration: d.meta?.duration }); }
         let music = libSong;
         if (moSong) { const d = await libPut("music", moSong, (pc) => { prog.innerHTML = `<p class="small muted">गाना upload — ${pc}%</p><div class="progress"><i style="width:${pc}%"></i></div>`; }); music = d.id; }
-        if (auto) { await api("POST", `/projects/${p.id}/montage`, { mode: "auto", replan: true, auto_render: true, plan: null, clips: ids, music, preset: $("#mo-preset").value, max_seconds: +$("#mo-len").value, look: "auto", pace: "auto", effects_level: "auto", reframe: "smart", slowmo: true, texts: [] }); toast("Clips देखे जा रहे हैं → beat plan → video ⏳"); }
+        if (auto) { await api("POST", `/projects/${p.id}/montage`, { mode: "auto", replan: true, auto_render: true, plan: null, clips: ids, music, preset: $("#mo-preset").value, max_seconds: +$("#mo-len").value, look: "auto", pace: "auto", effects_level: "auto", reframe: "smart", slowmo: true, texts: [], theme: $("#mo-theme").value || "", intro: !!$("#mo-theme").value, outro: false }); toast("Clips देखे जा रहे हैं → beat plan → video ⏳"); }
         go("/projects/" + p.id);
       } catch (err) { prog.innerHTML = `<div class="note err">${esc(err.message)}</div>`; $("#start").disabled = false; }
       return;
@@ -494,7 +497,7 @@ function bindNew() {
     if (!chosen) return;
     $("#start").disabled = true;
     try {
-      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, skip_transcript: f.transcript_mode.value === "skip", channel_id: S.channel });
+      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, skip_transcript: f.transcript_mode.value === "skip", theme_id: $("#up-theme")?.value || "", channel_id: S.channel });
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
       if (chosenAll.length > 1) {
         for (let i = 0; i < chosenAll.length; i++) { const f = chosenAll[i]; await uploadFile(p.id, f, (done, total) => { $("#up-progress").innerHTML = `<p class="small muted">Clip ${i + 1}/${chosenAll.length} — ${gb(done)} / ${gb(total)}</p><div class="progress"><i style="width:${(done / total * 100).toFixed(1)}%"></i></div>`; }, { clip: true, start: i === chosenAll.length - 1 }); }

@@ -1,0 +1,56 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.5
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [
+  "soft_glow"
+ ],
+ "id": "romantic",
+ "label": "Romantic",
+ "emoji": "💞",
+ "hint": "warm gold glow, soft caption, हल्की चमक",
+ "swatch": [
+  "#E8A0BF",
+  "#F6D6A8"
+ ],
+ "caption_style": "story",
+ "text_style": "gold",
+ "look": "none",
+ "grade_preset": "wedding_gold",
+ "transition": "dip",
+ "transition_duration": 0.5,
+ "stack": [
+  {
+   "id": "tr_light_leak",
+   "params": {
+    "amount": 0.3
+   }
+  }
+ ],
+ "music": {
+  "mood": "story",
+  "volume": 0.17,
+  "duck_amount": 0.5
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.4,
+  "look": "grade:wedding_gold",
+  "fx_strong": [
+   "white_fade",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

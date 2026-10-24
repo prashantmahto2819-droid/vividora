@@ -1,0 +1,47 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.6
+ },
+ "voice": "podcast",
+ "slowmo": false,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "business",
+ "label": "Business ad",
+ "emoji": "💼",
+ "hint": "साफ़ bright look, white-box text, zoom कम, clean transitions",
+ "swatch": [
+  "#1E63D6",
+  "#F3F6FB"
+ ],
+ "caption_style": "boxed",
+ "text_style": "white_box",
+ "look": "none",
+ "grade_preset": "clean_commercial",
+ "transition": "whip",
+ "transition_duration": 0.3,
+ "stack": [],
+ "music": {
+  "mood": "upbeat",
+  "volume": 0.12,
+  "duck_amount": 0.65
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "subtle",
+  "min_cut": 0.6,
+  "max_cut": 2.0,
+  "look": "grade:clean_commercial",
+  "fx_strong": [
+   "zoom_punch",
+   "flash"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "cut"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

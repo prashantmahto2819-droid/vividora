@@ -32,6 +32,7 @@ from typing import Any
 
 from . import db, notify, queue
 from .engine import autopilot as ap_eng
+from .engine import themes as themes_eng
 
 log = logging.getLogger("vividora.autopilot")
 FINISH = ("thumbnails", "metadata", "publish_plan")
@@ -149,6 +150,14 @@ def plan_and_render(c, project: dict) -> None:
     try:
         ch_settings, lib = channel_and_library(project, c)
         opts = ap_eng.plan(project, ch_settings, lib)
+        # the theme chosen at upload (or in the editor) colours the whole plan: look, captions, text, music mood…
+        tid = (project.get("settings") or {}).get("theme_id") or ((project.get("settings") or {}).get("render") or {}).get("theme_id")
+        theme = themes_eng.get(str(tid), project["workspace_id"]) if tid else None
+        if theme:
+            opts, applied, skipped_parts = themes_eng.apply(opts, theme, None, has_transcript=not skipped(project), library=lib, seed=pid)
+            note(c, pid, "plan", f"theme «{theme.get('label')}» लगा: {', '.join(applied)}")
+            for s in skipped_parts:
+                warn(c, pid, f"theme: {s}")
         missing = [k for k in ("music", "sticker", "sfx") if not any(x["kind"] == k for x in lib)]
         if missing:
             warn(c, pid, f"library में {', '.join(missing)} की फ़ाइलें नहीं मिलीं — उनके बिना edit (Library tab देखें)")

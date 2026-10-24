@@ -1,0 +1,45 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.5
+ },
+ "voice": "podcast",
+ "slowmo": false,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "documentary",
+ "label": "Documentary",
+ "emoji": "🎥",
+ "hint": "neutral रंग, lower-third जैसा text, बिना effects",
+ "swatch": [
+  "#2F3E46",
+  "#CAD2C5"
+ ],
+ "caption_style": "classic",
+ "text_style": "white_box",
+ "look": "none",
+ "grade_preset": "documentary",
+ "transition": "none",
+ "transition_duration": 0.3,
+ "stack": [],
+ "music": {
+  "mood": "lofi",
+  "volume": 0.1,
+  "duck_amount": 0.7
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "none",
+  "min_cut": 1.2,
+  "max_cut": 3.0,
+  "look": "grade:documentary",
+  "fx_strong": [
+   "cut"
+  ],
+  "fx_soft": [
+   "cut"
+  ],
+  "intro": true,
+  "outro": false
+ }
+}

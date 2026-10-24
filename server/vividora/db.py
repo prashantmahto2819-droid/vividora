@@ -108,6 +108,9 @@ CREATE TABLE IF NOT EXISTS yt_analytics (
 CREATE TABLE IF NOT EXISTS workers (
   name TEXT PRIMARY KEY, kinds TEXT NOT NULL DEFAULT '[]', info TEXT NOT NULL DEFAULT '{}',
   last_seen_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS themes (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, settings TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 """
 
 _lock = threading.Lock()

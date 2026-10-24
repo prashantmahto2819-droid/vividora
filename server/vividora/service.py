@@ -505,13 +505,14 @@ def after_job(c, job: dict, result: dict) -> None:
         db.update(c, "projects", pid, {"settings": {**st, "montage": mo}, "updated_at": db.now()})
         pl = result.get("plan") or {}
         n = len(pl.get("segments") or [])
+        wtxt = (" · " + "; ".join(pl.get("warnings") or [])[:160]) if pl.get("warnings") else ""
         if mo.get("auto_render"):
             project = db.get("projects", pid)
             queue.enqueue(c, pid, "montage", {**{k: v for k, v in mo.items() if k != "auto_render"}, "plan": pl,
                                               **({"voice": job["payload"]["voice"]} if (job.get("payload") or {}).get("voice") else {})})
-            set_status(c, pid, "rendering", f"beat edit बन रहा है · {pl.get('bpm')} BPM · {n} cuts")
+            set_status(c, pid, "rendering", f"beat edit बन रहा है · {pl.get('bpm')} BPM · {n} cuts{wtxt}")
         else:
-            set_status(c, pid, "review_cuts", f"plan तैयार · {pl.get('bpm')} BPM · {n} cuts — देखें/बदलें, फिर render")
+            set_status(c, pid, "review_cuts", f"plan तैयार · {pl.get('bpm')} BPM · {n} cuts — देखें/बदलें, फिर render{wtxt}")
 
     elif kind == "montage":
         for f in result.get("files", []):
@@ -743,15 +744,37 @@ def request_montage(c, project: dict, opts: dict) -> dict:
     preset = opts.get("preset") or "ig-reel"
     if preset not in platforms():
         raise ValueError("unknown preset")
-    payload = {"clips": clips[:60], "music": opts["music"], "texts": [str(t)[:120] for t in (opts.get("texts") or [])][:12],
-               "preset": preset, "look": opts.get("look") or "none", "every": max(1, min(8, int(opts.get("every", 2)))),
-               "max_seconds": max(5.0, min(180.0, float(opts.get("max_seconds", 30)))), "flash": bool(opts.get("flash", True)),
+    # library names ride along (text from clip names, "clip छोड़ी" notes) — only items of this workspace
+    names = {}
+    cn = db.conn()
+    ids = [cl["id"] for cl in clips[:60]]
+    if ids:
+        for r in cn.execute(f"SELECT id, name FROM library WHERE workspace_id = ? AND id IN ({','.join('?' * len(ids))})",
+                            (project["workspace_id"], *ids)).fetchall():
+            names[r[0]] = r[1]
+    clips = [{**cl, "name": names.get(cl["id"], cl.get("name") or "")} for cl in clips[:60]]
+    max_s = float(opts.get("max_seconds", 30) or 0)
+    max_s = 0.0 if max_s <= 0 or str(opts.get("max_seconds")) == "full" else max(5.0, min(600.0, max_s))   # 0 = पूरा song
+    theme = None
+    if opts.get("theme"):
+        from .engine import themes as themes_eng
+        theme = themes_eng.get(str(opts["theme"]), project["workspace_id"])
+    payload = {"clips": clips, "music": opts["music"], "texts": [str(t)[:120] for t in (opts.get("texts") or [])][:40],
+               "preset": preset, "look": opts.get("look") or ("auto" if theme else "none"), "every": max(1, min(8, int(opts.get("every", 2)))),
+               "max_seconds": max_s, "flash": bool(opts.get("flash", True)),
                "watermark": opts.get("watermark") or None, "font": opts.get("font") or "Poppins",
                "text_color": opts.get("text_color") or "#FFFFFF", "text_size": max(0.03, min(0.14, float(opts.get("text_size", 0.07)))),
                "seed": int(opts.get("seed", 7)), "mode": opts.get("mode") or "classic",
                "pace": opts.get("pace") or "auto", "effects_level": opts.get("effects_level") or "auto",
                "reframe": opts.get("reframe") or "smart", "slowmo": bool(opts.get("slowmo", True)),
-               "auto_render": bool(opts.get("auto_render", False))}
+               "auto_render": bool(opts.get("auto_render", False)),
+               # upgrade: theme feel, pinned clips, on-beat words, intro/outro
+               "theme": theme["id"] if theme else "", "theme_opts": themes_eng.montage_opts(theme) if theme else {},
+               "theme_text": bool(opts.get("theme_text", True)),
+               "pins": [str(x) for x in (opts.get("pins") or []) if any(cl["id"] == x for cl in clips)][:20],
+               "text_mode": opts.get("text_mode") if opts.get("text_mode") in ("bars", "beats", "names") else "bars",
+               "intro": bool(opts.get("intro", False)), "outro": bool(opts.get("outro", False)),
+               "intro_text": str(opts.get("intro_text") or "")[:80], "outro_text": str(opts.get("outro_text") or "")[:80]}
     # AI voice-over (Script mode) chosen in the Audio tab → mixed over the montage, music ducked under it
     r_eff = ((project.get("settings", {}).get("render") or {}).get("effects") or {})
     vt = r_eff.get("voice_track")
@@ -795,9 +818,11 @@ def _clean_plan(pl: dict) -> dict:
                      "speed": max(0.25, min(4.0, float(s.get("speed") or 1))), "fx": fx, "keep": bool(s.get("keep", True)),
                      "pulse": [float(x) for x in (s.get("pulse") or [])][:16], "focus": [max(0.0, min(1.0, float(foc[0]))), max(0.0, min(1.0, float(foc[1])))],
                      "energy": float(s.get("energy") or .5), "kind": s.get("kind") or "video", "highlight": bool(s.get("highlight")),
-                     "score": float(s.get("score") or 0), "face": bool(s.get("face"))})
-    return {**{k: pl.get(k) for k in ("bpm", "period", "music_start", "alts", "beats", "bars", "clip_info")}, "segments": segs,
-            "total": round(sum(s["dur"] for s in segs if s["keep"]), 3)}
+                     "score": float(s.get("score") or 0), "face": bool(s.get("face")),
+                     **{k: bool(s.get(k)) for k in ("ramp", "intro", "outro", "pinned") if s.get(k)},
+                     **({"beat": int(s["beat"])} if isinstance(s.get("beat"), (int, float)) else {})})
+    return {**{k: pl.get(k) for k in ("bpm", "period", "music_start", "alts", "beats", "bars", "clip_info", "beat_strength", "beat_energy", "drops", "theme", "full", "warnings")},
+            "segments": segs, "total": round(sum(s["dur"] for s in segs if s["keep"]), 3)}
 
 
 def resolve_effects_local(project: dict, effects: dict, *, audio: bool = False) -> dict:

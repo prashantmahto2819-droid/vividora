@@ -36,9 +36,18 @@ FX_LABELS = {"cut": "सीधा cut", "zoom_punch": "Zoom punch", "flash": "Fl
 
 
 # ------------------------------------------------------------------ music
+ANALYSIS_CAP = 240.0   # seconds of the song that are analysed (beats past this follow the grid)
+
+
 def music(path: Path, max_seconds: float = 30.0) -> dict:
-    y = _decode(path)
+    y = _decode(path, ANALYSIS_CAP)
     dur = len(y) / SR
+    if dur < 2.0:
+        raise ValueError("song में आवाज़ नहीं मिली (या 2 s से छोटा है)")
+    try:
+        full = float(ffmpeg.probe(path).get("duration") or dur)
+    except Exception:  # noqa: BLE001
+        full = dur
     env = onset_envelope(y)
     bpm = tempo(env)
     fps = SR / HOP
@@ -50,7 +59,7 @@ def music(path: Path, max_seconds: float = 30.0) -> dict:
         s = float(env[idx].sum()) if len(idx) else 0.0
         if s > best:
             best, phase = s, ph
-    beats = np.arange(phase / fps, max(dur - 0.05, 0), period)
+    beats = np.arange(phase / fps, max(min(full, dur + 600) - 0.05, 0), period)   # the grid continues past the analysed part
     if len(beats) < 4:
         beats = np.arange(0, max(dur, 4), 0.5)
     # strength (onset at the beat) and loudness (RMS of the beat)
@@ -83,7 +92,7 @@ def music(path: Path, max_seconds: float = 30.0) -> dict:
             v = float(energy[i:i + win].mean()) + (0.15 if any(i <= d < i + win // 3 for d in drops) else 0)
             if v > best_v:
                 best_v, start_i = v, i
-    return {"bpm": round(bpm, 1), "period": period, "duration": round(dur, 2), "beats": [round(float(b), 3) for b in beats],
+    return {"bpm": round(bpm, 1), "period": period, "duration": round(full, 2), "analysed": round(dur, 2), "beats": [round(float(b), 3) for b in beats],
             "strength": [round(float(s), 3) for s in strength], "energy": [round(float(e), 3) for e in energy],
             "bar0": bar0, "drops": drops, "start_i": start_i}
 
@@ -140,7 +149,7 @@ def clip(path: Path, kind: str = "video", fps: float = 4.0, max_seconds: float =
            "-pix_fmt", "gray", "-f", "rawvideo", "-"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     ffmpeg.track(proc)
-    ts, mot, sharp, bright, fxs, fys, faces = [], [], [], [], [], [], []
+    ts, mot, sharp, bright, fxs, fys, faces, thumbs = [], [], [], [], [], [], [], []
     prev = None
     n = 0
     assert proc.stdout is not None
@@ -152,6 +161,7 @@ def clip(path: Path, kind: str = "video", fps: float = 4.0, max_seconds: float =
         fr = np.frombuffer(buf, dtype=np.uint8).reshape(sh, sw)
         f = fr.astype(np.float32)
         ts.append(n / fps)
+        thumbs.append(_thumb(f))
         mot.append(float(np.abs(f - prev.astype(np.float32)).mean() / 255) if prev is not None else 0.0)
         lap = f[1:-1, 1:-1] * 4 - f[:-2, 1:-1] - f[2:, 1:-1] - f[1:-1, :-2] - f[1:-1, 2:]
         sharp.append(float(lap.var()))
@@ -182,9 +192,57 @@ def clip(path: Path, kind: str = "video", fps: float = 4.0, max_seconds: float =
     score[:edge] -= 0.25
     if len(score) > edge:
         score[-edge:] -= 0.25
+    # the clip's own sound: a laugh, a cheer, a bike revving — louder moments are better moments
+    aud = _audio_energy(path, fps, len(ts), min(dur, max_seconds))
+    score += 0.2 * aud
     return {"kind": "video", "duration": round(dur, 2), "w": w, "h": h, "t": [round(x, 2) for x in ts],
             "score": [round(float(x), 3) for x in score], "motion": [round(float(x), 4) for x in mn],
-            "fx": fxs, "fy": fys, "face": faces}
+            "fx": fxs, "fy": fys, "face": faces, "audio": [round(float(x), 3) for x in aud],
+            "thumbs": [t.tolist() for t in thumbs]}
+
+
+def _thumb(f: np.ndarray) -> np.ndarray:
+    """6×6 average-pooled grey thumbnail of a 256-px frame — enough to tell two moments apart."""
+    h, w = f.shape
+    th = np.zeros(36, np.uint8)
+    for j in range(6):
+        for i in range(6):
+            th[j * 6 + i] = int(f[j * h // 6:(j + 1) * h // 6, i * w // 6:(i + 1) * w // 6].mean())
+    return th
+
+
+def _audio_energy(path: Path, fps: float, n: int, seconds: float) -> np.ndarray:
+    """RMS loudness of the clip's own audio per analysis sample, 0..1 (zeros when silent / no audio)."""
+    if n <= 0:
+        return np.zeros(max(n, 0))
+    try:
+        y = _decode(path, seconds + 0.5)
+    except Exception:  # noqa: BLE001
+        return np.zeros(n)
+    if len(y) < SR * 0.2:
+        return np.zeros(n)
+    win = int(SR / fps)
+    e = np.array([float(np.sqrt(np.mean(y[i * win:(i + 1) * win] ** 2))) if i * win < len(y) else 0.0 for i in range(n)])
+    hi = float(np.percentile(e, 95)) if e.max() > 0 else 0.0
+    if hi <= 0.01:   # effectively silent
+        return np.zeros(n)
+    return np.clip(e / hi, 0, 1)
+
+
+def _sim(a, b) -> float:
+    """0 = same picture, 1 = very different (mean abs grey difference / 255)."""
+    if a is None or b is None:
+        return 1.0
+    return float(np.abs(np.asarray(a, np.int16) - np.asarray(b, np.int16)).mean() / 255)
+
+
+def _thumb_at(c: dict, a: float):
+    th = c.get("thumbs") or []
+    if not th:
+        return None
+    t = c["t"]
+    step = t[1] - t[0] if len(t) > 1 else 0.25
+    return th[min(len(th) - 1, int(a / step))]
 
 
 def _window(c: dict, a: float, d: float) -> tuple[float, float, float, float, bool]:
@@ -204,17 +262,27 @@ def _window(c: dict, a: float, d: float) -> tuple[float, float, float, float, bo
 
 # ------------------------------------------------------------------ plan
 def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "auto", effects: str = "auto",
-         min_cut: float = 0.4, max_cut: float = 2.2, slowmo: bool = True, seed: int = 7) -> dict:
-    """clips: [{id, ...clip() result}]"""
+         min_cut: float = 0.4, max_cut: float = 2.2, slowmo: bool = True, seed: int = 7,
+         fx_strong: list[str] | None = None, fx_soft: list[str] | None = None, speed_ramp: bool = True,
+         pins: list[str] | None = None, intro: bool = False, outro: bool = False) -> dict:
+    """clips: [{id, ...clip() result}]. fx_strong/fx_soft: the theme's effect pools; pins: clips that must appear;
+    intro/outro: hold the first/last cut for a whole bar (title / CTA go there)."""
     rnd = random.Random(seed)
     beats, energy, strength = mu["beats"], mu["energy"], mu["strength"]
     period = mu["period"]
     n = len(beats)
-    start_i = mu.get("start_i", 0)
+    full = max_seconds <= 0 or max_seconds >= float(mu.get("duration") or 0) - 1
+    if full:
+        max_seconds = max(4.0, float(mu.get("duration") or beats[-1]) - 0.3)
+    start_i = 0 if full else mu.get("start_i", 0)
     t0 = beats[start_i]
     limit = t0 + max_seconds
     drops = set(mu.get("drops") or [])
     bar0 = mu.get("bar0", 0)
+    strong_pool = [f for f in (fx_strong or []) if f in FX_ALL] or FX_STRONG
+    soft_pool = [f for f in (fx_soft or []) if f in FX_ALL] or FX_SOFT
+    min_cut, max_cut = max(0.2, float(min_cut)), max(0.5, float(max_cut))
+    bar = 4 * period
     # 1) cut points on the beat grid
     cuts: list[tuple[float, float, int, float]] = []   # (a, b, beat index, energy)
     i = start_i
@@ -228,7 +296,7 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
             nb = 1 if e > 0.75 else 2
         else:
             nb = 1 if e > 0.66 else 2 if e > 0.33 else 4
-        # stay inside 0.4–2.2 s
+        # stay inside min_cut–max_cut
         while nb > 1 and nb * period > max_cut:
             nb //= 2
         while nb * period < min_cut and nb < 8:
@@ -236,6 +304,13 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
         # land long cuts on bar starts
         if nb >= 2 and (i - bar0) % 2:
             nb = 1 if period >= min_cut else 2
+        # never jump over a drop or a beat that is clearly louder than this one — the cut must land ON it
+        while nb > 1 and any((i + x) in drops or energy[min(n - 1, i + x)] > max(0.6, e + 0.4) for x in range(1, nb)) \
+                and (nb // 2) * period >= min_cut:
+            nb //= 2
+        # intro: the first cut holds for a bar (title); outro: the last one too
+        if intro and not cuts:
+            nb = max(nb, min(4, max(2, int(round(min(2.6, bar) / period)))))
         j = min(n - 1, i + nb)
         a, b = beats[i], beats[j]
         if b > limit:
@@ -243,7 +318,7 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
             if b - a < min_cut:
                 break
         # stutter on a drop: two half-beat cuts of the same moment
-        if i in drops and effects != "none" and period / 2 >= 0.22 and nb == 1:
+        if i in drops and effects != "none" and period / 2 >= 0.22 and nb == 1 and not (intro and not cuts):
             cuts.append((a, a + period / 2, i, e))
             cuts.append((a + period / 2, b, i, e))
         else:
@@ -251,15 +326,28 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
         i = j
     if not cuts:
         raise ValueError("music बहुत छोटा है")
+    if outro and len(cuts) > 2:
+        # merge the tail into one bar-long closing cut
+        want = min(2.6, bar)
+        acc, k = 0.0, len(cuts)
+        while k > 1 and acc < want:
+            k -= 1
+            acc += cuts[k][1] - cuts[k][0]
+        a0 = cuts[k][0]
+        cuts = cuts[:k] + [(a0, cuts[-1][1], cuts[k][2], cuts[k][3])]
     # 2) best unused moment for each cut
     used: dict[str, list[tuple[float, float]]] = {c["id"]: [] for c in clips}
     count: dict[str, int] = {c["id"]: 0 for c in clips}
     segs = []
     last = None
     prev_window = None
+    recent_thumbs: list = []
+    few = len(clips) <= 3
     for k, (a, b, bi, e) in enumerate(cuts):
         d = b - a
-        stutter_repeat = k > 0 and cuts[k - 1][2] == bi and prev_window is not None
+        stutter_repeat = k > 0 and cuts[k - 1][2] == bi and prev_window is not None and not (outro and k == len(cuts) - 1)
+        next_drop = speed_ramp and k + 1 < len(cuts) and cuts[k + 1][2] in drops and d >= 0.6 and effects != "none"
+        is_intro, is_outro = intro and k == 0, outro and k == len(cuts) - 1
         best = None
         for c in clips:
             cid = c["id"]
@@ -267,7 +355,14 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
                 sc = c["score"][0] - 0.2 * count[cid] - (0.6 if cid == last else 0)
                 cand = [(sc, 0.0, 1.0)]
             else:
-                speed = 0.5 if (slowmo and e < 0.3 and pace != "fast" and c["duration"] > d * 0.6 + 1) else 1.0
+                if next_drop and c["duration"] > d + 0.5:
+                    speed = 0.75   # speed ramp: normal → slow-mo into the drop (needs ~¾ of the cut as footage)
+                elif slowmo and e < 0.3 and pace != "fast" and c["duration"] > d * 0.6 + 1:
+                    speed = 0.5
+                elif is_intro and c["duration"] > d * 0.5 + 0.5:
+                    speed = 0.5
+                else:
+                    speed = 1.0
                 need = d * speed
                 if c["duration"] < need + 0.1:
                     continue
@@ -277,7 +372,17 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
                     if not any(st < y and st + need > x for x, y in used[cid]):
                         sc, mo, *_ = _window(c, st, need)
                         sc += (0.25 * min(mo, 1.5) if e > 0.6 else -0.1 * max(0, mo - 1))   # loud → movement
-                        sc -= 0.12 * count[cid] + (0.6 if cid == last and len(clips) > 1 else 0)
+                        sc -= (0.08 if few else 0.14) * count[cid] + (0.6 if cid == last and len(clips) > 1 else 0)
+                        # near-duplicate of something just used (same framing / same moment in another take)
+                        th = _thumb_at(c, st)
+                        if th is not None and recent_thumbs:
+                            dup = min(_sim(th, r) for r in recent_thumbs)
+                            if dup < 0.045:
+                                sc -= 0.7
+                            elif dup < 0.09:
+                                sc -= 0.25
+                        if is_intro or is_outro:
+                            sc += 0.3 * float(any(c["face"][max(0, int(st * 4)):int(st * 4) + 4] or [False])) if c.get("face") else 0
                         cand.append((sc, st, speed))
                     st += 0.25
             for sc, st, speed in cand:
@@ -294,25 +399,56 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
         if not stutter_repeat:
             used[cid].append((st, st + d * speed))
             count[cid] += 1
+            th = _thumb_at(c, st)
+            if th is not None:
+                recent_thumbs = (recent_thumbs + [th])[-4:]
         prev_window = (cid, st, speed)
         last = cid
         # effect at the start of this cut
-        if k == 0:
-            fxn = "zoom_out" if c["kind"] != "image" else "zoom_in"
+        if is_intro or k == 0:
+            fxn = "zoom_in" if (is_intro or c["kind"] == "image") else "zoom_out"
+        elif is_outro:
+            fxn = "zoom_out"
         elif effects == "none":
             fxn = "cut"
         elif bi in drops or (strength[bi] > 0.75 and e > 0.6):
-            fxn = rnd.choice(FX_STRONG if effects != "subtle" else FX_SOFT)
+            fxn = rnd.choice(strong_pool if effects != "subtle" else soft_pool)
         elif (bi - bar0) % 4 == 0 and e > 0.35:
-            fxn = rnd.choice(FX_SOFT if effects != "strong" else FX_STRONG)
+            fxn = rnd.choice(soft_pool if effects != "strong" else strong_pool)
         elif c["kind"] == "image":
             fxn = rnd.choice(["zoom_in", "zoom_out"])
         else:
             fxn = "cut"
-        pulses = [round(beats[x] - a, 3) for x in range(bi + 1, n) if a < beats[x] < b - 0.08] if effects != "none" and e > 0.45 else []
-        segs.append({"i": k, "clip": cid, "src_in": round(st, 2), "dur": round(d, 3), "speed": speed, "fx": fxn,
-                     "pulse": pulses, "focus": [round(fx, 3), round(fy, 3)], "face": face, "score": round(sc, 2),
-                     "energy": round(e, 2), "keep": True, "kind": c["kind"]})
+        pulses = [round(beats[x] - a, 3) for x in range(bi + 1, n) if a < beats[x] < b - 0.08] if effects != "none" and e > 0.45 and not (is_intro or is_outro) else []
+        seg = {"i": k, "clip": cid, "src_in": round(st, 2), "dur": round(d, 3), "speed": speed, "fx": fxn,
+               "pulse": pulses, "focus": [round(fx, 3), round(fy, 3)], "face": face, "score": round(sc, 2),
+               "energy": round(e, 2), "keep": True, "kind": c["kind"], "beat": bi - start_i}
+        if speed == 0.75 and next_drop:
+            seg["ramp"] = True
+        if is_intro:
+            seg["intro"] = True
+        if is_outro:
+            seg["outro"] = True
+        segs.append(seg)
+    # 2b) pinned clips ("ज़रूरी") that never got picked take the weakest ordinary cut
+    for pid in (pins or []):
+        c = next((x for x in clips if x["id"] == pid), None)
+        if not c or count.get(pid):
+            continue
+        victims = [s for s in segs if not s.get("intro") and not s.get("outro") and s["clip"] != pid and s["kind"] == "video"]
+        if not victims:
+            continue
+        v = min(victims, key=lambda s: s["score"])
+        d = v["dur"]
+        if c["kind"] == "image":
+            v.update(clip=pid, src_in=0.0, speed=1.0, kind="image", focus=[c["fx"][0], c["fy"][0]], face=bool(c["face"][0]), pinned=True)
+        elif c["duration"] >= d + 0.1:
+            bestw = max(((_window(c, st, d)[0], st) for st in np.arange(0, c["duration"] - d, 0.25)), default=(0, 0.0))
+            _, _, fx, fy, face = _window(c, bestw[1], d)
+            v.update(clip=pid, src_in=round(float(bestw[1]), 2), speed=1.0, kind="video", focus=[round(fx, 3), round(fy, 3)], face=face,
+                     score=round(float(bestw[0]), 2), pinned=True)
+            v.pop("ramp", None)
+        count[pid] = 1
     # highlights = best quarter of the chosen moments
     if segs:
         thr = float(np.percentile([s["score"] for s in segs], 75))
@@ -339,10 +475,14 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
             if len(took) >= 4:
                 break
     alts.sort(key=lambda x: -x["score"])
+    span = max_seconds + 1
     return {"bpm": mu["bpm"], "period": round(period, 4), "music_start": round(t0, 3), "segments": segs, "alts": alts[:40],
-            "beats": [round(b - t0, 3) for b in beats[start_i:] if b - t0 <= max_seconds + 1],
-            "bars": [round(beats[x] - t0, 3) for x in range(start_i, n) if (x - bar0) % 4 == 0 and beats[x] - t0 <= max_seconds + 1],
-            "total": round(sum(s["dur"] for s in segs), 3)}
+            "beats": [round(b - t0, 3) for b in beats[start_i:] if b - t0 <= span],
+            "beat_strength": [round(float(strength[x]), 3) for x in range(start_i, n) if beats[x] - t0 <= span],
+            "beat_energy": [round(float(energy[x]), 3) for x in range(start_i, n) if beats[x] - t0 <= span],
+            "drops": [round(beats[x] - t0, 3) for x in sorted(drops) if start_i <= x < n and beats[x] - t0 <= span],
+            "bars": [round(beats[x] - t0, 3) for x in range(start_i, n) if (x - bar0) % 4 == 0 and beats[x] - t0 <= span],
+            "total": round(sum(s["dur"] for s in segs), 3), "full": full}
 
 
 # ------------------------------------------------------------------ render
@@ -407,8 +547,11 @@ def _grade(look: str | None, mean_energy: float) -> str:
 def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path, name: str, preset: dict,
            texts: list[str] | None = None, look: str = "auto", reframe: str = "smart", font: str = "Poppins",
            text_color: str = "#FFFFFF", text_size: float = 0.07, watermark: Path | None = None,
-           fonts_dir: Path | None = None, encoder_preset: str | None = None, on_progress=None) -> dict:
-    """clips: id → {path, kind, w, h}"""
+           fonts_dir: Path | None = None, encoder_preset: str | None = None, on_progress=None,
+           text_style: dict | None = None, text_mode: str = "bars", intro_text: str = "", outro_text: str = "") -> dict:
+    """clips: id → {path, kind, w, h}. text_style: a textfx style (font/color/outline/box…) — the theme's text look;
+    text_mode: "bars" (one line per bar) or "beats" (one word on every strong-beat cut); intro_text / outro_text sit on
+    the intro / outro cuts of the plan."""
     from .captions import _esc, _t, ass_color
     segs = [s for s in pl["segments"] if s.get("keep", True) and s.get("clip") in clips]
     if not segs:
@@ -433,12 +576,18 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
         else:
             src = d * speed
             inputs += ["-ss", f"{float(s['src_in']):.3f}", "-t", f"{src + 0.25:.3f}", "-i", str(c["path"])]
-            pre = f"[{n}:v]setpts=(PTS-STARTPTS)/{speed},fps={fps},"
+            if s.get("ramp") and speed < 1:
+                # speed ramp into the drop: normal speed at the start, half speed by the end (out = t + t²/2d)
+                pre = f"[{n}:v]setpts='(PTS-STARTPTS)+pow(T-STARTT\\,2)/{2 * d:.4f}/TB',fps={fps},"
+            else:
+                pre = f"[{n}:v]setpts=(PTS-STARTPTS)/{speed},fps={fps},"
         rf = _reframe(W, H, fx, fy, "smart" if margin != 1.0 and reframe == "fit" else reframe,
                       int(c.get("w") or W), int(c.get("h") or H), margin, n)
         chains.append(f"{pre}{rf}[r{n}]")
         src_lbl = f"[r{n}]"
         fxc = _fx_chain(s, W, H, fps)
+        if s.get("outro"):
+            fxc = (fxc + "," if fxc else "") + "eq=brightness=-0.22:saturation=0.85"
         chains.append(f"{src_lbl}{fxc + ',' if fxc else ''}scale={W}:{H},trim=duration={d:.3f},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[s{n}]")
         labels.append(f"[s{n}]")
     total = sum(float(s["dur"]) for s in segs)
@@ -447,30 +596,69 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
     g = _grade(look, float(np.mean([s.get("energy", .5) for s in segs])))
     if g:
         tail += g + ","
-    lines = [x.strip() for x in (texts or []) if x and x.strip()][:12]
+    lines = [x.strip() for x in (texts or []) if x and x.strip()][:40 if text_mode == "beats" else 12]
+    events: list[tuple[float, float, str, str]] = []   # (start, end, style, text)
+    acc = 0.0
+    starts_all = []
+    for s in segs:
+        starts_all.append((acc, s))
+        acc += float(s["dur"])
+    if intro_text and segs and segs[0].get("intro"):
+        events.append((0.0, float(segs[0]["dur"]), "T", intro_text))
+    if outro_text and segs and segs[-1].get("outro"):
+        a = total - float(segs[-1]["dur"])
+        events.append((a, total, "T", outro_text))
+    body = [(a, s) for a, s in starts_all if not s.get("intro") and not s.get("outro")] or starts_all
     if lines:
-        # each line starts on a bar start of the edited timeline
-        starts, acc = [], 0.0
-        for s in segs:
-            if s.get("fx") not in ("cut",) or not starts:
-                starts.append(acc)
-            acc += float(s["dur"])
-        per = max(1, len(starts) // len(lines))
+        if text_mode == "beats":
+            # one word per strong-beat cut (effects other than a plain cut), in order, each for its cut
+            slots = [(a, s) for a, s in body if s.get("fx") not in ("cut", None)] or body
+            step = max(1, len(slots) // len(lines))
+            for k, line in enumerate(lines):
+                if k * step >= len(slots):
+                    break
+                a, s = slots[k * step]
+                events.append((a, min(total, a + float(s["dur"])), "M", line))
+        else:
+            # each line starts on a bar start of the edited timeline
+            starts = []
+            for a, s in body:
+                if s.get("fx") not in ("cut",) or not starts:
+                    starts.append(a)
+            per = max(1, len(starts) // len(lines))
+            for k, line in enumerate(lines):
+                a = starts[min(len(starts) - 1, k * per)]
+                b = starts[min(len(starts) - 1, (k + 1) * per)] if k < len(lines) - 1 and (k + 1) * per < len(starts) else total
+                if b <= a:
+                    b = min(total, a + 2)
+                events.append((a, b, "M", line))
+    if events:
         base = min(W, H)
-        size = round(text_size * base)
+        ts = dict(text_style or {})
+        font = ts.get("font") or font
+        text_color = ts.get("color") or text_color
+        size = round(float(ts.get("size") or text_size) * base)
+        outline_c = ass_color(ts.get("outline") or "#000000")
+        outline_w = round(float(ts.get("outline_w") or 0.006) * base, 1)
+        if ts.get("box"):
+            # BorderStyle 3 = opaque box behind the text (box colour in BackColour)
+            box_alpha = float(ts.get("box_alpha") or 0)
+            style_tail = f"3,{max(2, round(float(ts.get('box_pad') or 0.016) * base))},0"
+            back = ass_color(ts.get("box_color") or "#000000", box_alpha)
+        else:
+            style_tail = f"1,{outline_w},{round(float(ts.get('shadow_d') or 0.004) * base, 1)}"
+            back = ass_color(ts.get("shadow") or "#000000", 0.5)
+        common = f"{ass_color(text_color)},&H00FFFFFF,{outline_c},{back},-1,0,0,0,100,100,0,0,{style_tail}"
         ass = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}", "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
                "[V4+ Styles]",
                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
                "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-               f"Style: M,{font},{size},{ass_color(text_color)},&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,"
-               f"{round(0.006 * base, 1)},{round(0.004 * base, 1)},5,{round(0.08 * W)},{round(0.08 * W)},0,1",
+               f"Style: M,{font},{size},{common},5,{round(0.08 * W)},{round(0.08 * W)},0,1",
+               f"Style: T,{font},{round(size * 1.25)},{common},5,{round(0.08 * W)},{round(0.08 * W)},0,1",
                "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
-        for k, line in enumerate(lines):
-            a = starts[min(len(starts) - 1, k * per)]
-            b = starts[min(len(starts) - 1, (k + 1) * per)] if k < len(lines) - 1 and (k + 1) * per < len(starts) else total
-            if b <= a:
-                b = min(total, a + 2)
-            ass.append(f"Dialogue: 0,{_t(a)},{_t(b)},M,,0,0,0,,{{\\fad(90,140)\\fscx80\\fscy80\\t(0,180,\\fscx100\\fscy100)}}{_esc(line).replace('|', chr(92) + 'N')}")
+        for a, b, st, line in events:
+            anim = "\\fad(90,140)\\fscx80\\fscy80\\t(0,180,\\fscx100\\fscy100)" if st == "M" else "\\fad(200,300)\\fscx92\\fscy92\\t(0,600,\\fscx100\\fscy100)"
+            ass.append(f"Dialogue: 0,{_t(a)},{_t(b)},{st},,0,0,0,,{{{anim}}}{_esc(line).replace('|', chr(92) + 'N')}")
         f = work / "beat.ass"
         f.write_text("\n".join(ass) + "\n", encoding="utf-8")
         fonts = fonts_dir or Path(__file__).resolve().parent.parent.parent / "fonts"

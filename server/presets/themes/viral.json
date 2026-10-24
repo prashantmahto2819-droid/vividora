@@ -1,0 +1,55 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 1.2
+ },
+ "voice": "bright",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [],
+ "id": "viral",
+ "label": "Viral short (fast)",
+ "emoji": "⚡",
+ "hint": "तेज़ cuts, glitch/RGB, बड़े word-box captions, zoom हर cut पर",
+ "swatch": [
+  "#FF2D95",
+  "#00E5FF"
+ ],
+ "caption_style": "wordbox",
+ "text_style": "neon_pink",
+ "look": "none",
+ "grade_preset": "yt_pop",
+ "transition": "glitch",
+ "transition_duration": 0.2,
+ "stack": [
+  {
+   "id": "tr_beat_shake",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "energetic",
+  "volume": 0.14,
+  "duck_amount": 0.65
+ },
+ "montage": {
+  "pace": "fast",
+  "effects_level": "strong",
+  "min_cut": 0.3,
+  "max_cut": 1.2,
+  "look": "grade:yt_pop",
+  "fx_strong": [
+   "glitch",
+   "rgb",
+   "shake",
+   "flash",
+   "zoom_punch"
+  ],
+  "fx_soft": [
+   "zoom_punch",
+   "flash"
+  ],
+  "intro": false,
+  "outro": true
+ }
+}
