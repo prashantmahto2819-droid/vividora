@@ -477,6 +477,55 @@ def after_job(c, job: dict, result: dict) -> None:
             except ValueError:
                 pass
 
+    elif kind == "explainer":
+        # Character Studio storyboard → a normal project: the backgrounds video is the recording, the
+        # dialogue is its transcript (captions work at once), every character a transparent overlay clip
+        meta = {**project.get("meta", {}), **result.get("meta", {})}
+        for f in result.get("files", []):
+            replace_assets(c, pid, f["kind"], keep_path=f["path"])
+            add_asset(c, pid, f["kind"], f["path"], mime=f.get("mime"), meta=f.get("meta"))
+        from .api.library import _probe_meta
+        st = project.get("settings", {})
+        rs = {**DEFAULT_RENDER, **(st.get("render") or {})}
+        eff = {**DEFAULT_EFFECTS, **(rs.get("effects") or {})}
+        broll = [b for b in (eff.get("broll") or []) if not (isinstance(b, dict) and b.get("char"))]
+        for i, ov in enumerate(result.get("overlays") or []):
+            src = storage.abs_path(ov["path"])
+            if not src.exists():
+                continue
+            item_id = db.new_id()
+            rel = str(Path(f"ws_{project['workspace_id']}") / "library" / "broll" / f"{item_id[:8]}_{storage.safe_name(src.name)}")
+            dst = storage.ensure_parent(rel)
+            shutil.move(str(src), str(dst))
+            ch = ov.get("char") or {}
+            db.insert(c, "library", {"id": item_id, "workspace_id": project["workspace_id"], "kind": "broll", "name": f"{ov.get('name') or 'पात्र'} · scene {int(ch.get('scene', 0)) + 1}",
+                                     "path": rel, "size": dst.stat().st_size, "mime": "video/webm",
+                                     "meta": {**_probe_meta(dst, "broll"), "alpha": True, "char": ch, "project_id": pid},
+                                     "created_by": project.get("created_by"), "created_at": db.now(), "tags": "character", "source": "characters", "license": "own"})
+            broll.append({"_id": f"char_{i}", "id": item_id, "start": float(ov["start"]), "end": float(ov["end"]), "fit": "free",
+                          "x": float(ov["x"]), "y": float(ov["y"]), "scale": float(ov["scale"]), "opacity": 1, "rotate": 0, "anim": "none",
+                          "fade": False, "track": 1 + (i % 3), "char": {k: ch.get(k) for k in ("profile", "base", "scene")}, "name": ov.get("name")})
+        eff["broll"] = broll
+        rs["effects"] = eff
+        rs["burn_captions"] = True
+        presets = (meta.get("storyboard") or {}).get("preset")
+        if presets:
+            rs["presets"] = [presets]
+        tr = result.get("transcript") or {"segments": [], "text": ""}
+        db.update(c, "projects", pid, {"meta": meta, "transcript": tr,
+                                       "edl": autocut.build_edl({"segments": []}, float(meta.get("duration") or result.get("duration") or 0)),
+                                       "settings": {**st, "render": rs, "skip_transcript": False}, "updated_at": db.now()})
+        n = len(tr.get("segments") or [])
+        if (job.get("payload") or {}).get("auto_render"):
+            try:
+                request_render(c, db.get("projects", pid), rs)
+                return
+            except ValueError as e:
+                set_status(c, pid, "review_cuts", f"explainer तैयार ({n} lines) — render नहीं चला: {e}")
+                return
+        set_status(c, pid, "review_cuts", f"explainer तैयार · {len(result.get('overlays') or [])} character clips · {n} lines — editor में देखें, फिर render")
+        notify.on_event("review_cuts", project)
+
     elif kind == "compress":
         # the compressed file becomes a library video next to the original (which is untouched)
         f = (result.get("files") or [{}])[0]
@@ -949,3 +998,18 @@ def project_view(project: dict) -> dict:
     return {**project, "assets": [{k: v for k, v in a.items() if k != "path"} for a in assets],
             "jobs": jobs, "edit_sig": edit_sig(project), "render_defaults": {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {})},
             "render_sigs": render_sigs(project)}
+
+
+def request_explainer(c, project: dict, storyboard: dict, *, auto_render: bool = False) -> dict:
+    """Character Studio: validate the storyboard, remember it on the project, queue the explainer job."""
+    from .engine.chars import storyboard as sb
+    spec = sb.normalise(storyboard)
+    pid = project["id"]
+    st = project.get("settings", {})
+    meta = {**(project.get("meta") or {}), "storyboard": spec}
+    db.update(c, "projects", pid, {"meta": meta, "settings": {**st, "theme_id": spec.get("theme_id") or st.get("theme_id", "")},
+                                   "updated_at": db.now()})
+    c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? AND kind='explainer' AND status='queued'", (db.now(), pid))
+    n_lines = sum(len(s["lines"]) for s in spec["scenes"])
+    set_status(c, pid, "preparing", f"explainer बन रहा है · {len(spec['scenes'])} scenes · {n_lines} lines (आवाज़ + characters)")
+    return queue.enqueue(c, pid, "explainer", {"storyboard": spec, "auto_render": bool(auto_render)})

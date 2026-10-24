@@ -121,6 +121,8 @@ def create_app() -> Starlette:
     api_routes += saas_api.routes  # plans / usage / Razorpay / admin (inert without SAAS_MODE)
     from .api import templates_api
     api_routes += templates_api.routes  # template studio, ad templates, trend research
+    from .api import chars_api
+    api_routes += chars_api.routes  # Character Studio (2D rigs, scenes, storyboards → explainer)
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))
