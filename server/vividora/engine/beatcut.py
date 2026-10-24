@@ -17,6 +17,7 @@ render()  the plan → one video: reframed clips, effects, colour grade, text
 
 from __future__ import annotations
 
+import os
 import math
 import random
 import subprocess
@@ -561,37 +562,53 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
     work.mkdir(exist_ok=True)
     W, H = int(preset["width"]), int(preset["height"])
     fps = 30
-    inputs: list[str] = []
-    chains: list[str] = []
-    labels = []
-    for n, s in enumerate(segs):
+    total = sum(float(s["dur"]) for s in segs)
+    # Stage 1 — every segment is rendered on its own (a few at a time) into a small intermediate file at the output
+    # size. One ffmpeg with 60 4K inputs opened at once used 16 GB and one core; this keeps memory at a few hundred MB
+    # per decoder and uses all cores.
+    import concurrent.futures as _cf
+    seg_files: list[Path] = [work / f"seg{n:03d}.mp4" for n in range(len(segs))]
+    done_segs = [0]
+
+    def _one(n: int) -> None:
+        s = segs[n]
         c = clips[s["clip"]]
         d = float(s["dur"])
         speed = float(s.get("speed") or 1)
         fx, fy = (s.get("focus") or [.5, .5])[:2]
         margin = 1.1 if s.get("fx") == "shake" else 1.0
         if c["kind"] == "image":
-            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{d + 0.1:.3f}", "-i", str(c["path"])]
-            pre = f"[{n}:v]fps={fps},"
+            inp = ["-loop", "1", "-framerate", str(fps), "-t", f"{d + 0.1:.3f}", "-i", str(c["path"])]
+            pre = f"[0:v]fps={fps},"
         else:
             src = d * speed
-            inputs += ["-ss", f"{float(s['src_in']):.3f}", "-t", f"{src + 0.25:.3f}", "-i", str(c["path"])]
+            inp = ["-ss", f"{float(s['src_in']):.3f}", "-t", f"{src + 0.25:.3f}", "-i", str(c["path"])]
             if s.get("ramp") and speed < 1:
                 # speed ramp into the drop: normal speed at the start, half speed by the end (out = t + t²/2d)
-                pre = f"[{n}:v]setpts='(PTS-STARTPTS)+pow(T-STARTT\\,2)/{2 * d:.4f}/TB',fps={fps},"
+                pre = f"[0:v]setpts='(PTS-STARTPTS)+pow(T-STARTT\\,2)/{2 * d:.4f}/TB',fps={fps},"
             else:
-                pre = f"[{n}:v]setpts=(PTS-STARTPTS)/{speed},fps={fps},"
+                pre = f"[0:v]setpts=(PTS-STARTPTS)/{speed},fps={fps},"
         rf = _reframe(W, H, fx, fy, "smart" if margin != 1.0 and reframe == "fit" else reframe,
-                      int(c.get("w") or W), int(c.get("h") or H), margin, n)
-        chains.append(f"{pre}{rf}[r{n}]")
-        src_lbl = f"[r{n}]"
+                      int(c.get("w") or W), int(c.get("h") or H), margin, 0)
         fxc = _fx_chain(s, W, H, fps)
         if s.get("outro"):
             fxc = (fxc + "," if fxc else "") + "eq=brightness=-0.22:saturation=0.85"
-        chains.append(f"{src_lbl}{fxc + ',' if fxc else ''}scale={W}:{H},trim=duration={d:.3f},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[s{n}]")
-        labels.append(f"[s{n}]")
-    total = sum(float(s["dur"]) for s in segs)
-    chains.append("".join(labels) + f"concat=n={len(labels)}:v=1:a=0[vcat]")
+        graph = f"{pre}{rf}[r0];[r0]{fxc + ',' if fxc else ''}scale={W}:{H},trim=duration={d:.3f},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v]"
+        ffmpeg.check_cancel()
+        ffmpeg.run([*inp, "-filter_complex", graph, "-map", "[v]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                    "-g", str(fps), "-r", str(fps), "-t", f"{d:.3f}", str(seg_files[n])], label=f"segment {n + 1}")
+        done_segs[0] += 1
+        if on_progress:
+            on_progress(0.75 * done_segs[0] / len(segs), f"clip {done_segs[0]}/{len(segs)}")
+
+    workers = max(1, min(3, (os.cpu_count() or 4) // 4))
+    with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(_one, range(len(segs))))  # re-raises the first failure
+    # Stage 2 — join the pieces (same size/fps/codec → concat demuxer), then look, text, watermark, music.
+    lst = work / "segs.txt"
+    lst.write_text("".join(f"file '{f.as_posix()}'\n" for f in seg_files), encoding="utf-8")
+    inputs: list[str] = ["-f", "concat", "-safe", "0", "-i", str(lst)]
+    chains: list[str] = ["[0:v]setpts=PTS-STARTPTS[vcat]"]
     tail = ""
     g = _grade(look, float(np.mean([s.get("energy", .5) for s in segs])))
     if g:
@@ -663,7 +680,7 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
         f.write_text("\n".join(ass) + "\n", encoding="utf-8")
         fonts = fonts_dir or Path(__file__).resolve().parent.parent.parent / "fonts"
         tail += f"ass=filename='{ffmpeg.escape_filter_path(f)}':fontsdir='{ffmpeg.escape_filter_path(fonts)}':shaping=complex,"
-    mi = len(segs)
+    mi = 1
     inputs += ["-ss", f"{float(pl.get('music_start', 0)):.3f}", "-t", f"{total + 0.5:.3f}", "-i", str(music_path)]
     if watermark is not None:
         inputs += ["-i", str(watermark)]
@@ -682,7 +699,7 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
                 "-c:v", "libx264", "-preset", encoder_preset or vcfg.get("preset", "medium"), "-crf", str(vcfg.get("crf", 20)),
                 "-g", str(fps * 2), "-profile:v", "high", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                 "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)],
-               duration=total, on_progress=on_progress, label="beat edit रेंडर")
+               duration=total, on_progress=(lambda f, l: on_progress(0.75 + 0.25 * f, l)) if on_progress else None, label="beat edit रेंडर")
     import shutil
     shutil.rmtree(work, ignore_errors=True)
     return {"files": [{"kind": "render", "path": out, "mime": "video/mp4", "label": preset["id"],
