@@ -127,6 +127,8 @@ def create_app() -> Starlette:
     api_routes += chars3d_api.routes  # 3D Studio: procedural characters, scenes, lip-sync, explainers
     from .api import copilot_api
     api_routes += copilot_api.routes  # Channel Copilot: hook scores, weekly audit, comment drafts
+    from .api import ytshorts_api
+    api_routes += ytshorts_api.routes  # YouTube → Shorts/Reels converter
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))

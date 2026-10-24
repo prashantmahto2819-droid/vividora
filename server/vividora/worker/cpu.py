@@ -585,6 +585,60 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                                 max_len=float(o.get("max_len", 58)), language=project.get("language", "hi"))
             return {"clips": clips}
 
+        if kind == "yt_shorts":
+            from ..engine import ytshorts
+            pl = job["payload"]
+            prog = _progress(client, job["id"])
+            prog(0.02, "YouTube से download हो रहा है")
+            info = ytshorts.download_yt(pl["url"], tmp / "yt")
+            raw_path = info["path"]
+            # Upload the raw video
+            prog(0.30, "video upload हो रहा है")
+            raw_up = client.upload(job["id"], raw_path, "raw")
+            # Run prepare (proxy, audio, waveform)
+            prog(0.35, "video जाँच — preview, audio")
+            prep_out = prepare.prepare(raw_path, tmp / "prep",
+                                       on_progress=lambda f, m: prog(0.35 + f * 0.30, m))
+            prep_files = [{"kind": "raw", "path": raw_up["path"], "mime": "video/mp4"}]
+            for f in prep_out["files"]:
+                up = client.upload(job["id"], f["path"], f["kind"])
+                prep_files.append({"kind": f["kind"], "path": up["path"], "mime": f.get("mime"),
+                                   "meta": f.get("meta", {})})
+            # Transcribe if auto_edit
+            transcript = {}
+            highlights = []
+            if pl.get("auto_edit"):
+                audio_asr = next((Path(f["path"]) for f in prep_out["files"] if f["kind"] == "audio_asr"), None)
+                if audio_asr and audio_asr.exists():
+                    prog(0.68, "transcript बन रहा है")
+                    try:
+                        from .transcribe import transcribe_file
+                        transcript = transcribe_file(audio_asr, language="hi",
+                                                     on_progress=lambda f_, m: prog(0.68 + f_ * 0.20, m))
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("yt-shorts transcribe failed: %s", e)
+                if transcript.get("segments"):
+                    prog(0.90, "highlights ढूँढ रहे हैं")
+                    highlights = ytshorts.find_highlights(
+                        transcript, info["duration"],
+                        count=int(pl.get("count", 5)),
+                        min_len=float(pl.get("min_len", 25)),
+                        max_len=float(pl.get("max_len", 58)),
+                    )
+            prog(0.98, "project बन रहा है")
+            return {
+                "title": info["title"],
+                "duration": info["duration"],
+                "video_id": info["video_id"],
+                "channel": info["channel"],
+                "thumbnail": info.get("thumbnail", ""),
+                "meta": prep_out["meta"],
+                "files": prep_files,
+                "transcript": transcript,
+                "highlights": highlights,
+                "format": pl.get("format", "shorts"),
+            }
+
         if kind == "transcribe":
             from .transcribe import transcribe_file
             audio = _fetch(client, assets, "audio_asr", tmp)
@@ -618,7 +672,7 @@ def main() -> None:
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")
-    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan", "compress", "explainer", "char3d", "storyboard3d"]
+    kinds = ["prepare", "autocut", "render", "shorts_plan", "publish", "montage", "montage_plan", "compress", "explainer", "char3d", "storyboard3d", "yt_shorts"]
     try:
         if not os.getenv("VIVIDORA_MATTE_MOCK"):
             import onnxruntime  # noqa: F401
