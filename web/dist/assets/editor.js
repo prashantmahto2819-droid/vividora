@@ -40,6 +40,7 @@ const ICON = {
 import * as TFX from "./textfx.js";
 import * as CUT from "./cutout.js";
 import * as PRO from "./pro.js";
+import * as MIX from "./mix.js";
 const TABS_ALL = [["cuts", "कट"], ["media", "Media"], ["audio", "Audio"], ["text", "Text"], ["stickers", "Stickers"], ["effects", "Effects"], ["transitions", "Transitions"], ["color", "Filters"], ["pro", "Pro"], ["captions", "Captions"], ["body", "Cutout"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["ai", "AI Studio"], ["refs", "Refs"]];
 const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
@@ -68,6 +69,7 @@ export function mount(root, project, ctx) {
   rs.effects.voice = { preset: "studio", ...(rs.effects.voice || {}) };
   rs.effects.music = { id: "", volume: 0.18, duck: true, duck_amount: 0.6, fade: 1.5, ...(rs.effects.music || {}) };
   rs.effects.fxclips = Array.isArray(rs.effects.fxclips) ? rs.effects.fxclips : [];
+  rs.effects.track_audio = rs.effects.track_audio && typeof rs.effects.track_audio === "object" ? rs.effects.track_audio : {};
   // every timeline item needs its own id (autopilot may have written the same id twice → select/delete hit the wrong one)
   const seenIds = new Set();
   for (const k of ["titles", "broll", "sfx", "fxclips"]) for (const x of rs.effects[k]) { if (!x._id || seenIds.has(x._id)) x._id = (String(x._id || "").startsWith("ap_") ? "ap_" : "") + uid(); seenIds.add(x._id); }
@@ -102,6 +104,7 @@ export function unmount() {
   if (!E) return;
   // leaving the editor (route change, reload after recut…): don't drop edits still waiting for the debounce
   if (E.dirty && E.canEdit && !E.locked) { clearTimeout(E.saveT); doSave(E, false); }
+  MIX.unmount();
   document.removeEventListener("keydown", onKey);
   window.removeEventListener("resize", layoutFrame);
   cancelAnimationFrame(E.raf); cutTeardown();
@@ -353,9 +356,11 @@ function bindStatic() {
   const name = $("#ed-name", E.root);
   if (name.isContentEditable) name.onblur = async () => { const t = name.textContent.trim(); if (t && t !== E.p.title) { await api("PATCH", `/projects/${E.pid}`, { title: t }); toast("नाम बदला"); E.p.title = t; } };
   const v = $("#pv", E.root);
+  // timeline sound: music / SFX / voice-over play in sync with the preview (mix.js)
+  MIX.mount(E, { fx: () => E.rs.effects, outOf, outDur, libItem, video: () => $("#pv", E.root), voiceVolume: () => voiceValues().volume });
   v.onloadedmetadata = () => { layoutFrame(); renderOverlay(); };
-  v.onplay = () => { $("#t-play", E.root).innerHTML = ICON.pause; tick(); };
-  v.onpause = () => { $("#t-play", E.root).innerHTML = ICON.play; cancelAnimationFrame(E.raf); renderOverlay(); };
+  v.onplay = () => { $("#t-play", E.root).innerHTML = ICON.pause; MIX.start(); tick(); };
+  v.onpause = () => { $("#t-play", E.root).innerHTML = ICON.play; cancelAnimationFrame(E.raf); MIX.stop(); MIX.tick(E.t); renderOverlay(); };
   v.addEventListener("seeked", cutKick); v.addEventListener("loadeddata", cutKick);
   v.addEventListener("seeked", () => E && PRO.drawBg()); v.addEventListener("loadeddata", () => E && PRO.drawBg()); v.addEventListener("ratechange", cutKick); watchFrames(v);
   $("#t-play", E.root).onclick = togglePlay;
@@ -413,12 +418,13 @@ function onKey(e) {
   else if (e.key === "End") seek(E.dur);
 }
 function togglePlay() { const v = $("#pv", E.root); if (!v.src) return; if (v.paused) { if (E.skipCuts) { const c = cutAt(v.currentTime); if (c) v.currentTime = c.end; } v.play(); } else v.pause(); }
-function seek(t) { const v = $("#pv", E.root); E.t = clamp(t, 0, E.dur); if (v) v.currentTime = E.t; renderOverlay(); renderPlayhead(); }
+function seek(t) { const v = $("#pv", E.root); E.t = clamp(t, 0, E.dur); if (v) v.currentTime = E.t; MIX.tick(E.t); renderOverlay(); renderPlayhead(); }
 function tick() {
   const v = $("#pv", E.root); if (!v) return;
   E.t = v.currentTime;
   if (E.skipCuts && !v.paused) { const c = cutAt(E.t); if (c) { v.currentTime = Math.min(E.dur, c.end + 0.02); E.t = v.currentTime; } }
   if (E.stopAt != null && E.t >= E.stopAt) { v.pause(); E.stopAt = null; }
+  MIX.tick(E.t);
   renderOverlay(); renderPlayhead(true); PRO.drawBg();
   if (!v.paused) E.raf = requestAnimationFrame(tick);
 }
@@ -1491,7 +1497,9 @@ function bindPanel() {
   on("#mus-fade", "oninput", (e) => { fx.music.fade = +e.target.value; touch(); });
   on("#vc-preset", "onchange", (e) => { fx.voice = { preset: e.target.value }; touch(); renderPanel(); toast("आवाज़ preset बदला — Preview frame/Render में सुनें"); });
   on("#ap-go", "onclick", (e) => audioPreview(e.target));
+  on("#ap-ab", "onclick", audioAB);
   on("#vc-adv", "ontoggle", (e) => { E.audioOpen = e.target.open; });
+  on("#vc-fx", "ontoggle", (e) => { E.audioFxOpen = e.target.open; });
   on("#vc-reset", "onclick", () => { fx.voice = { preset: fx.voice?.preset || "studio" }; touch(); renderPanel(); });
   $$("[data-vc]", panel).forEach((el) => (el.oninput = el.onchange = () => { fx.voice = fx.voice || { preset: "studio" }; const k = el.dataset.vc; fx.voice[k] = el.tagName === "SELECT" ? el.value : +el.value;
     const out = $(`[data-vcv="${k}"]`, panel); if (out) out.textContent = el.value; if (k === "volume") applyPreviewVolume(); touch(); }));
@@ -1716,12 +1724,25 @@ function showSuggestions() {
   $$("[data-sfix]", box).forEach((b) => (b.onclick = () => { const it = items[+b.dataset.sfix]; run(it); if (it.fix || it.action === "cta") { E.sugg.items = items.filter((x) => x !== it); showSuggestions(); E.ctx.toast("लगाया — preview/Render में देखें"); } }));
   const all = $("#sugg-all", box); if (all) all.onclick = () => { for (const it of items.filter((x) => x.fix)) applyPatch(E.rs, it.fix); E.sugg.items = items.filter((x) => !x.fix); touch(); renderPanel(); renderOverlay(); renderTimeline(); showSuggestions(); E.ctx.toast("सारे सुधार लगाए"); };
 }
+// 12 s of the finished sound from the playhead — processed (voice chain + music) AND the raw voice,
+// so the A/B button can flip between them while it plays.
 async function audioPreview(btn) {
   btn.disabled = true; const old = btn.textContent; btn.textContent = "बन रहा है…";
-  try { const r = await fetch(`/api/projects/${E.pid}/audio-preview`, { method: "POST", headers: { authorization: "Bearer " + E.ctx.S.token, "content-type": "application/json" }, body: JSON.stringify({ t: E.t, seconds: 12, render: JSON.parse(JSON.stringify(E.rs)) }) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "नहीं बना");
-    const url = URL.createObjectURL(await r.blob()); const au = $("#ap-audio", E.root); $("#pv", E.root)?.pause(); au.src = url; au.hidden = false; au.play();
+  const fetchOne = async (raw) => { const r = await fetch(`/api/projects/${E.pid}/audio-preview`, { method: "POST", headers: { authorization: "Bearer " + E.ctx.S.token, "content-type": "application/json" }, body: JSON.stringify({ t: E.t, seconds: 12, raw, render: JSON.parse(JSON.stringify(E.rs)) }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "नहीं बना"); return URL.createObjectURL(await r.blob()); };
+  try {
+    const [proc, raw] = await Promise.all([fetchOne(false), fetchOne(true)]);
+    if (E.ab?.proc) { URL.revokeObjectURL(E.ab.proc); URL.revokeObjectURL(E.ab.raw); }
+    E.ab = { proc, raw, which: "proc" };
+    const au = $("#ap-audio", E.root); $("#pv", E.root)?.pause(); MIX.stop(); au.src = proc; au.hidden = false; au.play();
+    const ab = $("#ap-ab", E.root); if (ab) { ab.hidden = false; ab.textContent = "A/B: सुधरी हुई"; }
   } catch (e) { E.ctx.toast(e.message); } finally { btn.disabled = false; btn.textContent = old; }
+}
+function audioAB() {
+  const au = $("#ap-audio", E.root); const ab = $("#ap-ab", E.root); if (!E.ab || !au) return;
+  const t = au.currentTime, playing = !au.paused; E.ab.which = E.ab.which === "proc" ? "raw" : "proc";
+  au.src = E.ab[E.ab.which]; au.currentTime = t; if (playing) au.play();
+  ab.textContent = E.ab.which === "proc" ? "A/B: सुधरी हुई" : "A/B: original"; ab.classList.toggle("primary", E.ab.which === "raw");
 }
 function voiceValues() {
   const S = E.ctx.S; const P = S.presets?.voice_params || {}; const PR = S.presets?.voice_presets || {}; const v = E.rs.effects.voice || { preset: "studio" };
@@ -1730,21 +1751,25 @@ function voiceValues() {
   for (const [k, val] of Object.entries(v)) if (k !== "preset" && val !== "" && val != null) out[k] = val;
   return out;
 }
-function applyPreviewVolume() { const pv = $("#pv", E.root); if (pv) pv.volume = Math.max(0, Math.min(1, +(voiceValues().volume ?? 1))); }
+function applyPreviewVolume() { MIX.applyVideo(); }
 function audioControls(dis) {
   const { esc } = E.ctx; const S = E.ctx.S; const fx = E.rs.effects; const music = fx.music; const P = S.presets?.voice_params || {}; const PR = S.presets?.voice_presets || {};
   const v = fx.voice || { preset: "studio" }; const vals = voiceValues();
   const slider = (k) => { const sp = P[k]; if (!sp) return ""; if (sp.choices) return field(sp.label, `<select data-vc="${k}" ${dis}>${sp.choices.map((c) => `<option value="${c}" ${vals[k] === c ? "selected" : ""}>${{ strong: "तेज़ (AI)", light: "हल्का", off: "बंद" }[c] || c}</option>`).join("")}</select>`);
     return field(`${sp.label} <b data-vcv="${k}">${vals[k]}</b>`, `<input type="range" data-vc="${k}" min="${sp.min}" max="${sp.max}" step="${sp.step}" value="${vals[k]}" ${dis}>`); };
   return `<div class="box audioctl"><div class="row between"><b>🎙 आवाज़ (Voice)</b><button class="btn small quiet" id="vc-reset" ${dis}>preset पर वापस</button></div>
-      <div class="irow"><button class="btn small primary" id="ap-go" title="playhead से 12 सेकंड final आवाज़ (voice + music)">🔊 बदलाव सुनें (12s)</button><audio id="ap-audio" controls hidden style="height:30px;flex:1"></audio></div>
+      <div class="irow"><button class="btn small primary" id="ap-go" title="playhead से 12 सेकंड final आवाज़ (voice + music)">🔊 बदलाव सुनें (12s)</button><button class="btn small" id="ap-ab" hidden title="चलते-चलते original और सुधरी हुई आवाज़ के बीच बदलें">A/B</button><audio id="ap-audio" controls hidden style="height:30px;flex:1"></audio></div>
       ${field("preset", `<select id="vc-preset" ${dis}>${Object.entries(PR).map(([k, x]) => `<option value="${k}" ${(v.preset || "studio") === k ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>`)}
       <div class="irow">${slider("volume")}${slider("denoise")}</div>
       <details ${E.audioOpen ? "open" : ""} id="vc-adv"><summary class="small">EQ, compressor और बाकी settings</summary>
         <div class="irow">${slider("bass")}${slider("mud")}</div><div class="irow">${slider("presence")}${slider("treble")}</div>
         <div class="irow">${slider("highpass")}${slider("deess")}</div><div class="irow">${slider("compress")}${slider("gate")}</div>
         <div class="irow">${slider("fade_in")}${slider("fade_out")}</div>${slider("loudness")}
-        <p class="small muted">noise “तेज़ (AI)” upload के समय DeepFilterNet से साफ़ हुई आवाज़ लेता है। बदलाव final render/preview frame में सुनाई देंगे।</p></details></div>
+        <p class="small muted">noise “तेज़ (AI)” upload के समय DeepFilterNet से साफ़ हुई आवाज़ लेता है। बदलाव final render/preview frame में सुनाई देंगे।</p></details>
+      <details ${E.audioFxOpen ? "open" : ""} id="vc-fx"><summary class="small">🎛 Effects — reverb, echo, chorus, pitch, stereo</summary>
+        <div class="irow">${slider("reverb")}${slider("echo")}</div><div class="irow">${slider("echo_ms")}${slider("chorus")}</div>
+        <div class="irow">${slider("pitch")}${slider("width")}</div>
+        <p class="small muted">“बदलाव सुनें” से 12 s में सुनें, फिर A/B से original से मिलाएँ। सब 0 = कोई effect नहीं।</p></details></div>
     <div class="box audioctl"><b>🎵 Background music</b>${music.id ? `<p class="small">${esc(libItem(music.id)?.name || music.id)}</p>` : `<p class="small muted">नीचे music में “लगाएँ” दबाएँ</p>`}
       <div class="irow">${field(`volume <b id="mus-vol-v">${Math.round((music.volume ?? 0.18) * 100)}%</b>`, `<input type="range" id="mus-vol" min="0" max="1" step="0.01" value="${music.volume ?? 0.18}" ${dis}>`)}${field("fade in/out (s)", `<input type="range" id="mus-fade" min="0" max="6" step="0.5" value="${music.fade ?? 1.5}" ${dis}>`)}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" id="mus-duck" ${music.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा (duck)</label>${field("कितना धीमा", `<input type="range" id="mus-damt" min="0.1" max="1" step="0.05" value="${music.duck_amount ?? 0.6}" ${dis}>`)}</div>
@@ -2043,8 +2068,16 @@ function renderTimeline() {
   for (let k = 0; k < TC.audio; k++) lane(`audio:${k}`, `A${k + 2} Audio`, fx.sfx.filter((x) => (x.track || 0) === k), sfxEl, (s) => [s.at, s.at + sfxLen(s)], "sfx", k === 0 ? "SFX / music / voice-over यहाँ खींचें" : "");
   if (E.shorts.length) lanes.push(["shorts", "Shorts", shortsRow, "shorts", LANE_H]);
   const canHide = (id) => /^(text|broll|audio|fx):/.test(id);
+  // audio lanes: mute / solo / volume — heard in the preview (mix.js) and applied in the render (effects.track_gain)
+  const ta = fx.track_audio || (fx.track_audio = {});
+  const audioCtl = (id) => { const c = ta[id] || {}; const muted = id === "audio" ? !!c.mute : hid.has(id);
+    return `<span class="tla"><button class="lbtn ${muted ? "on" : ""}" ${id === "audio" ? `data-tmute="${id}"` : `data-hidetrack="${id}"`} title="mute">${muted ? "🔇" : "🔊"}</button><button class="lbtn ${c.solo ? "on" : ""}" data-tsolo="${id}" title="solo — सिर्फ़ यही lane सुनें">S</button><input type="range" class="tlvol" data-tvol="${id}" min="0" max="1.5" step="0.05" value="${c.vol ?? 1}" title="lane volume ${Math.round((c.vol ?? 1) * 100)}%"></span>`; };
   labels.innerHTML = `<div class="tl-ruler-l"><span class="row" style="gap:.2rem"><button class="lbtn" data-addtrack="text" title="नया text track">+T</button><button class="lbtn" data-addtrack="fx" title="नया effect track">+FX</button><button class="lbtn" data-addtrack="broll" title="नया overlay/video track">+V</button><button class="lbtn" data-addtrack="audio" title="नया audio track">+A</button></span></div>`
-    + lanes.map(([id, l, , k, hh]) => `<div class="tl-l ${hid.has(id) ? "off" : ""}" data-lane="${id}" style="height:${hh}px"><span class="grow">${l}</span>${canHide(id) ? `<button class="lbtn" data-hidetrack="${id}" title="${k === "sfx" ? "mute" : "छिपाएँ"}">${hid.has(id) ? (k === "sfx" ? "🔇" : "🙈") : (k === "sfx" ? "🔊" : "👁")}</button>` : ""}</div>`).join("");
+    + lanes.map(([id, l, , k, hh]) => `<div class="tl-l ${hid.has(id) || ta[id]?.mute ? "off" : ""}" data-lane="${id}" style="height:${hh}px"><span class="grow">${l}</span>${k === "audio" || k === "sfx" ? audioCtl(id) : canHide(id) ? `<button class="lbtn" data-hidetrack="${id}" title="छिपाएँ">${hid.has(id) ? "🙈" : "👁"}</button>` : ""}</div>`).join("");
+  const tlTouch = () => { touch(); renderTimeline(); MIX.applyVideo(); };
+  $$("[data-tmute]", labels).forEach((bt) => (bt.onclick = () => { const id = bt.dataset.tmute; ta[id] = { ...(ta[id] || {}), mute: !ta[id]?.mute }; tlTouch(); }));
+  $$("[data-tsolo]", labels).forEach((bt) => (bt.onclick = () => { const id = bt.dataset.tsolo; ta[id] = { ...(ta[id] || {}), solo: !ta[id]?.solo }; tlTouch(); }));
+  $$("[data-tvol]", labels).forEach((r) => { r.oninput = () => { const id = r.dataset.tvol; ta[id] = { ...(ta[id] || {}), vol: +r.value }; r.title = `lane volume ${Math.round(+r.value * 100)}%`; MIX.applyVideo(); E.dirty = true; }; r.onchange = () => tlTouch(); r.onpointerdown = (e) => e.stopPropagation(); });
   body.style.width = W + "px";
   body.innerHTML = `<div class="tl-ruler" id="tl-ruler">${ruler}${PRO.tlMarkers(X)}<div class="tl-phead" id="tl-phead" style="left:${X(E.t)}px" title="playhead — खींचें"></div></div>`
     + lanes.map(([id, , html, k, hh]) => `<div class="tl-track ${k} ${hid.has(id) ? "off" : ""}" data-track="${id}" style="height:${hh}px">${html}</div>`).join("")
@@ -2053,6 +2086,7 @@ function renderTimeline() {
   $$("[data-hidetrack]", labels).forEach((bt) => (bt.onclick = () => { const id = bt.dataset.hidetrack; const hs = new Set(fx.hidden_tracks || []); hs.has(id) ? hs.delete(id) : hs.add(id); fx.hidden_tracks = [...hs]; touch(); renderTimeline(); renderOverlay(); }));
   const cv = $(".wave", body); if (cv) { const ctx2 = cv.getContext("2d"); ctx2.fillStyle = "rgba(127,196,138,.45)"; const n = peaks.length; const W2 = cv.width; for (let i = 0; i < n; i++) { const x = i / n * W2, w2 = Math.max(1, W2 / n - 0.5), hh = peaks[i] / 100 * 40; ctx2.fillRect(x, 23 - hh / 2, w2, hh); } }
   bindTimeline(); bindDrops(); PRO.bindTlMarkers(body); PRO.bindDiamonds(body);
+  MIX.rebuild();
   $("#tl-info", E.root).textContent = `${fmt(E.dur)} source → ${fmt(outDur())} output · ${E.cuts.filter((c) => c.enabled !== false).length} कट · ${fx.titles.length} text · ${fx.broll.length} B-roll${fx.fxclips.length ? ` · ${fx.fxclips.length} FX` : ""}`;
   $("#t-dur", E.root).textContent = fmt(E.dur);
 }

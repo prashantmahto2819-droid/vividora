@@ -613,9 +613,16 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                                           fade=float(music.get("fade", 1.5)), duck_amount=float(music.get("duck_amount", 0.6)))
             chains.append(chain)
             next_in += 1
+        g1 = fx.track_gain(e, "audio")  # lane A1: voice + AI voice-over + music
+        if abs(g1 - 1.0) > 1e-3:
+            chains.append(f"{cur_a}volume={g1:.3f}[a1g]")
+            cur_a = "[a1g]"
         sfx_labels = []
         for i, s in enumerate(e.get("sfx") or []):
             if not s.get("path"):
+                continue
+            gk = fx.track_gain(e, f"audio:{int(s.get('track', 0) or 0)}")
+            if gk <= 0.001:
                 continue
             inputs += ["-i", str(s["path"])]
             ms = int(float(s.get("at", 0)) * 1000)
@@ -627,7 +634,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             if float(s.get("fade_out", 0) or 0) > 0 and dur > 0:
                 fades += f"afade=t=out:st={max(0.0, dur - float(s['fade_out'])):.3f}:d={float(s['fade_out']):.2f},"
             chains.append(f"[{next_in}:a]{clip}aformat=sample_rates=48000:channel_layouts=mono,{fades}"
-                          f"volume={float(s.get('volume', 0.8)):.2f},adelay={ms}|{ms}[sfx{i}]")
+                          f"volume={float(s.get('volume', 0.8)) * gk:.3f},adelay={ms}|{ms}[sfx{i}]")
             sfx_labels.append(f"[sfx{i}]")
             next_in += 1
         for a_chain, a_label in pro_audio:  # overlay clips' own sound
@@ -638,8 +645,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                           f"dropout_transition=0:normalize=0[asfx]")
             cur_a = "[asfx]"
         target = fx.voice_settings(e.get("voice")).get("loudness") if (e.get("voice") or {}).get("loudness") not in (None, "") else a_cfg.get("loudness", -14)
+        tail = fx.voice_tail(e.get("voice"))
         chains.append(f"{cur_a}loudnorm=I={target}:TP={a_cfg.get('true_peak', -1.5)}:LRA=11,"
-                      f"aresample=48000[a]")
+                      f"aresample=48000{',' + tail if tail else ''}[a]")
         maps += ["-map", "[a]"]
 
     script = work / "filter.txt"

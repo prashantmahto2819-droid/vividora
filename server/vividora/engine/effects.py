@@ -222,6 +222,13 @@ VOICE_PARAMS = {
     "fade_in":  {"label": "fade in (s)", "min": 0, "max": 5, "step": 0.1, "default": 0},
     "fade_out": {"label": "fade out (s)", "min": 0, "max": 5, "step": 0.1, "default": 0},
     "loudness": {"label": "कुल loudness (LUFS)", "min": -24, "max": -9, "step": 0.5, "default": -14},
+    # creative effects (off by default) — group "fx" in the editor
+    "pitch":    {"label": "pitch (semitone)", "min": -6, "max": 6, "step": 0.5, "default": 0, "group": "fx"},
+    "reverb":   {"label": "reverb / हॉल गूँज", "min": 0, "max": 1, "step": 0.05, "default": 0, "group": "fx"},
+    "echo":     {"label": "echo / प्रतिध्वनि", "min": 0, "max": 1, "step": 0.05, "default": 0, "group": "fx"},
+    "echo_ms":  {"label": "echo gap (ms)", "min": 80, "max": 800, "step": 10, "default": 320, "group": "fx"},
+    "chorus":   {"label": "chorus / दोहरी आवाज़", "min": 0, "max": 1, "step": 0.05, "default": 0, "group": "fx"},
+    "width":    {"label": "stereo फैलाव (1 = सीधा)", "min": 1, "max": 2, "step": 0.05, "default": 1, "group": "fx"},
 }
 VOICE_PRESETS = {
     "off":     {"label": "कुछ नहीं (original)", "denoise": "off", "highpass": 0},
@@ -280,6 +287,18 @@ def voice_chain(cfg: dict | None, duration: float) -> str:
     if v["compress"] > 0:
         c = v["compress"]
         f.append(f"acompressor=threshold={-14 - 12 * c:.1f}dB:ratio={1.5 + 4.5 * c:.2f}:attack=6:release=140:makeup={1 + 3 * c:.2f}:knee=4")
+    if abs(v["pitch"]) >= 0.25:
+        k = 2 ** (v["pitch"] / 12)
+        f.append(f"asetrate=48000*{k:.5f},aresample=48000,atempo={1 / k:.5f}")
+    if v["chorus"] > 0:
+        c = v["chorus"]
+        f.append(f"chorus=in_gain=0.6:out_gain={0.35 + 0.55 * c:.2f}:delays=55|68:decays={0.25 + 0.3 * c:.2f}|{0.2 + 0.25 * c:.2f}:speeds=0.25|0.4:depths=2|1.5")
+    if v["echo"] > 0:
+        e, ms = v["echo"], int(v["echo_ms"])
+        f.append(f"aecho=in_gain=1:out_gain=0.95:delays={ms}|{2 * ms}:decays={0.55 * e:.2f}|{0.25 * e:.2f}")
+    if v["reverb"] > 0:
+        r = v["reverb"]
+        f.append(f"aecho=in_gain=1:out_gain=0.9:delays=31|53|79|113|151:decays={0.3 * r:.2f}|{0.25 * r:.2f}|{0.2 * r:.2f}|{0.15 * r:.2f}|{0.1 * r:.2f}")
     if abs(v["volume"] - 1.0) > 1e-3:
         f.append(f"volume={v['volume']:.3f}")
     if v["fade_in"] > 0:
@@ -288,6 +307,36 @@ def voice_chain(cfg: dict | None, duration: float) -> str:
         d = min(v["fade_out"], duration / 2)
         f.append(f"afade=t=out:st={max(0.0, duration - d):.3f}:d={d:.2f}")
     return ",".join(f)
+
+
+def voice_tail(cfg: dict | None) -> str:
+    """Filters that go on the FINAL mix (after loudnorm): stereo width needs a stereo signal, the
+    voice itself is mixed in mono. Empty when nothing is set."""
+    v = voice_settings(cfg)
+    if v["width"] > 1.001:
+        w = v["width"] - 1.0
+        # a Haas widener: a few ms of delay between the channels, scaled by the width slider
+        return (f"aformat=channel_layouts=stereo,haas=level_in=1:level_out=1:side_gain={0.3 + 0.7 * w:.2f}"
+                f":left_delay={2 + 8 * w:.2f}:right_delay={2.1 + 11 * w:.2f}:left_gain=1:right_gain=1")
+    return ""
+
+
+# ---- track-level audio (timeline lane headers: volume / mute / solo) ----
+# effects.track_audio = {"audio": {"vol": 1, "mute": false, "solo": false}, "audio:0": {...}, ...}
+# "audio" is lane A1 (the recording's voice + AI voice-over + music); "audio:k" are the SFX lanes A2+.
+def track_gain(e: dict, lane: str) -> float:
+    """Final gain of a lane after volume, mute and solo (solo on any lane mutes the others)."""
+    ta = e.get("track_audio") or {}
+    if not isinstance(ta, dict):
+        return 1.0
+    solo = {k for k, v in ta.items() if isinstance(v, dict) and v.get("solo")}
+    cfg = ta.get(lane) if isinstance(ta.get(lane), dict) else {}
+    if cfg.get("mute") or (solo and lane not in solo):
+        return 0.0
+    try:
+        return max(0.0, min(2.0, float(cfg.get("vol", 1) if cfg.get("vol") is not None else 1)))
+    except (TypeError, ValueError):
+        return 1.0
 
 
 def overlay_input_args(item: dict, path: Path) -> list[str]:

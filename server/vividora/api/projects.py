@@ -205,8 +205,9 @@ async def audio_preview(request: Request, user: dict):
     t = max(0.0, float(data.get("t") or 0))
     dur = min(20.0, max(3.0, float(data.get("seconds") or 12)))
     opts = {**service.DEFAULT_RENDER, **p.get("settings", {}).get("render", {}), **(data.get("render") or {})}
-    eff = service.resolve_effects_local(p, opts.get("effects") or {})
-    voice = eff.get("voice") or {}
+    eff = service.resolve_effects_local(p, opts.get("effects") or {}, audio=True)
+    raw = bool(data.get("raw"))  # A/B: the untouched voice — no enhancement, no music
+    voice = {"preset": "off"} if raw else (eff.get("voice") or {})
     src = None if voice.get("denoise") in ("light", "off") else service.asset_of(p["id"], "audio_clean")
     src = src or service.asset_of(p["id"], "raw")
     if not src:
@@ -216,10 +217,10 @@ async def audio_preview(request: Request, user: dict):
         with tempfile.TemporaryDirectory(prefix="vap_") as td:
             out = Path(td) / "p.mp3"
             args = ["ffmpeg", "-v", "error", "-y", "-ss", f"{t:.2f}", "-t", f"{dur:.2f}", "-i", str(storage.abs_path(src["path"]))]
-            vchain = fxm.voice_chain(voice, dur)
+            vchain = "" if raw else fxm.voice_chain(voice, dur)
             fc = f"[0:a]aformat=sample_rates=48000:channel_layouts=mono{',' + vchain if vchain else ''}[voice]"
             cur = "[voice]"
-            music = eff.get("music") or {}
+            music = {} if raw else (eff.get("music") or {})
             if music.get("path"):
                 args += ["-stream_loop", "-1", "-i", music["path"]]
                 chain, cur = fxm.music_chain(cur, 1, volume=float(music.get("volume", 0.18)), duck=bool(music.get("duck", True)),
@@ -227,7 +228,8 @@ async def audio_preview(request: Request, user: dict):
                                              duck_amount=float(music.get("duck_amount", 0.6)))
                 fc += ";" + chain
             target = fxm.voice_settings(voice).get("loudness", -14)
-            fc += f";{cur}loudnorm=I={target}:TP=-1.5:LRA=11,aresample=48000[a]"
+            tail = "" if raw else fxm.voice_tail(voice)
+            fc += f";{cur}loudnorm=I={target}:TP=-1.5:LRA=11,aresample=48000{',' + tail if tail else ''}[a]"
             subprocess.run([*args, "-filter_complex", fc, "-map", "[a]", "-t", f"{dur:.2f}", "-c:a", "libmp3lame", "-b:a", "128k", str(out)],
                            check=True, capture_output=True)
             return out.read_bytes()

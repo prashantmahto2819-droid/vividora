@@ -692,6 +692,57 @@ def t_catalogs(c: Checks):
     c.check("heart mask non-empty", 0.15 < arr.mean() < 0.6, round(float(arr.mean()), 3))
 
 
+def _mean_db(path: Path, start: float, dur: float) -> float:
+    vol = subprocess.run(["ffmpeg", "-ss", f"{start:.2f}", "-t", f"{dur:.2f}", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+                         capture_output=True, text=True).stderr
+    return float(vol.split("mean_volume:")[1].split("dB")[0]) if "mean_volume:" in vol else -99.0
+
+
+@test
+def t_track_audio(c: Checks):
+    """Lane volume / mute / solo (effects.track_audio) reach the render; voice FX (reverb/echo/pitch/width) build a valid chain."""
+    from vividora.engine import effects as fxm
+    e = fxm.effects if hasattr(fxm, "effects") else None  # noqa: F841
+    c.check("track_gain solo mutes others", fxm.track_gain({"track_audio": {"audio:0": {"solo": True}}}, "audio") == 0.0, True)
+    c.check("track_gain solo lane keeps vol", fxm.track_gain({"track_audio": {"audio:0": {"solo": True, "vol": 0.5}}}, "audio:0") == 0.5, True)
+    c.check("track_gain mute", fxm.track_gain({"track_audio": {"audio": {"mute": True, "vol": 1}}}, "audio") == 0.0, True)
+    c.check("track_gain default 1", fxm.track_gain({}, "audio:3") == 1.0, True)
+    chain = fxm.voice_chain({"preset": "off", "reverb": 0.5, "echo": 0.4, "pitch": 2, "chorus": 0.3}, 8.0)
+    c.check("voice FX chain has aecho/chorus/asetrate", all(k in chain for k in ("aecho", "chorus", "asetrate")), chain[:160])
+    c.check("voice_tail width", "haas" in fxm.voice_tail({"width": 1.5}) and fxm.voice_tail({"width": 1}) == "", True)
+    # SFX on lane audio:0 at 1 s; lane A1 (the recording's own sound) muted → only the SFX is heard around 1–3 s,
+    # and nothing at 5–7 s. Then the same with A1 at full volume and the SFX lane at 0.25.
+    base = {"sfx": [{"path": str(M["ov"]), "at": 1.0, "volume": 1.0, "dur": 2.0, "track": 0}]}
+    out_a, _, _ = do_render("track_audio_mute", M["face"], {**base, "track_audio": {"audio": {"mute": True}}}, pre=preset(320, 180))
+    c.check("A1 muted: silence outside the SFX", _mean_db(out_a, 5.0, 2.0) < -60, round(_mean_db(out_a, 5.0, 2.0), 1))
+    c.check("A1 muted: SFX still heard", _mean_db(out_a, 1.2, 1.5) > -40, round(_mean_db(out_a, 1.2, 1.5), 1))
+    # loudnorm re-levels the finished mix, so the lane volume is checked in the filter graph itself
+    from vividora.engine import ffmpeg as ffm
+    graphs: list[str] = []
+    real_run = ffm.run
+
+    def spy(cmd, **kw):
+        if "-filter_complex_script" in cmd:
+            graphs.append(Path(cmd[cmd.index("-filter_complex_script") + 1]).read_text())
+        return real_run(cmd, **kw)
+    render.ffmpeg.run = spy
+    try:
+        out_b, _, _ = do_render("track_audio_vol", M["face"], {**base, "track_audio": {"audio:0": {"vol": 0.25}}}, pre=preset(320, 180))
+        out_c, _, _ = do_render("track_audio_full", M["face"], base, pre=preset(320, 180))
+    finally:
+        render.ffmpeg.run = real_run
+    c.check("voice heard when A1 not muted", _mean_db(out_b, 5.0, 2.0) > -50, round(_mean_db(out_b, 5.0, 2.0), 1))
+    c.check("SFX lane volume 0.25 × clip 1.0 in the graph", any("volume=0.250,adelay=1000" in g for g in graphs) and any("volume=1.000,adelay=1000" in g for g in graphs), len(graphs))
+    out_d, _, _ = do_render("track_audio_solo", M["face"], {**base, "track_audio": {"audio:0": {"solo": True}}}, pre=preset(320, 180))
+    c.check("solo SFX lane: voice silent", _mean_db(out_d, 5.0, 2.0) < -60, round(_mean_db(out_d, 5.0, 2.0), 1))
+    out_e, _, _ = do_render("voice_fx", M["face"], {"voice": {"preset": "studio", "reverb": 0.6, "echo": 0.3, "pitch": -2, "width": 1.6, "chorus": 0.2}},
+                            pre=preset(320, 180))
+    info = probe(out_e)
+    c.check("voice FX render has audio, stereo (width)", info["has_audio"] and int(info.get("channels") or 0) in (0, 2), info.get("channels"))
+    c.check("voice FX render not silent", _mean_db(out_e, 1.0, 5.0) > -40, round(_mean_db(out_e, 1.0, 5.0), 1))
+    return {"files": [str(out_a), str(out_e)]}
+
+
 # ------------------------------------------------------------------ main
 def main() -> int:
     global OUT

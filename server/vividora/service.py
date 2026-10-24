@@ -38,6 +38,7 @@ DEFAULT_EFFECTS = {
     "voice_track": "original",       # or a `dub` asset id (AI voice-over); see engine/dub.py
     "voice_track_mode": "replace",   # replace | both (original quieter under the AI voice)
     "voice_track_under": 0.25,
+    "track_audio": {},  # lane volume/mute/solo: {"audio": {vol, mute, solo}, "audio:0": {...}} (engine/effects.py track_gain)
     "pro": {},          # main-video pro tools (stabilize, denoise, sharpen, face_refine, speed_warp, color, morph_cut, mask) — docs/editor-schema.md
 }
 
@@ -607,8 +608,9 @@ def _clean_plan(pl: dict) -> dict:
             "total": round(sum(s["dur"] for s in segs if s["keep"]), 3)}
 
 
-def resolve_effects_local(project: dict, effects: dict) -> dict:
-    """Same as the worker's _resolve_effects, but with files already on this machine."""
+def resolve_effects_local(project: dict, effects: dict, *, audio: bool = False) -> dict:
+    """Same as the worker's _resolve_effects, but with files already on this machine.
+    audio=False drops music/sfx (a frame preview has no sound)."""
     import copy
     e = copy.deepcopy(effects or {})
 
@@ -649,8 +651,9 @@ def resolve_effects_local(project: dict, effects: dict) -> dict:
                     p = lib_path(body[key]); body[key + "_path"] = str(p) if p else None
         else:
             body["enabled"] = False
-    e["music"] = {}  # no audio in a frame preview
-    e["sfx"] = []
+    if not audio:
+        e["music"] = {}  # no audio in a frame preview
+        e["sfx"] = []
     return e
 
 
