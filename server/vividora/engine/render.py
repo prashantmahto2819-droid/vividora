@@ -23,7 +23,7 @@ import math
 import re
 from pathlib import Path
 
-from . import catalog
+from . import catalog, encode
 from . import compose, protools  # pro compositing / main-video pro tools (additive)
 from . import effects as fx
 from . import ffmpeg
@@ -253,7 +253,8 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
            focus_x: float = 0.5, focus_y: float = 0.5, burn_captions: bool | None = None,
            caption_overrides: dict | None = None, effects: dict | None = None,
            clip: dict | None = None, face_track: str = "auto",
-           encoder_preset: str | None = None, on_progress: ProgressFn | None = None) -> dict:
+           encoder_preset: str | None = None, on_progress: ProgressFn | None = None,
+           export: dict | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     e = dict(effects or {})
     # items can be limited to some platforms (Subscribe popup only on YouTube, Follow on IG/FB…)
@@ -275,6 +276,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     fps_max = float(preset.get("video", {}).get("fps_max", 60))
     fps = src_fps if src_fps <= fps_max + 0.5 else fps_max
     fps = round(fps, 3) or 30.0
+    # user export overrides (resolution / fps / codec…) — see engine/encode.py
+    enc = encode.plan(export, preset, meta, fps)
+    w, h, fps = enc["width"], enc["height"], enc["fps"]
 
     keep = [(_snap(a, fps), _snap(b, fps)) for a, b in keep_segments(edl)]
     dub_path = e.get("voice_track_path") if e.get("voice_track") not in (None, "", "original") else None
@@ -646,20 +650,26 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     script.write_text(";\n".join(chains), encoding="utf-8")
 
     vcfg = preset.get("video", {})
-    out = out_dir / f"{name}.mp4"
+    out = out_dir / f"{name}.{enc['container']}"
     gop = max(1, int(math.ceil(fps * 2)))
-    ffmpeg.run(
-        [*inputs, "-filter_complex_script", str(script), *maps,
-         "-c:v", "libx264", "-preset", encoder_preset or vcfg.get("preset", "medium"),
-         "-crf", str(vcfg.get("crf", 20)), "-g", str(gop), "-profile:v", "high",
-         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
-         "-movflags", "+faststart", "-t", f"{new_dur:.3f}", str(out)],
-        duration=new_dur, on_progress=on_progress, label=f"{preset.get('label', name)} रेंडर",
-    )
+    speed = ["-preset", encoder_preset or vcfg.get("preset", "medium")] if enc["preset_arg_ok"] else []
+    base = [*inputs, "-filter_complex_script", str(script), *maps, *enc["vargs"], *speed, "-g", str(gop)]
+    label = f"{preset.get('label', name)} रेंडर"
+    if enc["two_pass"]:
+        # target-bitrate mode: a first pass only measures, the second one writes
+        passlog = str(work / "pass")
+        ffmpeg.run([*base, "-pass", "1", "-passlogfile", passlog, "-an", "-t", f"{new_dur:.3f}", "-f", "null", "/dev/null"],
+                   duration=new_dur, on_progress=(lambda f, m: on_progress(f * 0.5, m + " (pass 1)")) if on_progress else None, label=label)
+        ffmpeg.run([*base, "-pass", "2", "-passlogfile", passlog, *enc["aargs"], *enc["extra"], "-t", f"{new_dur:.3f}", str(out)],
+                   duration=new_dur, on_progress=(lambda f, m: on_progress(0.5 + f * 0.5, m + " (pass 2)")) if on_progress else None, label=label)
+    else:
+        ffmpeg.run([*base, *enc["aargs"], *enc["extra"], "-t", f"{new_dur:.3f}", str(out)],
+                   duration=new_dur, on_progress=on_progress, label=label)
 
-    files = [{"kind": "render", "path": out, "mime": "video/mp4", "label": preset["id"],
+    files = [{"kind": "render", "path": out, "mime": enc["mime"], "label": preset["id"],
               "meta": {"preset": preset["id"], "width": w, "height": h, "duration": round(new_dur, 2),
-                       "fps": fps, "captions": style.get("id") if (burn and style) else None,
+                       "fps": fps, "codec": enc["codec"], "container": enc["container"],
+                       "export": enc["export"] if export else None, "captions": style.get("id") if (burn and style) else None,
                        "clip": clip, "face_track": track_cmds is not None, "segments": len(segs) if use_segments else None,
                        "pro": tap.notes or None,
                        "effects": {"zoom": bool(zoom.get("enabled")), "look": e.get("look") or None,

@@ -67,7 +67,7 @@ def main() -> int:
         fails += 0 if cond else 1
 
     try:
-        for _ in range(100):
+        for _ in range(400):  # a loaded machine installs the starter pack slowly (~40 s seen)
             try:
                 if call("GET", "/health")[0] == 200:
                     break
