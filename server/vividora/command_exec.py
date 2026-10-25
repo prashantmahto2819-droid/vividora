@@ -33,7 +33,7 @@ def run(workspace_id: str, user_id: str | None, text: str, project_id: str | Non
         if not p:
             raise ValueError("कोई project नहीं मिला — पहले recording upload करें")
 
-    busy = p and p["status"] in ("uploading", "preparing", "transcribing", "cutting", "rendering")
+    busy = p and p["status"] in ("uploading", "preparing", "transcribing", "cutting")
     try:
         if it in ("none", "help"):
             res["reply"] = commands.HELP if it == "help" else "समझ नहीं आया 🙏 “help” बोलें/लिखें — क्या-क्या कर सकते हैं।"

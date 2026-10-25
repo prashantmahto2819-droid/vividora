@@ -111,7 +111,13 @@ async function load() {
   const ovQ = S.channels.length > 1 ? `?channel=${S.channel}` : "";
   if (r.kind === "home") { const [t, i, a, o] = await Promise.all([api("GET", "/trends").catch(() => ({ trends: [] })), api("GET", `/ideas?channel=${S.channel}`).catch(() => []), api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [] })), api("GET", "/overview" + ovQ).catch(() => null)]); S.homeTrends = t.trends || []; S.ideas = i; S.analytics = a; S.overview = o; }
   if (r.kind === "projects" && r.id) {
-    S.project = await api("GET", "/projects/" + r.id).catch(() => null);
+    // Progressive loading: project detail parallel में लाओ, editor skeleton पहले दिखाओ
+    const projPromise = api("GET", "/projects/" + r.id).catch(() => null);
+    // अगर editor पहले से open नहीं है तो loading skeleton दिखाओ
+    if (app.dataset.mode !== "editor:" + r.id) {
+      app.dataset.mode = "editor:" + r.id; app.innerHTML = `<div id="edroot"><div style="display:flex;align-items:center;justify-content:center;height:80vh;color:var(--muted,#888);font-size:1.1rem">⏳ Project लोड हो रहा है…</div></div>`;
+    }
+    S.project = await projPromise;
   } else S.project = null;
   if (r.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (r.kind === "users" || (r.kind === "account" && S.user?.role === "admin")) S.users = await api("GET", "/users").catch(() => []);
@@ -134,7 +140,7 @@ async function load() {
 function schedulePoll() {
   clearTimeout(S.poll);
   const busy = S.project && (WORKING.includes(S.project.status) || (S.project.jobs || []).some((j) => ["queued", "running"].includes(j.status)));
-  const anyBusy = S.projects.some((p) => WORKING.includes(p.status)) || (S.route.kind === "home" && (S.overview?.jobs || []).length);
+  const anyBusy = S.projects.some((p) => WORKING.includes(p.status) || (p.settings?.autopilot && p.meta?.autopilot?.stage && p.meta.autopilot.stage !== "ready")) || (S.route.kind === "home" && (S.overview?.jobs || []).length);
   const compBusy = S.route.kind === "compress" && (S.comp?.jobs || []).some((j) => ["queued", "running"].includes(j.status));
   const ytBusy = S.route.kind === "yt-shorts" && (S.ytShorts?.jobs || []).some((j) => ["queued", "running"].includes(j.status));
   if (busy || anyBusy || compBusy || ytBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy || ytBusy ? 2500 : 6000);
@@ -254,7 +260,7 @@ function pcard(p, opts = {}) {
     <div class="pc-thumb"><a class="pc-link" href="${href}" aria-label="${esc(p.title)}"></a>
       ${p.thumb_url ? `<img src="${p.thumb_url}" alt="" loading="lazy">` : `<div class="ph">${ic(p.kind === "montage" ? "music" : "film")}</div>`}
       <span class="pc-status ${cls}">${label}</span>${p.meta?.duration ? `<span class="pc-dur">${fmtDur(p.meta.duration)}</span>` : ""}${p.settings?.autopilot ? `<span class="pc-ap">✈ Autopilot</span>` : ""}
-      ${WORKING.includes(p.status) ? (p.meta?.autopilot?.total && p.settings?.autopilot ? `<div class="pc-prog ap" title="${esc(p.meta.autopilot.label || "")}"><i style="width:${Math.max(4, +p.meta.autopilot.percent || 0)}%"></i><span>${p.meta.autopilot.step}/${p.meta.autopilot.total}</span></div>` : `<div class="pc-prog"><i class="indet"></i></div>`) : ""}
+      ${WORKING.includes(p.status) || (p.settings?.autopilot && p.meta?.autopilot?.stage && p.meta.autopilot.stage !== "ready") ? (p.meta?.autopilot?.total && p.settings?.autopilot ? `<div class="pc-prog ap" title="${esc(p.meta.autopilot.label || "")}"><i style="width:${Math.max(4, +p.meta.autopilot.percent || 0)}%"></i><span>${p.meta.autopilot.step}/${p.meta.autopilot.total}</span></div>` : `<div class="pc-prog"><i class="indet"></i></div>`) : ""}
       ${canEdit ? `<label class="pc-check" title="चुनें"><input type="checkbox" data-sel="${p.id}" ${S.sel.has(p.id) ? "checked" : ""}></label>` : ""}
       ${opts.hover !== false ? `<div class="pc-hover"><a class="btn small" href="#/projects/${p.id}">खोलें</a>${S.user.role !== "viewer" ? `<a class="btn small quiet" href="#/thumbs/${p.id}">Thumbnail</a>` : ""}${canEdit && p.meta?.transcript_skipped && !WORKING.includes(p.status) ? `<button class="btn small quiet" data-trlater="${p.id}" title="transcript छोड़ा था — अब बनाएँ (कट/music वैसे ही रहेंगे)">🎙 Transcript</button>` : ""}</div>` : ""}</div>
     <div class="pc-body"><div class="pc-title"><a href="${href}" title="${esc(p.title)}">${esc(p.title)}</a>${opts.menu !== false ? `<button class="ibtn pc-more" data-menu="${p.id}" aria-label="और विकल्प">${ic("dots")}</button>` : ""}</div>

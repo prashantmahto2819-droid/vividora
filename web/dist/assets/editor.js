@@ -99,8 +99,17 @@ export function mount(root, project, ctx) {
   root.innerHTML = skeleton();
   E.root = root.firstElementChild;
   bindStatic();
-  renderAll();
-  loadLib(); loadRefs();
+  // Progressive loading: skeleton पहले दिखाओ, फिर timeline भरो — बड़े projects में editor तुरंत खुलता दिखे
+  renderTop(); layoutFrame();
+  requestAnimationFrame(() => {
+    if (!E || E.root !== root.firstElementChild) return; // unmount हो गया
+    renderTimeline(); renderOverlay(); renderPlayhead();
+    renderPanel(); renderInspector();
+  });
+  // Library और refs बाद में — timeline data पहले दिखे
+  const idleCb = typeof requestIdleCallback === "function" ? requestIdleCallback : (fn) => setTimeout(fn, 120);
+  idleCb(() => { if (E && E.pid === project.id) loadLib(); });
+  idleCb(() => { if (E && E.pid === project.id) loadRefs(); });
 }
 export function unmount() {
   if (!E) return;
@@ -161,8 +170,17 @@ function jobLabel(j) {
   return JOB_LABEL[j.kind] || j.kind;
 }
 const activeJobs = (p) => (p.jobs || []).filter((j) => ["queued", "running"].includes(j.status));
-// a full re-transcribe / auto-cut rewrites transcript + cuts: editing meanwhile would be overwritten
-function isLocked(p) { return ["transcribing", "cutting", "preparing"].includes(p.status) || activeJobs(p).some((j) => (j.kind === "transcribe" && !jobRange(j)) || j.kind === "autocut" || j.kind === "prepare"); }
+// Editor को सिर्फ़ तब lock करें जब सच में कोई content edit करने को न हो
+// (fresh upload: न transcript है, न edl — तो lock ज़रूरी है)
+// Autopilot re-run / background transcribe / render → editing जारी रखने दें
+function isLocked(p) {
+  const hasContent = !!(p.transcript?.segments?.length || p.edl?.cuts?.length);
+  // fresh upload (no content yet): lock during prepare/transcribe/autocut
+  if (!hasContent && ["transcribing", "cutting", "preparing"].includes(p.status)) return true;
+  if (!hasContent) return activeJobs(p).some((j) => (j.kind === "transcribe" && !jobRange(j)) || j.kind === "autocut" || j.kind === "prepare");
+  // content exists: only lock on a user-initiated full re-transcribe (not "later" mode, not autopilot)
+  return activeJobs(p).some((j) => j.kind === "transcribe" && !jobRange(j) && !j.payload?.later && !(p.settings?.autopilot && p.status !== "transcribing"));
+}
 function plainError(err) {
   const last = String(err || "").trim().split("\n").filter(Boolean).pop() || "";
   if (/memory|killed|oom/i.test(last)) return "मशीन की memory कम पड़ गई";
@@ -211,7 +229,7 @@ function renderJobs() {
   }
   el.innerHTML = `<div class="jhead" id="jobs-grip"><span class="small muted">⠿ काम चल रहे हैं</span><button class="ibtn" id="jobs-min" title="छोटा करें">—</button></div>` + ap + act.slice(0, 4).map((j) => { const pc = Math.max(0, Math.min(100, Math.round(+j.progress || 0)));
     return `<div class="jobrow" title="${esc(j.message || E.p.status_note || "")}"><span class="spin"></span><span class="jl"><b>${esc(jobLabel(j))}</b><span class="muted">${esc(jobSub(j))}</span></span><span class="jp">${j.status === "queued" ? "…" : pc + "%"}</span>${E.canEdit || E.ctx.S.user.role !== "viewer" ? `${j.kind === "render" && j.status === "running" ? `<button class="ibtn jx" data-jpause="${j.id}" title="रोकें — बने हुए टुकड़े अगले render में काम आएँगे">⏸</button>` : ""}<button class="ibtn jx" data-jcancel="${j.id}" title="रद्द करें">✕</button>` : ""}<i style="width:${j.status === "queued" ? 0 : pc}%"></i></div>`; }).join("")
-    + (act.length > 4 ? `<div class="small muted">+${act.length - 4} और</div>` : "") + (E.locked ? `<div class="small jlock">🔒 transcript/कट बन रहे हैं — तब तक editing बंद</div>` : "");
+    + (act.length > 4 ? `<div class="small muted">+${act.length - 4} और</div>` : "") + (E.locked ? `<div class="small jlock">🔒 पहला transcript/कट बन रहा है — editing जल्दी खुलेगी</div>` : "");
   PRO.bindAutopilot(el);
   $("#jobs-min", el).onclick = () => { E.jobsMini = true; saveJobsPref({ mini: true }); renderJobs(); };
   $$("[data-jcancel]", el).forEach((b) => (b.onclick = () => cancelJob(b.dataset.jcancel, b)));
@@ -1451,16 +1469,16 @@ function renderPanel() {
       <details ${mo.texts || mo.text_mode !== "bars" ? "open" : ""}><summary class="small">Text lines (एक line = एक message, | से line break)</summary>${field("", `<textarea id="mo-texts" rows="3" ${dis}>${esc(mo.texts)}</textarea>`)}
       ${auto ? field("कब दिखे", sel("mo-textmode", [["bars", "हर bar पर एक line (धीरे)"], ["beats", "हर strong beat पर एक word (तेज़)"], ["names", "clip के नाम से words, beat पर"]], mo.text_mode || "bars")) : ""}
       <div class="irow">${field("font", `<select id="mo-font" ${dis}>${fontList().map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field("आकार", `<input type="range" id="mo-size" min="0.04" max="0.12" step="0.005" value="${mo.text_size}" ${dis}>`)}</div></details>
-      ${auto ? `<div class="irow" style="margin-top:.6rem"><button class="btn primary" id="mo-auto" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>✨ Auto edit करो (plan + video)</button><button class="btn" id="mo-plan" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>सिर्फ़ plan</button></div>`
-      : `<button class="btn primary" id="mo-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.p.status === "rendering" ? "बन रहा है…" : "Montage बनाएँ"}</button>`}
-      ${E.p.status === "rendering" ? `<p class="small">${esc(E.p.status_note || "")}</p><div class="progress" style="margin-top:.5rem"><i style="width:${job?.progress || 0}%"></i></div>` : ""}
+      ${auto ? `<div class="irow" style="margin-top:.6rem"><button class="btn primary" id="mo-auto" ${dis}>✨ Auto edit करो (plan + video)</button><button class="btn" id="mo-plan" ${dis}>सिर्फ़ plan</button></div>`
+      : `<button class="btn primary" id="mo-render" ${dis}>Montage बनाएँ</button>`}
+      ${job ? `<div class="box" style="background:var(--blue-bg,#e8f0fe);padding:0.4rem 0.8rem;border-radius:8px;margin:0.4rem 0"><p class="small">⏳ ${esc(E.p.status_note || "बन रहा है…")} — editing जारी रखें</p><div class="progress" style="margin-top:.3rem"><i style="width:${job.progress || 0}%"></i></div></div>` : ""}
       ${auto && pl ? `<div class="box" style="margin-top:.8rem"><div class="row between"><b>Plan · ${pl.segments.filter((x) => x.keep !== false).length}/${pl.segments.length} cuts · ${keptDur.toFixed(1)}s · ${pl.bpm} BPM</b>${E.moDirty ? `<span class="small" style="color:var(--accent)">बदलाव बाकी</span>` : ""}</div>
         <p class="small muted">⭐ = सबसे अच्छे हिस्से · 🙂 = चेहरा मिला · 🎢 = drop से पहले slow-mo ramp · ☐ हटाने से cut निकल जाता है (beat sync बना रहता है) · ↻ = उसी clip का दूसरा हिस्सा · − / + = cut की सीमा ¼ beat खिसकाएँ</p>
         ${beatBars}${(pl.warnings || []).map((w) => `<p class="small" style="color:var(--amber)">⚠ ${esc(w)}</p>`).join("")}
         <div class="row" style="gap:.4rem;margin:.3rem 0"><button class="btn small quiet" id="mo-retheme" ${dis}>🎨 theme बदलो → दोबारा plan</button>${pl.theme ? `<span class="small muted">theme: ${esc((themes.find((t) => t.id === pl.theme) || {}).label || pl.theme)}</span>` : ""}</div>
         <ul class="plist moplan">${pl.segments.map(segRow).join("")}</ul>
         ${(pl.alts || []).length ? `<h4>छूटे हुए अच्छे हिस्से — वापस डालें</h4><div class="moalts">${pl.alts.slice(0, 24).map((a, i) => { const it = libItem(a.clip); return `<button class="moalt" data-moins="${i}" title="चुने हुए cut के बाद डालें" ${dis}>${it?.url ? `<img src="${frm(it, a.src_in)}" alt="" loading="lazy">` : ""}<span class="small">${esc((it?.name || "").slice(0, 10))} ${fmt(a.src_in)}${a.face ? " 🙂" : ""}</span></button>`; }).join("")}</div>` : ""}
-        <button class="btn primary" id="mo-rerender" style="margin-top:.6rem" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>🎬 इस plan से video बनाओ</button></div>` : ""}`;
+        <button class="btn primary" id="mo-rerender" style="margin-top:.6rem" ${dis}>🎬 इस plan से video बनाओ</button></div>` : ""}`;
   } else if (t === "refs") {
     const refs = E.refs || []; const RK = { audio: "🎵 audio", video: "🎬 video", effect: "✨ effect", caption: "💬 caption", hook: "🪝 hook", other: "📌" };
     h = `<div class="ph"><h3>References</h3><span class="small muted">trend audio / video / effect</span></div>
@@ -1480,7 +1498,7 @@ function renderPanel() {
         <input type="checkbox" ${sc.selected !== false ? "checked" : ""} ${dis}><div class="grow" style="display:flex;flex-direction:column"><b class="small" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(sc.title || sc.id)}</b><span class="small muted">${fmt(sc.start)} → ${fmt(sc.end)} · ${(sc.end - sc.start).toFixed(0)}s${sc.hook ? ` · hook: ${esc(sc.hook)}` : ""}</span></div></li>`).join("") || `<li class="muted small">अभी कोई सुझाव नहीं — “AI से सुझाव लें” दबाएँ (बिना API key भी चलता है)।</li>`}</ul>
       ${E.shorts.length ? `<div class="box"><div class="irow">${field("format", `<select id="sh-preset" ${dis}>${vert.map((pl) => `<option value="${pl.id}" ${(E.rs.shorts_preset || "yt-short") === pl.id ? "selected" : ""}>${esc(pl.label)}</option>`).join("")}</select>`)}
         <label class="chk small"><input type="checkbox" id="sh-face" ${E.rs.face_track !== "off" ? "checked" : ""} ${dis}> चेहरा track करें</label></div>
-        <button class="btn primary" id="sh-render" ${dis || (E.p.status === "rendering" ? "disabled" : "")}>${E.shorts.filter((x) => x.selected !== false).length} Shorts render करें</button></div>` : ""}`;
+        <button class="btn primary" id="sh-render" ${dis}>${E.shorts.filter((x) => x.selected !== false).length} Shorts render करें</button></div>` : ""}`;
   } else if (t === "effects") {
     const cat = S.presets?.catalog || { categories: {}, effects: [] }; const q = (E.fxq || "").toLowerCase(); const fc = E.fxcat || "";
     const looks = S.presets?.looks || [];
@@ -2417,7 +2435,9 @@ function renderTimeline() {
     + `<div class="tl-play" id="tl-play" style="left:${X(E.t)}px"><b class="tl-grip" title="playhead — खींचें"></b></div>` + PRO.tlDiamonds(E.sel, X);
   $$("[data-addtrack]", labels).forEach((bt) => (bt.onclick = () => { fx.tracks = { ...laneCounts(), ...(fx.tracks || {}) }; fx.tracks[bt.dataset.addtrack] = laneCounts()[bt.dataset.addtrack] + 1; touch(); renderTimeline(); E.ctx.toast("नया track जुड़ा — item उस पर खींचें"); }));
   $$("[data-hidetrack]", labels).forEach((bt) => (bt.onclick = () => { const id = bt.dataset.hidetrack; const hs = new Set(fx.hidden_tracks || []); hs.has(id) ? hs.delete(id) : hs.add(id); fx.hidden_tracks = [...hs]; touch(); renderTimeline(); renderOverlay(); }));
-  const cv = $(".wave", body); if (cv) { const ctx2 = cv.getContext("2d"); ctx2.fillStyle = "rgba(127,196,138,.45)"; const n = peaks.length; const W2 = cv.width; for (let i = 0; i < n; i++) { const x = i / n * W2, w2 = Math.max(1, W2 / n - 0.5), hh = peaks[i] / 100 * 40; ctx2.fillRect(x, 23 - hh / 2, w2, hh); } }
+  // Waveform deferred — timeline पहले दिखे, waveform बाद में draw हो
+  const cv = $(".wave", body);
+  if (cv) { const drawWave = () => { const ctx2 = cv.getContext("2d"); ctx2.fillStyle = "rgba(127,196,138,.45)"; const n = peaks.length; const W2 = cv.width; for (let i = 0; i < n; i++) { const x = i / n * W2, w2 = Math.max(1, W2 / n - 0.5), hh = peaks[i] / 100 * 40; ctx2.fillRect(x, 23 - hh / 2, w2, hh); } }; typeof requestIdleCallback === "function" ? requestIdleCallback(drawWave) : requestAnimationFrame(drawWave); }
   bindTimeline(); bindDrops(); PRO.bindTlMarkers(body); PRO.bindDiamonds(body);
   MIX.rebuild();
   $("#tl-info", E.root).textContent = `${fmt(E.dur)} source → ${fmt(outDur())} output · ${E.cuts.filter((c) => c.enabled !== false).length} कट · ${fx.titles.length} text · ${fx.broll.length} B-roll${fx.fxclips.length ? ` · ${fx.fxclips.length} FX` : ""}`;
@@ -2535,7 +2555,8 @@ function splitAtPlayhead() {
 function renderTop() {
   const ST = { review_cuts: "कट जाँचें", rendering: "render हो रहा है…", review_output: "मंज़ूरी बाकी", approved: "मंज़ूर", failed: "रुक गया" };
   const el = $("#ed-status", E.root); if (el) el.textContent = ST[E.p.status] || E.p.status;
-  const b = $("#ed-export", E.root); if (b) b.disabled = E.p.status === "rendering";
+  // Export button हमेशा चालू रहे — render चल रहा हो तब भी नई settings देख सकते हैं
+  const b = $("#ed-export", E.root); if (b) b.disabled = false;
   E.root.classList.toggle("ed-locked", !!E.locked);
   renderJobs();
 }
@@ -2560,7 +2581,7 @@ function renderExport() {
     ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए</label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
     <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>
     ${exportAdvHtml()}`}
-    ${p.status === "rendering" ? `<div class="progress"><i style="width:${job ? job.progress : 0}%"></i></div><p class="small muted row between"><span>${esc(job ? jobSub(job) : "queue में")}</span>${job && E.canEdit ? `<button class="btn small quiet" data-jcancel="${job.id}">✕ रद्द करें</button>` : ""}</p>` : ""}
+    ${job ? `<div class="box" style="background:var(--blue-bg,#e8f0fe);color:var(--blue-fg,#1a73e8);padding:0.5rem 1rem;border-radius:8px;margin:0.5rem 0"><div class="row between"><span>⏳ Render चल रहा है — editing जारी रखें</span>${E.canEdit ? `<button class="btn small quiet" data-jcancel="${job.id}">✕ रद्द</button>` : ""}</div><div class="progress" style="margin-top:0.3rem"><i style="width:${job.progress || 0}%"></i></div><p class="small muted">${esc(jobSub(job))}</p></div>` : ""}
     ${outs.length ? `<h3>तैयार वीडियो</h3><div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
       return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(a.label?.startsWith("short-") ? (a.meta.title || a.label) : pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}${a.meta.height ? ` · ${a.meta.height > a.meta.width ? a.meta.width : a.meta.height}p` : ""}${a.meta.codec && a.meta.codec !== "h264" ? ` · ${a.meta.codec.toUpperCase()}` : ""}${a.size ? ` · ${mb(a.size)}` : ""}</span></div>${sigBadge(a)}<div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}${p.status === "approved" && E.canEdit && (E.conns?.connections || []).length ? `<button class="btn small primary" data-pub="${a.id}">Publish</button>` : ""}</div>
         ${(E.pubs || []).filter((x) => x.asset_id === a.id).map((x) => `<div class="small pubrow ${x.status}">${PLAT[x.platform] || x.platform}: ${x.status === "done" ? `<a href="${x.url}" target="_blank" rel="noopener">${esc(x.url || "हो गया")}</a>` : x.status === "failed" ? `<span class="muted">असफल — ${esc((x.error || "").slice(0, 120))}</span>` : "upload हो रहा…"}</div>`).join("")}</div>`; }).join("")}</div>` : ""}
@@ -2570,7 +2591,7 @@ function renderExport() {
       <p class="small muted">title/description AI ने transcript से लिखे — बदलना हो तो यहीं बदलें; अलग से publish करने के लिए ऊपर हर output का Publish button।</p></div>` : ""}
     ${E.pubFor ? publishForm(E.pubFor) : ""}
     <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? `मंज़ूर ✓ ${p.meta?.archived_at ? `· archived (${esc(p.meta.archive || "")}) <button class="btn small quiet" id="restore">raw वापस लाएँ</button>` : E.canEdit ? `<button class="btn small quiet" id="archive" title="raw files को Drive/archive पर भेजें, server खाली">☁ archive</button>` : ""}` : ""}</span>
-      <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit && !E.montage ? `<button class="btn primary" id="go-render" ${p.status === "rendering" ? "disabled" : ""}>${p.status === "rendering" ? "render हो रहा…" : allFresh(outs) ? "दोबारा render (बदलाव नहीं)" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
+      <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit && !E.montage ? `<button class="btn primary" id="go-render">${allFresh(outs) ? "दोबारा render (बदलाव नहीं)" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };
   $$("[data-jcancel]", m).forEach((b) => (b.onclick = () => cancelJob(b.dataset.jcancel, b)));
   $$("[data-pub]", m).forEach((b) => (b.onclick = () => { const a = p.assets.find((x) => x.id === b.dataset.pub); E.pubFor = { asset: a, title: "", description: "", tags: "", conn: "", privacy: "private", when: "" }; renderExport(); $("#pubform", m)?.scrollIntoView({ behavior: "smooth" }); }));

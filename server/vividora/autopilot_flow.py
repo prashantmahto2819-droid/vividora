@@ -62,7 +62,12 @@ def _save_state(c, pid: str, **changes: Any) -> dict:
 
 
 def enter(c, pid: str, stage: str, detail: str = "", status: str | None = None) -> None:
-    """Move to `stage` and say so: status_note "n/11 · …", meta.autopilot.{stage, step, total, percent}."""
+    """Move to `stage` and say so: status_note "n/11 · …", meta.autopilot.{stage, step, total, percent}.
+
+    Non-blocking: when the project already has a transcript/edl (= the editor has content to
+    show), autopilot uses 'review_cuts' instead of 'transcribing'/'cutting' so the editor
+    stays unlocked. Progress goes into status_note + meta.autopilot (the jobs panel picks it up).
+    """
     n, total = ap_eng.step_no(stage), len(ap_eng.STEPS)
     p = db.get("projects", pid) or {}
     hist = list(state(p).get("history") or [])
@@ -70,7 +75,14 @@ def enter(c, pid: str, stage: str, detail: str = "", status: str | None = None) 
         hist.append({"stage": stage, "at": db.now()})
     _save_state(c, pid, stage=stage, step=n, total=total, label=dict(ap_eng.STEPS).get(stage, stage),
                 percent=round((n - 1) * 100 / total), history=hist[-30:], failed=None)
-    db.update(c, "projects", pid, {"status": status or STATUS_FOR.get(stage, "rendering"),
+    # non-blocking: project जिसमें content है, उसका status blocking ("transcribing"/"cutting") न रखें
+    if status is None:
+        has_content = bool((p.get("transcript") or {}).get("segments")) or bool((p.get("edl") or {}).get("cuts"))
+        if has_content and stage in STATUS_FOR:
+            status = "review_cuts"  # editor खुला रहेगा, progress jobs panel + status_note में दिखेगा
+        else:
+            status = STATUS_FOR.get(stage, "rendering")
+    db.update(c, "projects", pid, {"status": status,
                                    "status_note": ap_eng.step_note(stage, detail), "updated_at": db.now()})
 
 
@@ -523,9 +535,13 @@ def resume(c, project: dict) -> str:
 def kick() -> None:
     """Watchdog (every minute + at start): finish steps lost to an API restart, wake a step whose
     jobs are all gone, and say so when no worker can take a waiting job."""
+    # non-blocking autopilot: review_cuts भी शामिल क्योंकि content वाले projects
+    # अब review_cuts status में रहते हैं जब तक autopilot चल रहा है
     rows = db.rows(db.conn().execute(
-        "SELECT * FROM projects WHERE status IN ('preparing','transcribing','cutting','rendering') "
-        "AND json_extract(settings, '$.autopilot') = 1"))
+        "SELECT * FROM projects WHERE status IN ('preparing','transcribing','cutting','rendering','review_cuts') "
+        "AND json_extract(settings, '$.autopilot') = 1 "
+        "AND json_extract(meta, '$.autopilot.stage') IS NOT NULL "
+        "AND json_extract(meta, '$.autopilot.stage') != 'ready'"))
     for p in rows:
         st = state(p)
         stage = st.get("stage")

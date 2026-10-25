@@ -637,8 +637,7 @@ async def matte_lib_now(request: Request, user: dict):
 @require("editor")
 async def montage_render(request: Request, user: dict):
     p = own_project(request, user)
-    if p["status"] == "rendering":
-        raise ApiError(400, "पहले वाला render पूरा होने दें")
+    # montage render चलने दें — पुराना cancel हो जाता है (queue.enqueue already handles this)
     data = await body(request)
     try:
         with db.tx() as c:
@@ -665,8 +664,8 @@ async def shorts_plan(request: Request, user: dict):
 @require("editor")
 async def shorts_render(request: Request, user: dict):
     p = own_project(request, user)
-    if p["status"] in ("uploading", "preparing", "transcribing", "cutting", "rendering"):
-        raise ApiError(400, "अभी दूसरा काम चल रहा है")
+    if p["status"] in ("uploading", "preparing", "transcribing", "cutting"):
+        raise ApiError(400, "पहले transcript और कट पूरे होने दें")
     data = await body(request)
     clips = data.get("clips") or []
     if not isinstance(clips, list):
