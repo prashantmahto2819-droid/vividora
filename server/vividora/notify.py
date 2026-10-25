@@ -54,7 +54,8 @@ def _send(text: str) -> None:
         headers["X-Api-Key"] = settings.notify_token
     req = urllib.request.Request(settings.notify_url, data=body.encode(), method="POST", headers=headers)
     try:
-        urllib.request.urlopen(req, timeout=15).read()
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read()
     except Exception as e:  # noqa: BLE001 — a lost notification must never break a job
         log.warning("notify failed: %s", e)
 
