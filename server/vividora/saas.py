@@ -35,10 +35,10 @@ SEED_PLANS = [
     {"id": "free", "name": "Free (trial)", "price_inr": {"monthly": 0, "quarterly": 0, "annual": 0}, "order": 0,
      "limits": {"ai_credits": 30, "render_minutes": 30, "storage_gb": 5, "max_export_height": 1080,
                 "concurrent_jobs": 1, "premium_voices": False, "music_gen": False, "templates": 10}},
-    {"id": "creator", "name": "Creator", "price_inr": {"monthly": 0, "quarterly": 0, "annual": 0}, "order": 1,
+    {"id": "creator", "name": "Creator", "price_inr": {"monthly": 499, "quarterly": 1299, "annual": 4799}, "order": 1,
      "limits": {"ai_credits": 300, "render_minutes": 300, "storage_gb": 50, "max_export_height": 1080,
                 "concurrent_jobs": 1, "premium_voices": True, "music_gen": False, "templates": 100}},
-    {"id": "studio", "name": "Studio", "price_inr": {"monthly": 0, "quarterly": 0, "annual": 0}, "order": 2,
+    {"id": "studio", "name": "Studio", "price_inr": {"monthly": 1499, "quarterly": 3999, "annual": 14399}, "order": 2,
      "limits": {"ai_credits": 1500, "render_minutes": 1500, "storage_gb": 250, "max_export_height": 2160,
                 "concurrent_jobs": 2, "premium_voices": True, "music_gen": True, "templates": 1000}},
 ]
