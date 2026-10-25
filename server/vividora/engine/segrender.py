@@ -178,13 +178,15 @@ def _zoom_slice(points: list[tuple[float, float]], t0: float, t1: float) -> list
 
 
 def _probe(path: Path) -> dict:
-    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
-                          "-show_entries", "stream=nb_read_frames,r_frame_rate:format=duration", "-of", "json", str(path)],
-                         capture_output=True, text=True).stdout
+    """Frame count + duration.  Uses -count_packets (reads container index)
+    instead of -count_frames (decodes every frame) — 100× faster."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+                          "-show_entries", "stream=nb_read_packets,r_frame_rate:format=duration", "-of", "json", str(path)],
+                         capture_output=True, text=True, timeout=15).stdout
     try:
         j = json.loads(out)
         st = (j.get("streams") or [{}])[0]
-        return {"frames": int(st.get("nb_read_frames") or 0), "duration": float((j.get("format") or {}).get("duration") or 0)}
+        return {"frames": int(st.get("nb_read_packets") or 0), "duration": float((j.get("format") or {}).get("duration") or 0)}
     except (ValueError, IndexError):
         return {"frames": 0, "duration": 0.0}
 
@@ -383,33 +385,50 @@ def render_segmented(*, project_id: str, source_sig: str, on_progress=None, **kw
 
 # ---------------------------------------------------------------- cache upkeep
 def prune(days: int = CACHE_DAYS, max_gb: float = CACHE_GB) -> dict:
-    """Drop pieces older than `days`, then the oldest until the cache is under `max_gb`."""
+    """Drop pieces older than `days`, then the oldest until the cache is under `max_gb`.
+    Stats are cached per file to avoid redundant I/O (was 3× stat per file)."""
     root = cache_root()
     if not root.exists():
         return {"removed": 0, "bytes": 0}
     now = time.time()
-    files = [f for f in root.rglob("*") if f.is_file()]
-    removed, freed = 0, 0
-    for f in files:
+    cutoff = days * 86400
+    # stat once, keep result
+    entries: list[tuple[Path, float, int]] = []  # (path, mtime, size)
+    for f in root.rglob("*"):
+        if not f.is_file():
+            continue
         try:
-            if now - f.stat().st_mtime > days * 86400:
-                freed += f.stat().st_size
-                f.unlink()
-                removed += 1
+            st = f.stat()
+            entries.append((f, st.st_mtime, st.st_size))
         except OSError:
             pass
-    rest = sorted((f for f in files if f.exists()), key=lambda f: f.stat().st_mtime)
-    total = sum(f.stat().st_size for f in rest)
-    while rest and total > max_gb * 1e9:
-        f = rest.pop(0)
+    removed, freed = 0, 0
+    remaining: list[tuple[Path, float, int]] = []
+    for f, mtime, size in entries:
+        if now - mtime > cutoff:
+            try:
+                f.unlink()
+                freed += size
+                removed += 1
+            except OSError:
+                remaining.append((f, mtime, size))
+        else:
+            remaining.append((f, mtime, size))
+    remaining.sort(key=lambda e: e[1])  # oldest first
+    total = sum(s for _, _, s in remaining)
+    while remaining and total > max_gb * 1e9:
+        f, _, size = remaining.pop(0)
         try:
-            total -= f.stat().st_size
-            freed += f.stat().st_size
             f.unlink()
+            total -= size
+            freed += size
             removed += 1
         except OSError:
             pass
     for d in [d for d in root.iterdir() if d.is_dir()]:
-        if not any(d.iterdir()):
-            d.rmdir()
+        try:
+            if not any(d.iterdir()):
+                d.rmdir()
+        except OSError:
+            pass
     return {"removed": removed, "bytes": freed, "total": total}

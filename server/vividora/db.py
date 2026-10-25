@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   started_at TEXT, heartbeat_at TEXT, finished_at TEXT);
 CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status, kind, created_at);
 CREATE INDEX IF NOT EXISTS jobs_project ON jobs(project_id, created_at);
+CREATE INDEX IF NOT EXISTS jobs_run_after ON jobs(run_after) WHERE run_after IS NOT NULL;
 CREATE TABLE IF NOT EXISTS activity (
   id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, user_id TEXT, project_id TEXT,
   action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
@@ -74,6 +75,7 @@ CREATE TABLE IF NOT EXISTS publications (
   status TEXT NOT NULL DEFAULT 'queued', payload TEXT NOT NULL DEFAULT '{}', remote_id TEXT, url TEXT,
   error TEXT, created_by TEXT, created_at TEXT NOT NULL, finished_at TEXT);
 CREATE INDEX IF NOT EXISTS publications_project ON publications(project_id, created_at);
+CREATE INDEX IF NOT EXISTS publications_ws ON publications(workspace_id, created_at);
 CREATE TABLE IF NOT EXISTS trends (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, source TEXT NOT NULL, title TEXT NOT NULL, url TEXT,
   score REAL NOT NULL DEFAULT 0, meta TEXT NOT NULL DEFAULT '{}', fetched_at TEXT NOT NULL);

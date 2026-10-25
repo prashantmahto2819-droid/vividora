@@ -82,6 +82,11 @@ async def _scheduler():
         try:
             with db.tx() as c:
                 queue.requeue_stale(c)
+            # WAL checkpoint: prevent unbounded WAL file growth on long-running servers
+            try:
+                db.conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:  # noqa: BLE001
+                pass
             await run_in_threadpool(archive.sweep)
             from . import radar_job
             await run_in_threadpool(radar_job.tick)
@@ -167,8 +172,11 @@ def create_app() -> Starlette:
     routes.append(Route("/{path:path}", spa))
 
     class _Revalidate:
-        """App files (JS/CSS/HTML) must never be reused from the browser cache after an update:
-        "no-cache" makes the browser ask every time (a cheap 304 when nothing changed)."""
+        """Cache policy:
+        /assets/*  → immutable, 1 year (filenames contain content hashes from the build)
+        everything else (index.html, manifest, sw.js) → no-cache (304 when unchanged)
+        /api/ and /pub/ → untouched (backend sets its own headers)
+        """
         def __init__(self, app):
             self.app = app
 
@@ -177,10 +185,15 @@ def create_app() -> Starlette:
             if not path or path.startswith("/api/") or path.startswith("/pub/"):
                 return await self.app(scope, receive, send)
 
+            is_hashed = path.startswith("/assets/")
+
             async def send2(msg):
                 if msg["type"] == "http.response.start":
                     hs = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
-                    hs.append((b"cache-control", b"no-cache"))
+                    if is_hashed:
+                        hs.append((b"cache-control", b"public, max-age=31536000, immutable"))
+                    else:
+                        hs.append((b"cache-control", b"no-cache"))
                     msg = {**msg, "headers": hs}
                 await send(msg)
             return await self.app(scope, receive, send2)
