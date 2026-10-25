@@ -34,8 +34,13 @@ async def list_projects(request: Request, user: dict):
         args.append(ch)
     q += " ORDER BY updated_at DESC LIMIT 200"
     projects = db.rows(db.conn().execute(q, args))
-    thumbs = {a["project_id"]: a["id"] for a in db.rows(db.conn().execute(
-        "SELECT id, project_id FROM assets WHERE kind = 'thumb'"))}
+    pids = [p["id"] for p in projects]
+    if pids:
+        marks = ", ".join("?" for _ in pids)
+        thumbs = {a["project_id"]: a["id"] for a in db.rows(db.conn().execute(
+            f"SELECT id, project_id FROM assets WHERE kind = 'thumb' AND project_id IN ({marks})", pids))}
+    else:
+        thumbs = {}
     out = []
     for p in projects:
         p.pop("transcript", None)

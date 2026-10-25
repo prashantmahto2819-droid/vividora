@@ -461,12 +461,12 @@ function bindHome() {
 function loginView() {
   const q = new URLSearchParams((location.hash.split("?")[1] || "")); const signup = /^#\/signup/.test(location.hash); const invite = q.get("invite") || "";
   if (signup) return `<div class="login"><form id="signup"><div class="brand"><i></i>Vividora</div><p class="muted">${invite ? "आपको इस studio में बुलाया गया है — अपना account बनाएँ।" : "नया account — 14 दिन का free trial, card नहीं चाहिए।"}</p>
-    <div class="field"><label>आपका नाम</label><input name="name" required maxlength="80" autocomplete="name"></div>
+    <div class="field"><label>आपका नाम</label><input name="name" required maxlength="80" autocomplete="name" placeholder="आपका पूरा नाम"></div>
     ${invite ? "" : `<div class="field"><label>Studio / channel का नाम</label><input name="workspace" maxlength="80" placeholder="जैसे: Prashant Motivation"></div>`}
-    <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
-    <div class="field"><label>Password (8+ अक्षर, अक्षर और अंक दोनों)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required><div id="pw-meter" class="small" style="margin-top:.25rem"></div></div>
+    <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required placeholder="you@example.com"></div>
+    <div class="field"><label>Password</label><input name="password" type="password" autocomplete="new-password" minlength="8" required placeholder="8+ अक्षर, अक्षर और अंक दोनों"><div id="pw-meter" class="small" style="margin-top:.3rem"></div></div>
     <input type="hidden" name="invite" value="${esc(invite)}">
-    <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Account बनाएँ</button>
+    <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">🚀 Free Trial शुरू करें</button>
     <p class="small muted" style="margin-top:.8rem;text-align:center">पहले से account है? <a href="#/" id="to-login">Login करें</a></p></form></div>`;
   const reset = /^#\/reset/.test(location.hash);
   if (reset) { const rt = new URLSearchParams((location.hash.split("?")[1] || "")).get("t") || "";
@@ -481,12 +481,12 @@ function loginView() {
     <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
     <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Reset link भेजें</button>
     <p class="small muted" style="margin-top:.8rem;text-align:center"><a href="#/">← Login पर जाएँ</a></p></form></div>`;
-  return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका video studio — आगे बढ़ने के लिए login करें।</p>
-    <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
+  return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका AI video studio — login करें और बनाना शुरू करें।</p>
+    <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required placeholder="you@example.com"></div>
     <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
     <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Login करें</button>
     <p class="small muted" style="margin-top:.6rem;text-align:center"><a href="#/forgot">Password भूल गए?</a></p>
-    <p class="small muted" id="signup-link" style="margin-top:.4rem;text-align:center" hidden>नया हैं? <a href="#/signup">Free trial शुरू करें</a></p></form></div>`;
+    <p class="small muted" id="signup-link" style="margin-top:.4rem;text-align:center" hidden>नया हैं? <a href="#/signup"><b>Free trial शुरू करें →</b></a></p></form></div>`;
 }
 function bindLogin() {
   const finish = async (r, isNewSignup) => { S.token = r.token; S.user = r.user; S.ws = r.workspace; S.saas = !!r.saas; localStorage.setItem("vividora_token", r.token); location.hash = "#/"; await load(); render();
@@ -1496,21 +1496,23 @@ function bindAccount() {
 // ---------- SaaS: plan / billing / admin ----------
 function planMini(pi) {
   const l = pi.limits || {}, u = pi.usage || {}, left = pi.left || {};
-  const bar = (used, cap, label) => { const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0; return `<div class="small">${label}: <b>${used}</b> / ${cap}</div><div class="stbar"><i style="width:${pct}%;background:${pct > 90 ? "#e5484d" : pct > 70 ? "#f2b33d" : "#46a758"}"></i></div>`; };
-  return `<p><b>${esc(pi.plan?.name || "—")}</b> <span class="pill">${esc(pi.status || "")}</span>${pi.period_end ? `<br><span class="small muted">${pi.status === "trialing" ? "trial खत्म" : "अगला renewal"}: ${new Date(pi.period_end).toLocaleDateString("hi-IN")}</span>` : ""}</p>
-    ${bar(u.ai_calls || 0, l.ai_credits || 0, "AI credits")}${bar(Math.round((u.render_seconds || 0) / 60), l.render_minutes || 0, "Render minutes")}${bar(((u.storage_bytes || 0) / 1024 ** 3).toFixed(1), l.storage_gb || 0, "Storage GB")}
-    <p class="small muted">Export ${l.max_export_height || 1080}p तक · एक साथ ${l.concurrent_jobs || 1} काम · premium आवाज़ें ${l.premium_voices ? "✓" : "✗"}</p>`;
+  const bar = (used, cap, label, icon) => { const pct = cap ? Math.min(100, Math.round(used / cap * 100)) : 0; return `<div class="small" style="display:flex;justify-content:space-between;align-items:center"><span>${icon} ${label}</span><span style="font-weight:600;color:${pct > 90 ? "#e5484d" : pct > 70 ? "#f2b33d" : "inherit"}">${used} / ${cap}</span></div><div class="stbar"><i style="width:${pct}%;background:${pct > 90 ? "#e5484d" : pct > 70 ? "#f2b33d" : "#46a758"}"></i></div>`; };
+  const statusLabel = { active: "चालू", trialing: "trial", past_due: "भुगतान बाकी", cancelled: "बंद" };
+  return `<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem"><b style="font-size:1.1rem">${esc(pi.plan?.name || "—")}</b><span class="pill ${pi.status === "active" || pi.status === "trialing" ? "ok" : "warn"}">${esc(statusLabel[pi.status] || pi.status || "")}</span></div>
+    ${pi.period_end ? `<p class="small muted" style="margin:0 0 .5rem">${pi.status === "trialing" ? "⏱ Trial खत्म" : "🔄 अगला renewal"}: <b>${new Date(pi.period_end).toLocaleDateString("hi-IN")}</b></p>` : ""}
+    ${bar(u.ai_calls || 0, l.ai_credits || 0, "AI credits", "🤖")}${bar(Math.round((u.render_seconds || 0) / 60), l.render_minutes || 0, "Render minutes", "🎬")}${bar(((u.storage_bytes || 0) / 1024 ** 3).toFixed(1), l.storage_gb || 0, "Storage GB", "💾")}
+    <p class="small muted" style="margin-top:.4rem">Export ${l.max_export_height || 1080}p तक · एक साथ ${l.concurrent_jobs || 1} काम · premium आवाज़ें ${l.premium_voices ? "✓" : "✗"}</p>`;
 }
 function billingView() {
   const pi = S.planInfo; if (!pi) return `<h1>Plan</h1><p class="muted">जानकारी नहीं मिली।</p>`;
-  if (!pi.saas) return `<div class="pghead"><div><h1>Plan</h1></div></div><div class="note">यह self-hosted install है — कोई plan/limit नहीं। (SAAS_MODE=1 करने पर plans चालू होते हैं।)</div>`;
+  if (!pi.saas) return `<div class="pghead"><div><h1>Plan & billing</h1></div></div><div class="note" style="border-radius:12px;padding:1.25rem;text-align:center"><p style="font-size:1.1rem;margin:0 0 .3rem">🏠 Self-hosted mode</p><p class="muted" style="margin:0">सारी features unlimited हैं — कोई plan/limit नहीं।<br><span class="small">SaaS plans चालू करने के लिए <code>SAAS_MODE=1</code> .env में जोड़ें।</span></p></div>`;
   const admin = S.user.role === "admin"; const cyc = S.billCycle || "monthly";
   const price = (p) => { const v = (p.price_inr || {})[cyc]; return v ? `₹${v.toLocaleString("en-IN")} / ${{ monthly: "महीना", quarterly: "3 महीने", annual: "साल" }[cyc]}` : (p.id === "free" ? "₹0" : "कीमत जल्द"); };
-  return `<div class="pghead"><div><h1>Plan & billing</h1><p class="muted small">आपका plan, इस period का उपयोग, और receipts।</p></div></div>
-    <div class="setgrid"><section class="card"><div class="card-h"><h2>अभी</h2></div>${planMini(pi)}${admin && pi.plan && pi.plan.id !== "free" && pi.status === "active" ? `<button class="btn quiet small danger" id="bill-cancel">period के अंत में बंद करें</button>` : ""}</section>
+  return `<div class="pghead"><div><h1>Plan & billing</h1><p class="muted small">आपका plan, उपयोग, और receipts — सब एक जगह।</p></div></div>
+    <div class="setgrid"><section class="card"><div class="card-h"><h2>📊 मौजूदा plan</h2></div>${planMini(pi)}${admin && pi.plan && pi.plan.id !== "free" && pi.status === "active" ? `<button class="btn quiet small danger" id="bill-cancel" style="margin-top:.5rem">⏹ Period के अंत में बंद करें</button>` : ""}</section>
     <section class="card"><div class="card-h"><h2>Plans</h2><div class="seg" id="bill-cycle">${["monthly", "quarterly", "annual"].map((c) => `<button data-c="${c}" class="${c === cyc ? "on" : ""}">${{ monthly: "महीना", quarterly: "तिमाही", annual: "साल" }[c]}</button>`).join("")}</div></div>
-      <div class="plans">${(pi.plans || []).map((p) => `<div class="plan ${pi.plan?.id === p.id ? "on" : ""}"><h3>${esc(p.name)}</h3><p class="price">${price(p)}</p><ul class="small"><li>${p.limits.ai_credits} AI credits</li><li>${p.limits.render_minutes} render minutes</li><li>${p.limits.storage_gb} GB storage</li><li>${p.limits.max_export_height}p export</li><li>${p.limits.concurrent_jobs} साथ-साथ काम</li><li>premium आवाज़ें ${p.limits.premium_voices ? "✓" : "✗"}</li></ul>
-        ${pi.plan?.id === p.id ? `<span class="pill">मौजूदा</span>` : admin && p.id !== "free" ? `<button class="btn primary small" data-buy="${p.id}" ${pi.billing ? "" : "disabled title='payment अभी चालू नहीं'"}>${pi.billing ? "यह लें" : "जल्द"}</button>` : ""}</div>`).join("")}</div>
+      <div class="plans">${(pi.plans || []).map((p) => { const rec = p.id === "creator"; return `<div class="plan ${pi.plan?.id === p.id ? "on" : ""} ${rec ? "recommended" : ""}"><h3>${esc(p.name)}</h3><p class="price">${price(p)}</p><ul><li>${p.limits.ai_credits} AI credits</li><li>${p.limits.render_minutes} render min</li><li>${p.limits.storage_gb} GB storage</li><li>${p.limits.max_export_height}p export</li><li>${p.limits.concurrent_jobs} साथ-साथ काम</li>${p.limits.premium_voices ? `<li>premium आवाज़ें</li>` : ""}</ul>
+        ${pi.plan?.id === p.id ? `<span class="pill">मौजूदा</span>` : admin && p.id !== "free" ? `<button class="btn primary small" data-buy="${p.id}" ${pi.billing ? "" : "disabled title='payment अभी चालू नहीं'"}>${pi.billing ? "यह लें" : "जल्द"}</button>` : ""}</div>`; }).join("")}</div>
       ${pi.billing ? `<p class="small muted">Payment Razorpay पर होता है (UPI, card, netbanking) — card की जानकारी यहाँ नहीं आती।</p>` : `<p class="small muted">Online payment अभी चालू नहीं — admin से बात करें।</p>`}</section></div>
     <section class="card"><div class="card-h"><h2>Receipts</h2></div>${(pi.invoices || []).length ? `<div class="tablewrap"><table><tr><th>तारीख़</th><th>Plan</th><th>राशि</th><th>Period</th><th></th></tr>${pi.invoices.map((i) => `<tr><td>${new Date(i.created_at).toLocaleDateString("hi-IN")}</td><td>${esc(i.plan_id)}</td><td>₹${(+i.amount_inr).toLocaleString("en-IN")}</td><td class="small muted">${(i.period_start || "").slice(0, 10)} → ${(i.period_end || "").slice(0, 10)}</td><td><a class="btn small" target="_blank" rel="noopener" href="/api/billing/invoices/${i.id}">receipt</a></td></tr>`).join("")}</table></div>` : `<p class="small muted">अभी कोई payment नहीं।</p>`}</section>`;
 }
@@ -1539,23 +1541,57 @@ function bindAdmin() {
 function showOnboarding() {
   const overlay = document.createElement("div");
   overlay.id = "onboard-overlay";
+  const firstName = esc(S.user.name.split(" ")[0]);
+  const steps = [
+    { href: "#/record", icon: "🎙", title: "Record / Upload", desc: "पहला वीडियो बनाना शुरू करें", tag: "शुरू करें" },
+    { href: "#/templates", icon: "📋", title: "Templates देखें", desc: `${(S.templates || []).length || 80}+ industry templates`, tag: "तैयार" },
+    { href: "#/characters", icon: "👤", title: "2D / 3D Characters", desc: "200+ animated characters — Pixar quality", tag: "नया" },
+    { href: "#/settings", icon: "🎨", title: "Brand Kit सेट करें", desc: "logo, रंग, font, watermark", tag: "" },
+  ];
   overlay.innerHTML = `<div class="onboard-card">
-    <h2>🎬 स्वागत है, ${esc(S.user.name.split(" ")[0])}!</h2>
-    <p>Vividora आपका AI video studio है — record करें, AI editing करवाएँ, और YouTube / Instagram पर publish करें।</p>
-    <div class="onboard-steps">
-      <a href="#/record" class="onboard-step" data-close><span class="onboard-icon">🎙</span><b>Record / Upload</b><span class="small muted">पहला वीडियो बनाना शुरू करें</span></a>
-      <a href="#/templates" class="onboard-step" data-close><span class="onboard-icon">📋</span><b>Templates देखें</b><span class="small muted">${(S.templates || []).length || 80}+ industry templates</span></a>
-      <a href="#/characters" class="onboard-step" data-close><span class="onboard-icon">👤</span><b>2D Characters</b><span class="small muted">200 animated characters</span></a>
-      <a href="#/settings" class="onboard-step" data-close><span class="onboard-icon">🎨</span><b>Brand Kit सेट करें</b><span class="small muted">logo, रंग, font, watermark</span></a>
+    <div class="onboard-header">
+      <div class="onboard-logo">🎬</div>
+      <h2>स्वागत है, ${firstName}!</h2>
+      <p>Vividora आपका AI video studio है — record करें, AI editing करवाएँ, और YouTube / Instagram पर publish करें।</p>
     </div>
-    <button class="btn small quiet" id="onboard-close">बाद में देखूँगा</button>
-    ${S.saas ? `<p class="small muted" style="margin-top:.5rem">14 दिन का free trial चालू है — कोई card नहीं लगा।</p>` : ""}
+    <div class="onboard-steps">
+      ${steps.map((s, i) => `<a href="${s.href}" class="onboard-step" data-close>
+        <span class="onboard-num">${i + 1}</span>
+        <span class="onboard-icon">${s.icon}</span>
+        <span class="onboard-text"><b>${s.title}</b>${s.tag ? `<span class="onboard-tag">${s.tag}</span>` : ""}<span class="small muted">${s.desc}</span></span>
+        <span class="onboard-arrow">→</span>
+      </a>`).join("")}
+    </div>
+    <div class="onboard-foot">
+      <button class="btn small quiet" id="onboard-close">बाद में देखूँगा</button>
+      ${S.saas ? `<p class="small muted">✨ 14 दिन का free trial चालू है — कोई card नहीं लगा।</p>` : ""}
+    </div>
   </div>`;
-  overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;animation:fadeIn .3s";
-  const card = overlay.querySelector(".onboard-card");
-  card.style.cssText = "background:var(--bg2,#fff);border-radius:12px;padding:2rem;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2);animation:slideUp .3s";
-  overlay.querySelectorAll(".onboard-steps a").forEach(a => { a.style.cssText = "display:flex;align-items:center;gap:.75rem;padding:.75rem;border-radius:8px;text-decoration:none;color:inherit;border:1px solid var(--border,#e5e5e5);margin:.5rem 0;transition:background .15s"; a.onmouseenter = () => a.style.background = "var(--bg3,#f5f5f5)"; a.onmouseleave = () => a.style.background = ""; });
-  overlay.querySelectorAll(".onboard-icon").forEach(i => { i.style.cssText = "font-size:1.5rem;width:2.5rem;text-align:center;flex-shrink:0"; });
+  // inject styles
+  const style = document.createElement("style");
+  style.textContent = `
+    #onboard-overlay { position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;animation:fadeIn .3s }
+    .onboard-card { background:var(--panel,#1a1f2e);border-radius:16px;max-width:460px;width:92%;box-shadow:0 12px 48px rgba(0,0,0,.35);animation:slideUp .35s ease-out;overflow:hidden }
+    .onboard-header { text-align:center;padding:2rem 2rem 1rem;background:linear-gradient(135deg,rgba(242,179,61,.08),rgba(255,138,61,.05));border-bottom:1px solid var(--line,rgba(255,255,255,.08)) }
+    .onboard-logo { font-size:2.5rem;margin-bottom:.4rem;filter:drop-shadow(0 2px 8px rgba(242,179,61,.3)) }
+    .onboard-header h2 { margin:0 0 .3rem;font-size:1.35rem }
+    .onboard-header p { margin:0;color:var(--muted);font-size:.88rem;line-height:1.45 }
+    .onboard-steps { padding:.75rem 1.25rem }
+    .onboard-step { display:flex;align-items:center;gap:.7rem;padding:.7rem .8rem;border-radius:10px;text-decoration:none;color:inherit;border:1px solid var(--line,rgba(255,255,255,.08));margin:.45rem 0;transition:all .15s }
+    .onboard-step:hover { background:rgba(242,179,61,.08);border-color:rgba(242,179,61,.25);transform:translateX(3px) }
+    .onboard-num { width:22px;height:22px;border-radius:50%;background:rgba(242,179,61,.15);color:var(--accent,#F2B33D);font-size:.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0 }
+    .onboard-icon { font-size:1.3rem;width:2rem;text-align:center;flex-shrink:0 }
+    .onboard-text { flex:1;display:flex;flex-direction:column;gap:.1rem }
+    .onboard-text b { font-size:.9rem }
+    .onboard-tag { display:inline-block;font-size:.65rem;font-weight:600;padding:.1rem .4rem;border-radius:4px;background:rgba(70,167,88,.15);color:#46a758;margin-left:.35rem;vertical-align:middle }
+    .onboard-arrow { color:var(--muted);font-size:1rem;opacity:.4;transition:opacity .15s }
+    .onboard-step:hover .onboard-arrow { opacity:1;color:var(--accent,#F2B33D) }
+    .onboard-foot { padding:.75rem 2rem 1.5rem;text-align:center }
+    .onboard-foot p { margin:.5rem 0 0 }
+    @keyframes slideUp { from { opacity:0;transform:translateY(20px) } to { opacity:1;transform:translateY(0) } }
+    @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+  `;
+  overlay.appendChild(style);
   const close = () => { try { localStorage.setItem("vividora_onboarded", "1"); } catch {} overlay.remove(); };
   overlay.querySelector("#onboard-close").onclick = close;
   overlay.querySelectorAll("[data-close]").forEach(a => a.addEventListener("click", close));

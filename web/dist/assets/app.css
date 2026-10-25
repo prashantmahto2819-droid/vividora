@@ -94,10 +94,17 @@ p { margin: 0 0 .75rem; } .muted { color: var(--muted); } .small { font-size: .8
 .progress i { display: block; height: 100%; background: var(--amber); transition: width .3s; }
 
 /* login */
-.login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
-.login form { width: min(380px, 100%); background: var(--panel); padding: 2rem; border-radius: 14px; border: 1px solid var(--line); }
-.login .brand { font-size: 1.5rem; margin-bottom: .25rem; }
-.login .brand i { width: 30px; height: 30px; }
+.login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; background: radial-gradient(ellipse at 50% 20%, rgba(242,179,61,.06), transparent 60%); }
+.login form { width: min(400px, 100%); background: var(--panel); padding: 2rem 2.25rem; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 4px 24px rgba(0,0,0,.12); }
+.login .brand { font-size: 1.6rem; margin-bottom: .3rem; text-align: center; }
+.login .brand i { width: 32px; height: 32px; }
+.login .muted { text-align: center; }
+.login .field { margin-bottom: .65rem; }
+.login .field label { font-size: .85rem; font-weight: 500; margin-bottom: .2rem; display: block; }
+.login .field input { padding: .55rem .7rem; border-radius: 10px; }
+.login .btn.primary { margin-top: .6rem; padding: .6rem; border-radius: 10px; font-size: .95rem; font-weight: 600; }
+.login .note { border-radius: 10px; padding: .6rem .8rem; margin: .5rem 0; font-size: .85rem; }
+.login .note.err { background: rgba(229,72,77,.1); border: 1px solid rgba(229,72,77,.25); color: #e5484d; }
 
 /* review timeline — the one memorable element */
 .timeline { margin: 1rem 0; }
@@ -236,7 +243,10 @@ th { color: var(--muted); font-weight: 500; }
 :root { --nav: #0F141C; --panel-3: #2A3545; --amber-soft: rgba(242,179,61,.14); --blue: #5B9BFF; --violet: #A78BFA; --r2: 14px; }
 .ic { width: 20px; height: 20px; flex: none; display: inline-block; vertical-align: middle; }
 .grow { flex: 1; }
-.pill { display: inline-block; font-size: .72rem; padding: .05rem .5rem; border-radius: 999px; background: var(--panel-3); color: var(--text); vertical-align: middle; }
+.pill { display: inline-block; font-size: .72rem; padding: .1rem .55rem; border-radius: 999px; background: var(--panel-3); color: var(--text); vertical-align: middle; font-weight: 500; }
+.pill.ok { background: rgba(70,167,88,.15); color: #46a758; }
+.pill.warn { background: rgba(242,179,61,.15); color: #f2b33d; }
+.pill.err { background: rgba(229,72,77,.15); color: #e5484d; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .3rem; vertical-align: middle; }
 .err { color: var(--rose); }
 kbd { font: inherit; font-size: .78rem; padding: .05rem .4rem; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--panel); }
@@ -569,11 +579,19 @@ a.stat:hover { border-color: #46546A; } .stat b { font-size: 1.55rem; font-varia
 /* ===== end thumbnail direct editing ===== */
 
 /* plan & billing */
-.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; margin-top: .5rem; }
-.plan { border: 1px solid var(--line); border-radius: 12px; padding: .9rem; background: var(--panel-2, rgba(255,255,255,.03)); display: flex; flex-direction: column; gap: .4rem; }
-.plan.on { border-color: var(--accent, #F2B33D); box-shadow: 0 0 0 1px var(--accent, #F2B33D) inset; }
-.plan h3 { margin: 0; font-size: 1rem; } .plan .price { margin: 0; font-weight: 700; color: var(--accent, #F2B33D); }
-.plan ul { margin: 0; padding-left: 1.1rem; color: var(--muted); } .plan .btn, .plan .pill { align-self: flex-start; margin-top: auto; }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: .75rem; }
+.plan { border: 1px solid var(--line); border-radius: 14px; padding: 1.1rem; background: var(--panel-2, rgba(255,255,255,.03)); display: flex; flex-direction: column; gap: .5rem; position: relative; overflow: hidden; transition: transform .15s, box-shadow .15s; }
+.plan:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+.plan.on { border-color: var(--accent, #F2B33D); box-shadow: 0 0 0 2px var(--accent, #F2B33D) inset; }
+.plan.recommended::before { content: "⭐ सबसे लोकप्रिय"; position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: .7rem; font-weight: 600; padding: .25rem; background: linear-gradient(90deg, #F2B33D, #FF8A3D); color: #000; letter-spacing: .02em; }
+.plan.recommended { padding-top: 1.8rem; border-color: rgba(242,179,61,.4); }
+.plan h3 { margin: 0; font-size: 1.05rem; font-weight: 700; } .plan .price { margin: 0; font-weight: 700; font-size: 1.15rem; color: var(--accent, #F2B33D); }
+.plan ul { margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: .85rem; } .plan ul li { padding: .15rem 0; } .plan ul li::before { content: "✓ "; color: #46a758; font-weight: 600; }
+.plan .btn, .plan .pill { align-self: stretch; margin-top: auto; text-align: center; justify-content: center; }
+.plan .btn.primary { padding: .5rem; border-radius: 10px; font-weight: 600; }
+/* usage bars */
+.stbar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: .2rem 0 .4rem; }
+.stbar i { display: block; height: 100%; border-radius: 3px; transition: width .3s; }
 
 /* ---- Template studio: gallery, fill form, trend research ---- */
 .tplgrid2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .9rem; }
