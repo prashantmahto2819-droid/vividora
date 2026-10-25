@@ -80,8 +80,66 @@ _add("south_m", "Murugan (veshti)", "festive", outfit="southindian", hair="short
 _add("south_f", "Lakshmi (Kanjivaram)", "festive", outfit="saree", hair="long", skin="brown", gender="f", build=0.95, colors={"torso": 0x7f1d1d, "drape": 0xfacc15})
 _add("bride", "Dulhan Aishwarya", "festive", outfit="saree", hair="bun", skin="fair", gender="f", build=0.85, colors={"torso": 0xb91c1c, "drape": 0xfacc15})
 _add("groom", "Dulha Vivaan", "festive", outfit="kurta", hair="short", skin="wheat", gender="m", props=["hat"], build=1.0, colors={"torso": 0xfef3c7, "legs": 0xfef3c7})
+# --- entertainment ------------------------------------------------------------------------------------
+_add("singer_m", "Singer Arijit", "entertainment", outfit="tshirt", hair="curly", skin="brown", gender="m", props=["mic"], build=1.0, colors={"torso": 0x111827})
+_add("singer_f", "Singer Shreya", "entertainment", outfit="saree", hair="long", skin="fair", gender="f", props=["mic"], build=0.85, colors={"torso": 0x9333ea, "drape": 0xfacc15})
+_add("dancer_m", "Dancer Prabhu", "entertainment", outfit="gym", hair="short", skin="dark", gender="m", build=1.1, colors={"torso": 0xdc2626, "legs": 0x111827})
+_add("dancer_f", "Dancer Madhuri", "entertainment", outfit="garba", hair="long", skin="wheat", gender="f", build=0.85, colors={"torso": 0xec4899})
+_add("dj", "DJ Akash", "entertainment", outfit="tshirt", hair="spiky", skin="tan", gender="m", props=["headphones"], build=1.0, colors={"torso": 0x7c3aed})
+_add("comedian", "Stand-up Vir", "entertainment", outfit="tshirt", hair="short", skin="wheat", gender="m", props=["mic"], build=1.05, colors={"torso": 0x111827})
+_add("actor", "Actor Ranveer", "entertainment", outfit="suit", hair="curly", skin="wheat", gender="m", beard=True, build=1.1, colors={"torso": 0x111827, "tie": 0xdc2626})
+_add("actress", "Actress Alia", "entertainment", outfit="saree", hair="long", skin="fair", gender="f", build=0.8, colors={"torso": 0xf472b6, "drape": 0xfef3c7})
+_add("newsanchor_m", "Anchor Rajat", "entertainment", outfit="suit", hair="short", skin="wheat", gender="m", build=1.05, colors={"torso": 0x1e3a8a, "tie": 0xdc2626})
+_add("newsanchor_f", "Anchor Rubika", "entertainment", outfit="saree", hair="bun", skin="tan", gender="f", props=["mic"], build=0.9, colors={"torso": 0xbe185d, "drape": 0xfacc15})
+_add("rj", "RJ Naved", "entertainment", outfit="tshirt", hair="short", skin="brown", gender="m", props=["headphones"], build=1.0, colors={"torso": 0xf59e0b})
+_add("youtuber", "YouTuber Ashish", "entertainment", outfit="tshirt", hair="curly", skin="wheat", gender="m", props=["phone"], build=0.95, colors={"torso": 0xdc2626})
+# --- sports -------------------------------------------------------------------------------------------
+_add("cricketer", "Cricketer Virat", "sports", outfit="sports", hair="short", skin="wheat", gender="m", props=["bat"], build=1.15, colors={"torso": 0x1e40af})
+_add("cricketer_f", "Cricketer Smriti", "sports", outfit="sports", hair="ponytail", skin="tan", gender="f", props=["bat"], build=0.95, colors={"torso": 0x1e40af})
+_add("kabaddi", "Kabaddi Pardeep", "sports", outfit="sports", hair="short", skin="dark", gender="m", build=1.3, colors={"torso": 0xf59e0b, "legs": 0xf59e0b})
+_add("wrestler", "Pehelwan Sushil", "sports", outfit="gym", hair="short", skin="brown", gender="m", build=1.4, colors={"torso": 0xdc2626})
+_add("badminton", "Shuttler Saina", "sports", outfit="sports", hair="ponytail", skin="wheat", gender="f", build=0.85, colors={"torso": 0x16a34a})
+_add("football", "Footballer Sunil", "sports", outfit="sports", hair="short", skin="tan", gender="m", build=1.1, colors={"torso": 0x60a5fa, "legs": 0x111827})
+_add("boxer", "Boxer MC Mary", "sports", outfit="gym", hair="short", skin="brown", gender="f", build=1.0, colors={"torso": 0xdc2626, "legs": 0x111827})
+_add("runner", "Runner Hima", "sports", outfit="sports", hair="ponytail", skin="dark", gender="f", build=0.9, colors={"torso": 0x16a34a})
+# --- healthcare (extended) ----------------------------------------------------------------------------
+_add("pharmacist", "Pharmacist Sanjay", "medical", outfit="apron", hair="short", skin="wheat", gender="m", props=["glasses"], build=1.0, colors={"apron": 0xffffff})
+_add("paramedic", "Paramedic Ravi", "medical", outfit="nurse", hair="short", skin="brown", gender="m", build=1.1, colors={"torso": 0xf59e0b, "sleeves": 0xf59e0b, "legs": 0x1e3a8a})
+_add("ayurveda", "Vaidya Sharma", "medical", outfit="kurta", hair="short", skin="wheat", gender="m", age="old", beard=True, props=["glasses"], build=1.0, colors={"torso": 0x16a34a})
+_add("physio", "Physio Ankita", "medical", outfit="gym", hair="ponytail", skin="fair", gender="f", build=0.9, colors={"torso": 0x14b8a6, "legs": 0x111827})
+# --- education (extended) -----------------------------------------------------------------------------
+_add("professor", "Professor Saxena", "education", outfit="suit", hair="short", skin="brown", gender="m", age="old", props=["glasses", "book"], build=1.05, colors={"torso": 0x374151})
+_add("librarian", "Librarian Jyoti", "education", outfit="saree", hair="bun", skin="wheat", gender="f", age="old", props=["glasses", "book"], build=1.0, colors={"torso": 0x0e7490, "drape": 0xfef3c7})
+_add("principal", "Principal Mathur", "education", outfit="suit", hair="short", skin="tan", gender="m", age="old", props=["glasses"], build=1.15, colors={"torso": 0x1e293b})
+_add("tutor", "Tuition teacher Nidhi", "education", outfit="shirt", hair="ponytail", skin="fair", gender="f", props=["book"], build=0.85, colors={"torso": 0xfce7f3})
+# --- misc workers / street life -----------------------------------------------------------------------
+_add("auto_driver", "Auto wale Pappu", "service", outfit="driver", hair="short", skin="dark", gender="m", build=1.1, colors={"torso": 0xfde68a})
+_add("truck_driver", "Truck wale Bhola", "service", outfit="driver", hair="short", skin="brown", gender="m", beard=True, build=1.3, colors={"torso": 0x1f2937})
+_add("riksha", "Riksha wale chacha", "service", outfit="tshirt", hair="short", skin="dark", gender="m", age="old", build=1.0, colors={"torso": 0xffffff})
+_add("chai", "Chai wale Guddu", "service", outfit="tshirt", hair="short", skin="brown", gender="m", build=0.95, colors={"torso": 0xffffff})
+_add("vendor", "Sabzi wali Shakuntala", "service", outfit="saree", hair="bun", skin="dark", gender="f", age="old", build=1.15, colors={"torso": 0x16a34a, "drape": 0xfacc15})
+_add("plumber", "Plumber Kallu", "service", outfit="mechanic", hair="short", skin="dark", gender="m", props=["bag"], build=1.1, colors={"torso": 0x60a5fa})
+_add("goldsmith", "Sonar Ravi", "service", outfit="apron", hair="short", skin="wheat", gender="m", props=["glasses"], age="old", build=0.95, colors={"apron": 0xfef3c7})
+_add("fisherman", "Machhiwala Ganesh", "service", outfit="tshirt", hair="short", skin="dark", gender="m", build=1.15, colors={"torso": 0x60a5fa, "legs": 0x1e3a8a})
+_add("painter", "Painter Rafiq", "service", outfit="apron", hair="short", skin="brown", gender="m", build=1.0, colors={"apron": 0xffffff})
+_add("washerman", "Dhobi Ramu", "service", outfit="tshirt", hair="short", skin="dark", gender="m", build=1.1, colors={"torso": 0xffffff})
+# --- govt / defence -----------------------------------------------------------------------------------
+_add("army", "Fauji Captain Sharma", "govt", outfit="army", hair="short", skin="wheat", gender="m", build=1.2, colors={"torso": 0x4d7c0f, "sleeves": 0x4d7c0f, "legs": 0x4d7c0f})
+_add("airforce", "Wing Commander Ahuja", "govt", outfit="army", hair="short", skin="fair", gender="m", build=1.1, colors={"torso": 0x475569, "sleeves": 0x475569, "legs": 0x475569})
+_add("navy", "Navy Officer Priya", "govt", outfit="army", hair="bun", skin="tan", gender="f", build=0.95, colors={"torso": 0x1e3a8a, "sleeves": 0x1e3a8a, "legs": 0x1e3a8a})
+_add("pilot", "Pilot Captain Raj", "govt", outfit="suit", hair="short", skin="wheat", gender="m", build=1.05, colors={"torso": 0x1e3a8a, "tie": 0x1e3a8a})
+_add("pilot_f", "Pilot Captain Aarohi", "govt", outfit="suit", hair="bun", skin="fair", gender="f", build=0.9, colors={"torso": 0x1e3a8a, "tie": 0x1e3a8a})
+_add("postman", "Postman Ratan", "govt", outfit="shirt", hair="short", skin="brown", gender="m", props=["bag"], build=1.0, colors={"torso": 0xfde68a})
+_add("firefighter", "Fireman Bharat", "govt", outfit="mechanic", hair="short", skin="tan", gender="m", props=["helmet"], build=1.25, colors={"torso": 0xdc2626, "sleeves": 0xdc2626})
+# --- housewife / elderly / baby -----------------------------------------------------------------------
+_add("housewife", "Ghar ki Rani", "family", outfit="saree", hair="bun", skin="wheat", gender="f", build=1.05, colors={"torso": 0x16a34a, "drape": 0xbe185d})
+_add("nani", "Naniji", "family", outfit="saree", hair="bun", skin="brown", gender="f", age="old", props=["glasses"], build=1.1, hairColor=0xd1d5db, colors={"torso": 0xfef3c7, "drape": 0x16a34a})
+_add("nanaji", "Nanaji", "family", outfit="kurta", hair="bald", skin="brown", gender="m", age="old", props=["glasses"], build=1.0, colors={"torso": 0xfef3c7})
+_add("toddler_b", "Baby Aryan (3)", "family", outfit="tshirt", hair="short", skin="fair", gender="m", age="child", build=0.7, colors={"torso": 0x60a5fa, "legs": 0xdc2626})
+_add("toddler_g", "Baby Anaya (3)", "family", outfit="tshirt", hair="ponytail", skin="wheat", gender="f", age="child", build=0.65, colors={"torso": 0xfce7f3, "legs": 0xfce7f3})
 
 PROFILES: list[dict] = [{"id": i, "name": n, "category": c, "spec": {"gender": "m", **s}} for i, n, c, s in _P]
 BY_ID = {p["id"]: p for p in PROFILES}
 CATEGORIES = {"medical": "Doctor / clinic", "retail": "दुकान / retail", "business": "Business / office", "education": "Teacher / student",
-              "fitness": "Gym / salon / spa", "service": "Service / mechanic / delivery", "family": "परिवार", "festive": "त्योहार / regional"}
+              "fitness": "Gym / salon / spa", "service": "Service / mechanic / delivery", "family": "परिवार", "festive": "त्योहार / regional",
+              "entertainment": "Singer / actor / creator", "sports": "Cricket / kabaddi / gym", "govt": "Army / police / govt"}
