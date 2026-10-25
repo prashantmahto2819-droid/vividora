@@ -23,10 +23,20 @@ def _rows(workspace_id: str, channel_id: str | None = None) -> list[dict]:
         q += " AND pr.channel_id = ?"
         args.append(channel_id)
     pubs = db.rows(cn.execute(q + " ORDER BY p.finished_at DESC", args))
+    # batch-fetch latest stats for all publications (avoids N+1)
+    import json
+    pub_ids = [p["id"] for p in pubs]
+    stats_map: dict[str, dict] = {}
+    if pub_ids:
+        placeholders = ",".join("?" for _ in pub_ids)
+        for st_row in db.rows(cn.execute(
+                f"SELECT s.* FROM stats s INNER JOIN (SELECT publication_id, MAX(fetched_at) AS mf FROM stats "
+                f"WHERE publication_id IN ({placeholders}) GROUP BY publication_id) g "
+                f"ON s.publication_id = g.publication_id AND s.fetched_at = g.mf", pub_ids)):
+            stats_map[st_row["publication_id"]] = st_row
     out = []
     for p in pubs:
-        import json
-        st = db.row(cn.execute("SELECT * FROM stats WHERE publication_id = ? ORDER BY fetched_at DESC LIMIT 1", (p["id"],)).fetchone())
+        st = stats_map.get(p["id"])
         meta = p["asset_meta"] if isinstance(p["asset_meta"], dict) else json.loads(p["asset_meta"] or "{}")
         rs = (p["project_settings"] if isinstance(p["project_settings"], dict) else json.loads(p["project_settings"] or "{}")).get("render", {})
         published_at = (st or {}).get("extra", {}).get("published") or p["finished_at"]
