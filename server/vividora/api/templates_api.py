@@ -53,7 +53,7 @@ def _view(t: dict) -> dict:
     out = {k: t.get(k) for k in ("id", "name", "format", "industry", "tags", "fields", "defaults", "settings", "source", "created_at", "updated_at")}
     out["tags"] = _tags(t.get("tags"))
     out["builtin"] = bool(t.get("builtin"))
-    if t.get("preview"):
+    if t.get("preview") or t.get("builtin"):
         from ..security import media_token
         out["preview_url"] = f"/api/templates/{t['id']}/preview.png?t={media_token(t['id'])}"
     return out
@@ -115,20 +115,50 @@ async def get_one(request: Request, user: dict):
     return ok(_view(t))
 
 
+def _builtin_preview_path(tid: str) -> Path:
+    from ..config import settings as cfg
+    root = cfg.media_root / "cache" / "tpl_previews"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{tid}.jpg"
+
+
+def _render_builtin_preview(tpl: dict) -> bytes | None:
+    """Render a built-in template preview and cache it to disk."""
+    try:
+        s = TP.fill(tpl, tpl.get("defaults") or {})
+        png, _, _ = thumbs.render_design("__builtin__", s, "jpg")
+        path = _builtin_preview_path(tpl["id"])
+        path.write_bytes(png)
+        return png
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def preview_png(request: Request):
     """<img src> cannot send a bearer header: the short-lived ?t= media token (subject = template id) is the auth."""
+    from starlette.concurrency import run_in_threadpool
     from ..security import read_token
     tid = request.path_params["tid"]
     data = read_token(request.query_params.get("t") or "", kind="media")
     if not data or data.get("sub") != tid:
         raise ApiError(401, "link expired")
+    # try DB-stored template first
     t = db.get("templates", tid)
-    if not t or not t.get("preview"):
-        raise ApiError(404, "preview नहीं")
-    try:
-        return Response(storage.abs_path(t["preview"]).read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
-    except (ValueError, OSError):
-        raise ApiError(404, "preview नहीं")
+    if t and t.get("preview"):
+        try:
+            return Response(storage.abs_path(t["preview"]).read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
+        except (ValueError, OSError):
+            pass
+    # built-in template: lazy render + disk cache
+    bt = TP.builtin(tid)
+    if bt:
+        cached = _builtin_preview_path(tid)
+        if cached.exists():
+            return Response(cached.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+        img = await run_in_threadpool(_render_builtin_preview, bt)
+        if img:
+            return Response(img, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+    raise ApiError(404, "preview नहीं")
 
 
 @require("editor")

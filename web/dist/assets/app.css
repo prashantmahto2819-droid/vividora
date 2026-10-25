@@ -614,3 +614,23 @@ a.stat:hover { border-color: #46546A; } .stat b { font-size: 1.55rem; font-varia
 .thx-align { display: flex; gap: .25rem; flex-wrap: wrap; align-items: center; margin: .4rem 0; }
 .th-canvas.wide { max-height: 60vh; margin: 0 auto; }
 @media (max-width: 640px) { .tplgrid2 { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } .th-fmt select { max-width: 60vw; } .trtbl { display: block; overflow-x: auto; } }
+
+/* ---- tablet refinements (≤ 1024px) ---- */
+@media (max-width: 1024px) {
+  .app2 { grid-template-columns: 200px minmax(0, 1fr); }
+  .nav { width: 200px; }
+  .nav a { padding: .55rem .8rem; font-size: .88rem; }
+  .tplgrid2 { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .stats { gap: .75rem; }
+  .stat { padding: .8rem; }
+  .hcols2 { grid-template-columns: 1fr; }
+  .fillform .ifield { min-width: 140px; }
+}
+
+/* ---- touch-friendly targets ---- */
+@media (pointer: coarse) {
+  .btn, .nav a, .ibtn, .drop { min-height: 44px; }
+  input, select, textarea { min-height: 44px; font-size: 16px; }
+  .tplcard { cursor: default; }
+  .plans .btn { min-height: 48px; }
+}

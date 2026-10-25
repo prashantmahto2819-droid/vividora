@@ -863,11 +863,11 @@ function statusView() {
 }
 
 // ---------- settings / connections ----------
-const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" };
+const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok" };
 function settingsView() {
   const c = S.conns || { connections: [], setup: {} }; const st = c.setup || {}; const admin = S.user.role === "admin";
   const chn = S.channels.find((c) => c.id === S.channel);
-  return `<div class="pghead"><div><h1>Channels & Brand</h1><p class="muted small">Channels, brand kit और YouTube, Instagram, Facebook connections</p></div></div>
+  return `<div class="pghead"><div><h1>Channels & Brand</h1><p class="muted small">Channels, brand kit और YouTube, Instagram, Facebook, TikTok connections</p></div></div>
     <div class="section" style="margin-top:0;border:0;padding-top:0"><div class="row between"><h2>आपके channels <em class="cnt">${S.channels.length}</em></h2>${admin ? `<button class="btn small" id="ch-add">+ नया channel</button>` : ""}</div>
       <div class="chgrid">${S.channels.map((c) => `<div class="chcard ${c.id === S.channel ? "on" : ""}" data-ch="${c.id}" style="--c:${esc(c.color || "#F2B33D")}"><b>${esc(c.name)}</b><span class="small muted">${[c.handle, c.niche || "niche तय नहीं", `${c.projects} projects`, (c.platforms || []).join(", ") || "कोई account नहीं जुड़ा"].filter(Boolean).map(esc).join(" · ")}</span></div>`).join("")}</div>
       ${chn && admin ? `<form id="ch-edit" class="row" style="align-items:flex-end;margin-top:.75rem"><input type="hidden" name="id" value="${chn.id}">
@@ -880,8 +880,8 @@ function settingsView() {
     <p class="muted">नीचे की settings (connections, brand kit) <b>${esc(chn?.name || "")}</b> channel की हैं। हर upload से पहले आपकी मंज़ूरी ज़रूरी है — connection सिर्फ़ रास्ता खोलता है।</p>
     ${st.dry_run ? `<div class="note">Test mode: PUBLISH_DRY_RUN चालू है, इसलिए कुछ भी असल में publish नहीं होगा।</div>` : ""}
     ${!st.public_url ? `<div class="note err">.env में <b>PUBLIC_URL</b> नहीं है (जैसे https://studio.yourdomain.com — Cloudflare Tunnel का पता)। बिना इसके Google/Meta login वापस नहीं आ सकता और Instagram/Facebook वीडियो नहीं ले पाएँगे।</div>` : ""}
-    <div class="section"><div class="row between"><h2>जुड़े हुए accounts</h2>${admin ? `<span class="row"><button class="btn" id="c-yt" ${st.youtube ? "" : "disabled"} title="${st.youtube ? "" : ".env में YT_CLIENT_ID/YT_CLIENT_SECRET चाहिए"}">+ YouTube</button><button class="btn" id="c-meta" ${st.meta ? "" : "disabled"} title="${st.meta ? "" : ".env में META_APP_ID/META_APP_SECRET चाहिए"}">+ Instagram / Facebook</button></span>` : ""}</div>
-      ${c.connections.length ? `<div class="tablewrap"><table><tr><th>Platform</th><th>नाम</th><th>Channel</th><th>कब जुड़ा</th><th></th></tr>${c.connections.map((x) => `<tr><td>${PLAT[x.platform] || x.platform}</td><td>${esc(x.name)}${x.meta?.subscribers ? ` <span class="muted small">· ${x.meta.subscribers} subs</span>` : ""}${x.meta?.page ? ` <span class="muted small">· page: ${esc(x.meta.page)}</span>` : ""}</td><td>${admin ? `<select class="c-move small" data-id="${x.id}">${S.channels.map((ch) => `<option value="${ch.id}" ${x.channel_id === ch.id ? "selected" : ""}>${esc(ch.name)}</option>`).join("")}</select>` : esc(S.channels.find((ch) => ch.id === x.channel_id)?.name || "")}</td><td class="small muted">${new Date(x.created_at).toLocaleDateString("hi-IN")}</td><td>${admin ? `<button class="btn quiet small danger c-del" data-id="${x.id}">हटाएँ</button>` : ""}</td></tr>`).join("")}</table></div>` : `<p class="muted">अभी कोई account नहीं जुड़ा। ऊपर के button से YouTube या Instagram / Facebook जोड़ें।</p>`}</div>
+    <div class="section"><div class="row between"><h2>जुड़े हुए accounts</h2>${admin ? `<span class="row"><button class="btn" id="c-yt" ${st.youtube ? "" : "disabled"} title="${st.youtube ? "" : ".env में YT_CLIENT_ID/YT_CLIENT_SECRET चाहिए"}">+ YouTube</button><button class="btn" id="c-meta" ${st.meta ? "" : "disabled"} title="${st.meta ? "" : ".env में META_APP_ID/META_APP_SECRET चाहिए"}">+ Instagram / Facebook</button><button class="btn" id="c-tt" ${st.tiktok ? "" : "disabled"} title="${st.tiktok ? "" : ".env में TIKTOK_CLIENT_KEY/TIKTOK_CLIENT_SECRET चाहिए"}">+ TikTok</button></span>` : ""}</div>
+      ${c.connections.length ? `<div class="tablewrap"><table><tr><th>Platform</th><th>नाम</th><th>Channel</th><th>कब जुड़ा</th><th></th></tr>${c.connections.map((x) => `<tr><td>${PLAT[x.platform] || x.platform}</td><td>${esc(x.name)}${x.meta?.subscribers ? ` <span class="muted small">· ${x.meta.subscribers} subs</span>` : ""}${x.meta?.page ? ` <span class="muted small">· page: ${esc(x.meta.page)}</span>` : ""}</td><td>${admin ? `<select class="c-move small" data-id="${x.id}">${S.channels.map((ch) => `<option value="${ch.id}" ${x.channel_id === ch.id ? "selected" : ""}>${esc(ch.name)}</option>`).join("")}</select>` : esc(S.channels.find((ch) => ch.id === x.channel_id)?.name || "")}</td><td class="small muted">${new Date(x.created_at).toLocaleDateString("hi-IN")}</td><td>${admin ? `<button class="btn quiet small danger c-del" data-id="${x.id}">हटाएँ</button>` : ""}</td></tr>`).join("")}</table></div>` : `<p class="muted">अभी कोई account नहीं जुड़ा। ऊपर के button से YouTube, Instagram / Facebook या TikTok जोड़ें।</p>`}</div>
     ${S.user.role === "admin" ? `<p class="small muted">Storage और disk की सफ़ाई <a href="#/account">Settings</a> में है।</p>` : ""}
     <div class="section"><h2>Brand kit</h2><p class="muted small">हर नए project और autopilot में यही default लगेगा।</p>
       <form id="brand" class="row" style="align-items:flex-end">
@@ -958,6 +958,7 @@ function bindSettings() {
   document.querySelectorAll("[data-ch]").forEach((el) => (el.onclick = () => { S.channel = el.dataset.ch; localStorage.setItem("vividora_channel", S.channel); load().then(render); }));
   const yt = $("#c-yt"); if (yt) yt.onclick = () => start("youtube");
   const mt = $("#c-meta"); if (mt) mt.onclick = () => start("meta");
+  const tt = $("#c-tt"); if (tt) tt.onclick = () => start("tiktok");
   document.querySelectorAll(".c-del").forEach((b) => (b.onclick = async () => { if (confirm("यह connection हटाएँ?")) { await api("DELETE", `/connections/${b.dataset.id}`); load().then(render); } }));
 }
 

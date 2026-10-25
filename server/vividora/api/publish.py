@@ -21,12 +21,13 @@ from .. import db, queue, service, storage, thumbs
 from ..config import settings
 from ..engine import metadata
 from ..publish import meta as metaapi
+from ..publish import tiktok as tiktokapi
 from ..publish import youtube
 from ..publish.http import PublishError
 from ..security import make_token, read_token
 from .deps import ApiError, body, need, ok, own_project, require
 
-PLATFORMS = ("youtube", "instagram", "facebook")
+PLATFORMS = ("youtube", "instagram", "facebook", "tiktok")
 _states: dict[str, dict] = {}  # oauth state → {workspace_id, user_id, platform}
 _STATE_TTL = 600  # 10 minutes — OAuth must complete within this window
 
@@ -45,8 +46,8 @@ def conn_view(c: dict) -> dict:
 
 
 def _platform_status() -> dict:
-    return {"youtube": youtube.configured(), "meta": metaapi.configured(), "public_url": settings.public_url,
-            "dry_run": settings.publish_dry_run}
+    return {"youtube": youtube.configured(), "meta": metaapi.configured(), "tiktok": tiktokapi.configured(),
+            "public_url": settings.public_url, "dry_run": settings.publish_dry_run}
 
 
 @require("viewer")
@@ -97,6 +98,12 @@ async def connect_start(request: Request, user: dict):
         state = pysecrets.token_urlsafe(24)
         _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel"), "_ts": _t.time()}
         return ok({"url": metaapi.auth_url(state)})
+    if platform == "tiktok":
+        if not tiktokapi.configured():
+            raise ApiError(400, ".env में TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET / PUBLIC_URL सेट करें")
+        state = pysecrets.token_urlsafe(24)
+        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel"), "_ts": _t.time()}
+        return ok({"url": tiktokapi.auth_url(state)})
     raise ApiError(404, "unknown platform")
 
 
@@ -169,6 +176,37 @@ async def meta_callback(request: Request):
                 added.append(row["name"])
         service.log(c, st["workspace_id"], "connection.add", user_id=st["user_id"], detail={"platform": "meta", "name": ", ".join(added)})
     return _done_page("जुड़ गया ✓ " + ", ".join(added))
+
+
+async def tiktok_callback(request: Request):
+    st = _states.pop(request.query_params.get("state", ""), None)
+    code = request.query_params.get("code")
+    error = request.query_params.get("error")
+    if error:
+        return _done_page(f"TikTok denied: {request.query_params.get('error_description', error)}", False)
+    if not st or not code:
+        return _done_page("लिंक पुराना है — दोबारा Connect दबाएँ", False)
+    try:
+        sec = tiktokapi.exchange_code(code)
+        tok = sec["access_token"]
+        info = tiktokapi.user_info(tok)
+    except PublishError as e:
+        return _done_page(f"TikTok जोड़ नहीं पाए: {e}", False)
+    display = info.get("display_name") or info.get("open_id", "TikTok User")
+    with db.tx() as c:
+        existing = db.row(c.execute("SELECT * FROM connections WHERE workspace_id=? AND platform='tiktok' AND external_id=?",
+                                    (st["workspace_id"], sec["open_id"])).fetchone())
+        row = {"platform": "tiktok", "name": f"@{display}", "external_id": sec["open_id"],
+               "secrets": sec, "meta": {"avatar": info.get("avatar_url")},
+               "channel_id": st.get("channel_id"), "updated_at": db.now()}
+        if existing:
+            db.update(c, "connections", existing["id"], row)
+        else:
+            db.insert(c, "connections", {"id": db.new_id(), "workspace_id": st["workspace_id"],
+                                         "created_by": st["user_id"], "created_at": db.now(), **row})
+        service.log(c, st["workspace_id"], "connection.add", user_id=st["user_id"],
+                    detail={"platform": "tiktok", "name": display})
+    return _done_page(f"TikTok "@{display}" जुड़ गया ✓")
 
 
 # ---- publications
@@ -429,6 +467,7 @@ routes = [
     Route("/connect/{platform}/start", connect_start, methods=["POST"]),
     Route("/connect/youtube/callback", youtube_callback),
     Route("/connect/meta/callback", meta_callback),
+    Route("/connect/tiktok/callback", tiktok_callback),
     Route("/projects/{project_id}/publications", list_publications),
     Route("/projects/{project_id}/publications", create_publication, methods=["POST"]),
     Route("/projects/{project_id}/metadata", suggest_metadata, methods=["POST"]),

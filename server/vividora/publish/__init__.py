@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import meta, youtube
+from . import meta, tiktok, youtube
 from .http import PublishError
 
 __all__ = ["run", "PublishError"]
@@ -78,5 +78,18 @@ def run(platform: str, secrets: dict, payload: dict, *, video: Path | None, publ
                 r = meta.fb_publish_reel(secrets["page_id"], page_token, public_url, caption, title=title,
                                          scheduled_at=sched, on_progress=on_progress)
         return {**r, "secrets": secrets}
+
+    if platform == "tiktok":
+        if not public_url:
+            raise PublishError("PUBLIC_URL सेट नहीं है — TikTok को वीडियो का public link चाहिए")
+        token, new = tiktok.access_token(secrets)
+        privacy = payload.get("privacy", "SELF_ONLY")
+        # Map common privacy names to TikTok API values
+        privacy_map = {"private": "SELF_ONLY", "unlisted": "MUTUAL_FOLLOW_FRIENDS",
+                       "public": "PUBLIC_TO_EVERYONE", "friends": "FOLLOWER_OF_CREATOR"}
+        tiktok_privacy = privacy_map.get(privacy.lower(), privacy)
+        r = tiktok.publish_video(token, public_url, caption[:150],
+                                  privacy_level=tiktok_privacy, on_progress=on_progress)
+        return {**r, "secrets": new}
 
     raise PublishError(f"unknown platform {platform}")
