@@ -8,6 +8,7 @@ JOB_STALE_MINUTES, up to MAX_JOB_ATTEMPTS times.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from . import db
@@ -71,6 +72,18 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
     job = _pick_fair(c, cands)
     if job is None:
         return None
+    # ---- sysguard: skip heavy jobs when resources are low ----
+    from . import sysguard
+    reason = sysguard.pre_job_check(c, job["kind"])
+    if reason:
+        import logging
+        logging.getLogger("vividora.queue").info("heavy job %s skipped: %s", job["id"], reason)
+        # try to find a quick (non-heavy) job instead
+        quick = [j for j in cands if j["kind"] not in HEAVY]
+        if quick:
+            job = quick[0]
+        else:
+            return None  # all candidates are heavy and resources are low
     n = c.execute(
         "UPDATE jobs SET status='running', worker=?, attempts=attempts+1, started_at=?, "
         "heartbeat_at=?, progress=0, message='शुरू', error=NULL WHERE id=? AND status='queued'",
@@ -82,12 +95,31 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
 
 def _pick_fair(c, cands: list[dict]) -> dict | None:
     """SAAS_MODE: one workspace must not hold the whole queue. Skip workspaces at their plan's
-    concurrent-job limit, then round-robin by "least recently served" workspace. Otherwise FIFO."""
+    concurrent-job limit, then round-robin by "least recently served" workspace.
+    Self-hosted: still fair — limit each workspace to 2 concurrent heavy jobs so one user
+    doesn't block the others."""
     from . import saas
     if not cands:
         return None
     if not saas.enabled():
-        return cands[0]
+        # self-hosted fairness: limit per-workspace concurrent heavy to 2
+        max_per_ws = int(os.getenv("SYSGUARD_MAX_HEAVY_PER_WS", "2"))
+        running_ws: dict[str, int] = {}
+        for r in c.execute(
+            "SELECT p.workspace_id, COUNT(*) FROM jobs j JOIN projects p ON p.id = j.project_id "
+            "WHERE j.status = 'running' AND j.kind IN ('render','montage','matte','dub','transcribe','compress') "
+            "GROUP BY p.workspace_id"
+        ).fetchall():
+            running_ws[r[0]] = r[1]
+        # prefer quick jobs; for heavy jobs, skip workspaces at their limit
+        for j in cands:
+            if j["kind"] not in HEAVY:
+                return j  # quick jobs always pass
+            if running_ws.get(j["ws"], 0) < max_per_ws:
+                return j
+        # all heavy cands are at their per-ws limit; if there are multiple workspaces
+        # waiting, pick the one with fewest running
+        return min(cands, key=lambda j: running_ws.get(j["ws"], 0)) if cands else None
     running = {r[0]: r[1] for r in c.execute(
         "SELECT p.workspace_id, COUNT(*) FROM jobs j JOIN projects p ON p.id = j.project_id "
         "WHERE j.status = 'running' GROUP BY p.workspace_id").fetchall()}

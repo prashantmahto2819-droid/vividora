@@ -24,6 +24,25 @@ log = logging.getLogger("vividora")
 
 
 async def health(request: Request):
+    """Enhanced health endpoint with optional system stats.
+    GET /api/health          → basic {ok, version}
+    GET /api/health?full=1   → adds memory, cpu, disk, jobs, workers (requires worker token or auth)
+    """
+    if request.query_params.get("full"):
+        # full stats: check auth (worker token or logged-in user)
+        token = request.headers.get("x-worker-token") or ""
+        auth_ok = token == settings.worker_token
+        if not auth_ok:
+            # also accept a valid session cookie / bearer token
+            from .api.deps import current_user
+            try:
+                auth_ok = current_user(request) is not None
+            except Exception:  # noqa: BLE001
+                pass
+        if auth_ok:
+            from . import sysguard
+            snap = sysguard.system_snapshot()
+            return JSONResponse({"ok": True, "version": __version__, "system": snap})
     return JSONResponse({"ok": True, "version": __version__})
 
 
@@ -72,6 +91,14 @@ async def _scheduler():
             if backup.due():
                 await run_in_threadpool(backup.run)
             await run_in_threadpool(_trend_templates_tick)  # optional scheduled thumbnail-trend research
+            # ---- sysguard: periodic resource check ----
+            from . import sysguard
+            mem = sysguard._mem_info()
+            if mem["available_gb"] < sysguard.WARN_FREE_GB:
+                log.warning("⚠ RAM: %.1f GB free / %.1f GB total (%.0f%% used)",
+                            mem["available_gb"], mem["total_gb"], mem["percent_used"])
+            if not sysguard.disk_ok():
+                log.warning("⚠ Disk space low on media_root")
         except Exception as e:  # noqa: BLE001
             log.warning("scheduler: %s", e)
         await asyncio.sleep(3600)

@@ -773,6 +773,12 @@ def fail_job(c, job: dict, error: str) -> None:
 
 def request_render(c, project: dict, settings_in: dict) -> list[dict]:
     """Validate render settings, store them, queue one render job per preset."""
+    # ---- sysguard: check disk space before accepting render ----
+    from . import sysguard
+    try:
+        sysguard.check_disk()
+    except sysguard.ResourceError as e:
+        raise ValueError(str(e)) from None
     pid = project["id"]
     opts = {**DEFAULT_RENDER, **project.get("settings", {}).get("render", {}), **settings_in}
     unknown = [p for p in opts["presets"] if p not in platforms()]

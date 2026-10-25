@@ -141,8 +141,12 @@ async def upload(request: Request):
 async def workers_status(request: Request, user: dict):
     ws = db.rows(db.conn().execute("SELECT * FROM workers ORDER BY last_seen_at DESC"))
     q = db.conn().execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall()
-    from .. import archive
+    from .. import archive, sysguard
+    snap = sysguard.system_snapshot()
     return ok({"workers": ws, "jobs": {r[0]: r[1] for r in q}, "disk": storage.disk_usage(),
+               "system": {"memory": snap["memory"], "cpu": snap["cpu"],
+                          "heavy_running": snap["jobs"]["heavy_total"],
+                          "heavy_max": snap["jobs"]["heavy_max"]},
                "archive": {"backend": archive.backend(), "remote": archive.REMOTE or None, "after_days": service.settings.archive_after_days}})
 
 
