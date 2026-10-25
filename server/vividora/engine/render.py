@@ -113,10 +113,10 @@ def _plan_segments(keep: list[tuple[float, float]], edl: dict, default_tr: str, 
 def _segment_timeline(segs: list[dict]) -> list[dict]:
     """Add output start/duration to each segment, accounting for xfade overlaps."""
     t = 0.0
-    for sgm in segs:
+    for i, sgm in enumerate(segs):
         d = (sgm["b"] - sgm["a"]) / sgm["rate"]
         if fx.is_xfade(sgm["tr"]):
-            t -= min(fx.XFADE_SECONDS, d / 2, (segs[segs.index(sgm) - 1]["out_dur"] / 2) if segs.index(sgm) > 0 else d)
+            t -= min(fx.XFADE_SECONDS, d / 2, (segs[i - 1]["out_dur"] / 2) if i > 0 else d)
         sgm["out_start"] = max(0.0, t)
         sgm["out_dur"] = d
         t += d
@@ -124,10 +124,19 @@ def _segment_timeline(segs: list[dict]) -> list[dict]:
 
 
 def _src_to_out(segs: list[dict]):
+    # pre-extract segment boundaries for fast lookup via bisect
+    from bisect import bisect_right
+    starts = [sgm["a"] for sgm in segs]
+    last = segs[-1]
+
     def f(t: float) -> float | None:
-        for sgm in segs:
-            if sgm["a"] <= t < sgm["b"] or (t == sgm["b"] and sgm is segs[-1]):
-                return sgm["out_start"] + (t - sgm["a"]) / sgm["rate"]
+        # binary search: find rightmost segment whose start ≤ t
+        idx = bisect_right(starts, t) - 1
+        if idx < 0:
+            return None
+        sgm = segs[idx]
+        if t < sgm["b"] or (t == sgm["b"] and sgm is last):
+            return sgm["out_start"] + (t - sgm["a"]) / sgm["rate"]
         return None
     return f
 

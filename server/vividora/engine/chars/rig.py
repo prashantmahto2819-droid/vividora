@@ -131,19 +131,19 @@ def _hair_back(p: dict, hx: float, hy: float, rx: float, ry: float, col: str) ->
     if h in ("long", "wavy"):
         wave = "" if h == "long" else f" q{_f(rx * .3)} 18 0 36 q{_f(-rx * .3)} 18 0 36"
         return (f'<path d="M{_f(hx - rx - 6)} {_f(hy - 10)} q0 {_f(ry * 2.3)} {_f(rx * .5)} {_f(ry * 2.5)}{wave} '
-                f'h{_f(rx * 1.2)} q{_f(rx * .5)} {_f(-ry * .2)} {_f(rx * .5)} {_f(-ry * 2.5)} v{_f(-ry * 1.0)} z" fill="{col}"/>')
+                f'h{_f(rx * 1.2)} q{_f(rx * .5)} {_f(-ry * .2)} {_f(rx * .5)} {_f(-ry * 2.5)} v{_f(-ry * 1.0)} z" fill="url(#hg)"/>')
     if h == "ponytail":
         return (f'<path d="M{_f(hx + rx * .6)} {_f(hy - 20)} q{_f(rx * .9)} {_f(ry * .4)} {_f(rx * .5)} {_f(ry * 1.9)} '
-                f'q{_f(-rx * .3)} {_f(ry * .3)} {_f(-rx * .7)} {_f(ry * .1)} q{_f(rx * .4)} {_f(-ry)} 0 {_f(-ry * 1.6)}z" fill="{col}"/>')
+                f'q{_f(-rx * .3)} {_f(ry * .3)} {_f(-rx * .7)} {_f(ry * .1)} q{_f(rx * .4)} {_f(-ry)} 0 {_f(-ry * 1.6)}z" fill="url(#hg)"/>')
     if h == "braid":
         s = ""
         for i in range(5):
             s += f'<ellipse cx="{_f(hx + rx * .95)}" cy="{_f(hy + ry * .6 + i * 24)}" rx="10" ry="13" fill="{col if i % 2 else _mix(col, 1.15)}"/>'
         return s
     if h == "bun":
-        return f'<circle cx="{_f(hx)}" cy="{_f(hy - ry - 6)}" r="{_f(rx * .42)}" fill="{col}"/>'
+        return f'<circle cx="{_f(hx)}" cy="{_f(hy - ry - 6)}" r="{_f(rx * .42)}" fill="url(#hg)"/>'
     if h == "bob":
-        return f'<path d="M{_f(hx - rx - 4)} {_f(hy - 20)} v{_f(ry * 1.25)} q{_f(rx)} 10 {_f(rx * 2 + 8)} 0 v{_f(-ry * 1.25)}z" fill="{col}"/>'
+        return f'<path d="M{_f(hx - rx - 4)} {_f(hy - 20)} v{_f(ry * 1.25)} q{_f(rx)} 10 {_f(rx * 2 + 8)} 0 v{_f(-ry * 1.25)}z" fill="url(#hg)"/>'
     return ""
 
 
@@ -157,22 +157,22 @@ def _hair_front(p: dict, hx: float, hy: float, rx: float, ry: float, col: str) -
         return f'<path d="M{_f(hx - rx)} {_f(hy - ry * .35)} a{_f(rx)} {_f(ry)} 0 0 1 {_f(rx * 2)} 0 q{_f(-rx * .2)} {_f(-ry * .05)} {_f(-rx)} 0 q{_f(-rx * .8)} {_f(-ry * .05)} {_f(-rx)} 0z" fill="{col}" opacity=".9"/>'
     if h == "spiky":
         pts = "".join(f" L{_f(hx - rx * .8 + i * rx * .4)} {_f(top - 26 - (i % 2) * 10)} L{_f(hx - rx * .6 + i * rx * .4)} {_f(top + 6)}" for i in range(5))
-        return f'<path d="M{_f(hx - rx)} {_f(hy - ry * .3)} Q{_f(hx - rx)} {_f(top + 6)} {_f(hx - rx * .8)} {_f(top + 4)}{pts} Q{_f(hx + rx)} {_f(top + 6)} {_f(hx + rx)} {_f(hy - ry * .3)}z" fill="{col}"/>'
+        return f'<path d="M{_f(hx - rx)} {_f(hy - ry * .3)} Q{_f(hx - rx)} {_f(top + 6)} {_f(hx - rx * .8)} {_f(top + 4)}{pts} Q{_f(hx + rx)} {_f(top + 6)} {_f(hx + rx)} {_f(hy - ry * .3)}z" fill="url(#hg)"/>'
     if h == "curly":
-        s = f'<path d="M{_f(hx - rx - 2)} {_f(hy - ry * .3)} a{_f(rx + 2)} {_f(ry * 1.05)} 0 0 1 {_f(rx * 2 + 4)} 0z" fill="{col}"/>'
+        s = f'<path d="M{_f(hx - rx - 2)} {_f(hy - ry * .3)} a{_f(rx + 2)} {_f(ry * 1.05)} 0 0 1 {_f(rx * 2 + 4)} 0z" fill="url(#hg)"/>'
         for i in range(7):
             ang = math.pi * (0.1 + 0.8 * i / 6)
             s += f'<circle cx="{_f(hx - math.cos(ang) * (rx + 2))}" cy="{_f(hy - ry * .3 - math.sin(ang) * ry * 1.0)}" r="13" fill="{col}"/>'
         return s
     if h == "side":
         return (f'<path d="M{_f(hx - rx)} {_f(hy - ry * .3)} a{_f(rx)} {_f(ry)} 0 0 1 {_f(rx * 2)} 0 q{_f(-rx * .3)} {_f(-ry * .1)} {_f(-rx * 1.5)} {_f(ry * .35)} '
-                f'q{_f(-rx * .2)} {_f(-ry * .2)} {_f(-rx * .5)} {_f(-ry * .35)}z" fill="{col}"/>')
+                f'q{_f(-rx * .2)} {_f(-ry * .2)} {_f(-rx * .5)} {_f(-ry * .35)}z" fill="url(#hg)"/>')
     if h in ("bun", "ponytail", "braid", "long", "wavy", "bob"):
         return (f'<path d="M{_f(hx - rx - 2)} {_f(hy - ry * .25)} a{_f(rx + 2)} {_f(ry * 1.02)} 0 0 1 {_f(rx * 2 + 4)} 0 '
-                f'q{_f(-rx * .4)} {_f(-ry * .25)} {_f(-rx * 1.1)} {_f(ry * .2)} q{_f(-rx * .4)} {_f(-ry * .3)} {_f(-rx * .9)} {_f(-ry * .2)}z" fill="{col}"/>')
+                f'q{_f(-rx * .4)} {_f(-ry * .25)} {_f(-rx * 1.1)} {_f(ry * .2)} q{_f(-rx * .4)} {_f(-ry * .3)} {_f(-rx * .9)} {_f(-ry * .2)}z" fill="url(#hg)"/>')
     # short (default)
     return (f'<path d="M{_f(hx - rx)} {_f(hy - ry * .3)} a{_f(rx)} {_f(ry)} 0 0 1 {_f(rx * 2)} 0 q{_f(-rx * .5)} {_f(-ry * .15)} {_f(-rx)} {_f(ry * .15)} '
-            f'q{_f(-rx * .5)} {_f(-ry * .3)} {_f(-rx)} {_f(-ry * .15)}z" fill="{col}"/>')
+            f'q{_f(-rx * .5)} {_f(-ry * .3)} {_f(-rx)} {_f(-ry * .15)}z" fill="url(#hg)"/>')
 
 
 def _hat(kind: str, hx: float, hy: float, rx: float, ry: float, col: str) -> str:
@@ -229,6 +229,61 @@ def _mouth(x: float, y: float, viseme: str, open_: float, smile: float, k: float
     ry = (5 + 6 * o) * k
     return (f'<ellipse cx="{_f(x)}" cy="{_f(y + ry * .5)}" rx="{_f(w * .95)}" ry="{_f(ry)}" fill="{inner}"/>'
             f'<rect x="{_f(x - w * .6)}" y="{_f(y - 1)}" width="{_f(w * 1.2)}" height="{_f(3 * k)}" fill="#FFFFFF"/>')
+
+
+# ------------------------------------------------------------------ polished rendering defs
+def _defs(skin: str, skin_d: str, hair_c: str, top: str, bottom: str) -> str:
+    """SVG <defs> — gradients and shadows for studio-quality look."""
+    skin_hi = _mix(skin, 1.15)
+    hair_hi = _mix(hair_c, 1.35)
+    hair_dk = _mix(hair_c, 0.72)
+    top_hi = _mix(top, 1.14)
+    top_dk = _mix(top, 0.80)
+    bot_hi = _mix(bottom, 1.10)
+    bot_dk = _mix(bottom, 0.82)
+    return (
+        '<defs>'
+        # skin radial — warm highlight center, natural shadow at edges
+        f'<radialGradient id="sk" cx=".44" cy=".36" r=".6">'
+        f'<stop offset="0" stop-color="{skin_hi}"/>'
+        f'<stop offset=".65" stop-color="{skin}"/>'
+        f'<stop offset="1" stop-color="{skin_d}"/>'
+        '</radialGradient>'
+        # skin limb gradient — subtle depth along limbs
+        f'<linearGradient id="sl" x1="0" y1="0" x2="1" y2="0">'
+        f'<stop offset="0" stop-color="{skin_d}"/>'
+        f'<stop offset=".45" stop-color="{skin}"/>'
+        f'<stop offset="1" stop-color="{skin_d}"/>'
+        '</linearGradient>'
+        # hair gradient — highlight band to deep shadow
+        f'<linearGradient id="hg" x1=".3" y1="0" x2=".5" y2="1">'
+        f'<stop offset="0" stop-color="{hair_hi}"/>'
+        f'<stop offset=".35" stop-color="{hair_c}"/>'
+        f'<stop offset="1" stop-color="{hair_dk}"/>'
+        '</linearGradient>'
+        # clothing top gradient
+        f'<linearGradient id="tg" x1=".2" y1="0" x2=".6" y2="1">'
+        f'<stop offset="0" stop-color="{top_hi}"/>'
+        f'<stop offset="1" stop-color="{top_dk}"/>'
+        '</linearGradient>'
+        # clothing bottom gradient
+        f'<linearGradient id="btg" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0" stop-color="{bot_hi}"/>'
+        f'<stop offset="1" stop-color="{bot_dk}"/>'
+        '</linearGradient>'
+        # iris gradient — deep brown centre to lighter rim
+        '<radialGradient id="ig" cx=".38" cy=".32" r=".55">'
+        '<stop offset="0" stop-color="#795548"/>'
+        '<stop offset=".6" stop-color="#4E342E"/>'
+        '<stop offset="1" stop-color="#3E2723"/>'
+        '</radialGradient>'
+        # lip gradient
+        f'<radialGradient id="lg" cx=".5" cy=".4" r=".6">'
+        f'<stop offset="0" stop-color="{_mix(skin, 0.68)}"/>'
+        f'<stop offset="1" stop-color="{_mix(skin, 0.52)}"/>'
+        '</radialGradient>'
+        '</defs>'
+    )
 
 
 # ------------------------------------------------------------------ the character
@@ -307,7 +362,9 @@ def svg(params: dict, pose: dict | None = None, *, width: int | None = None, hei
     lean = float(q["lean"]) + m["lean_extra"]
     g.append(f'<g transform="rotate({_f(lean)} {_f(cx)} {_f(hip_y)})">')
     g.append(f'<path d="M{_f(cx - tw)} {_f(sh_y - 12)} q{_f(tw * .1)} -20 {_f(tw)} -20 q{_f(tw * .9)} 0 {_f(tw)} 20 '
-             f'l{_f(-(tw - hip - 8))} {_f(torso_bottom - sh_y + 12)} h{_f(-(hip + 8) * 2)}z" fill="{top}"/>')
+             f'l{_f(-(tw - hip - 8))} {_f(torso_bottom - sh_y + 12)} h{_f(-(hip + 8) * 2)}z" fill="url(#tg)"/>'
+             # subtle centre fold line for depth
+             f'<path d="M{_f(cx)} {_f(sh_y + 10)} v{_f(torso_bottom - sh_y - 20)}" stroke="{_mix(top, 0.82)}" stroke-width="1.5" opacity=".25"/>')
     if female and not o.get("coat"):
         g.append(f'<path d="M{_f(cx - tw * .7)} {_f(sh_y + 40)} q{_f(tw * .7)} 26 {_f(tw * 1.4)} 0" stroke="{_mix(top, .85)}" stroke-width="2" fill="none" opacity=".6"/>')
     if o.get("collar"):
@@ -355,15 +412,22 @@ def svg(params: dict, pose: dict | None = None, *, width: int | None = None, hei
         hand_kind = "fist"
     g.append(_limb(cx + sw, sh_y, q["r_sh"], ua, q["r_el"], fa, 1, 24 * (1 if m["width"] < 1.2 else 1.2), c_upper, c_fore, 14, skin, hand_kind, r_prop))
     # --- neck + head
-    g.append(f'<rect x="{_f(cx - 16)}" y="{_f(neck_top)}" width="32" height="40" rx="8" fill="{skin_d}"/>')
+    # neck with shadow under jaw
+    g.append(f'<rect x="{_f(cx - 16)}" y="{_f(neck_top)}" width="32" height="40" rx="8" fill="{skin_d}"/>'
+             f'<ellipse cx="{_f(cx)}" cy="{_f(neck_top + 4)}" rx="22" ry="6" fill="{_mix(skin_d, 0.85)}" opacity=".3"/>')
     tilt = float(q["head_tilt"])
     turn = max(-1.0, min(1.0, float(q["head_turn"])))
     g.append(f'<g transform="rotate({_f(tilt)} {_f(cx)} {_f(neck_top + 10)})">')
-    g.append(f'<ellipse cx="{_f(cx - rx * .92)}" cy="{_f(hy + 4)}" rx="10" ry="14" fill="{skin_d}"/><ellipse cx="{_f(cx + rx * .92)}" cy="{_f(hy + 4)}" rx="10" ry="14" fill="{skin_d}"/>')
+    g.append(f'<ellipse cx="{_f(cx - rx * .92)}" cy="{_f(hy + 4)}" rx="10" ry="14" fill="{skin_d}"/>'
+             f'<ellipse cx="{_f(cx - rx * .92)}" cy="{_f(hy + 4)}" rx="6" ry="9" fill="{_mix(skin_d, 0.88)}" opacity=".35"/>'  # ear inner shadow
+             f'<ellipse cx="{_f(cx + rx * .92)}" cy="{_f(hy + 4)}" rx="10" ry="14" fill="{skin_d}"/>'
+             f'<ellipse cx="{_f(cx + rx * .92)}" cy="{_f(hy + 4)}" rx="6" ry="9" fill="{_mix(skin_d, 0.88)}" opacity=".35"/>')
     if "earrings" in (p.get("accessories") or []):
         g.append(f'<circle cx="{_f(cx - rx * .95)}" cy="{_f(hy + 20)}" r="4" fill="#FFD54F"/><circle cx="{_f(cx + rx * .95)}" cy="{_f(hy + 20)}" r="4" fill="#FFD54F"/>')
     jaw = 1.0 + 0.06 * float(q["mouth_open"])
-    g.append(f'<ellipse cx="{_f(cx)}" cy="{_f(hy)}" rx="{_f(rx)}" ry="{_f(ry * jaw)}" fill="{skin}"/>')
+    g.append(f'<ellipse cx="{_f(cx)}" cy="{_f(hy)}" rx="{_f(rx)}" ry="{_f(ry * jaw)}" fill="url(#sk)"/>'
+             # subtle jaw shadow for depth
+             f'<ellipse cx="{_f(cx)}" cy="{_f(hy + ry * jaw * 0.7)}" rx="{_f(rx * 0.75)}" ry="{_f(ry * 0.22)}" fill="{skin_d}" opacity=".18"/>')
     if p["age"] == "elderly":
         g.append(f'<path d="M{_f(cx - 30)} {_f(hy + 22)} q6 6 12 0 M{_f(cx + 18)} {_f(hy + 22)} q6 6 12 0 M{_f(cx - 14)} {_f(hy - 44)} h28" stroke="{skin_d}" stroke-width="2" fill="none"/>')
     if p["age"] == "child" or q.get("expr") == "happy":
@@ -375,9 +439,17 @@ def svg(params: dict, pose: dict | None = None, *, width: int | None = None, hei
         ex = fx + side * 24 * (1 - abs(turn) * 0.12)
         ey = hy - 6
         g.append(f'<ellipse cx="{_f(ex)}" cy="{_f(ey)}" rx="11" ry="{_f(max(0.6, 7.5 * eo))}" fill="#FFFFFF"/>')
+        # eyelid / lash line for depth
+        if eo > 0.2:
+            g.append(f'<path d="M{_f(ex - 12)} {_f(ey - 7.5 * eo)} q12 {_f(-2.5 * eo)} 24 0" stroke="{hair_c if p["hair"] != "bald" else "#3E2723"}" stroke-width="2.4" fill="none" stroke-linecap="round"/>')
         if eo > 0.12:
-            g.append(f'<circle cx="{_f(ex + float(q["gaze_x"]) * 4 + turn * 2)}" cy="{_f(ey + float(q["gaze_y"]) * 3)}" r="{_f(4.6 * min(1, eo + .3))}" fill="#3E2723"/>'
-                     f'<circle cx="{_f(ex + float(q["gaze_x"]) * 4 + turn * 2 - 1.5)}" cy="{_f(ey + float(q["gaze_y"]) * 3 - 1.5)}" r="1.4" fill="#FFFFFF"/>')
+            ix = ex + float(q["gaze_x"]) * 4 + turn * 2
+            iy = ey + float(q["gaze_y"]) * 3
+            ir = 4.6 * min(1, eo + .3)
+            g.append(f'<circle cx="{_f(ix)}" cy="{_f(iy)}" r="{_f(ir)}" fill="url(#ig)"/>'         # iris with gradient
+                     f'<circle cx="{_f(ix)}" cy="{_f(iy)}" r="{_f(ir * 0.38)}" fill="#1B1B1B"/>'    # pupil
+                     f'<circle cx="{_f(ix - 1.8)}" cy="{_f(iy - 1.8)}" r="2.0" fill="#FFFFFF"/>'    # main catchlight
+                     f'<circle cx="{_f(ix + 1.4)}" cy="{_f(iy + 1.2)}" r="0.9" fill="#FFFFFF" opacity=".55"/>')  # secondary catchlight
         else:
             g.append(f'<path d="M{_f(ex - 10)} {_f(ey)} q10 4 20 0" stroke="{skin_d}" stroke-width="2.2" fill="none"/>')
         # brows
@@ -390,8 +462,13 @@ def svg(params: dict, pose: dict | None = None, *, width: int | None = None, hei
         g.append(f'<g stroke="{p.get("glasses_color") or "#222"}" stroke-width="2.5" fill="{"#263238" if dark else "none"}" fill-opacity="{".85" if dark else "0"}">'
                  f'<rect x="{_f(fx - 38)}" y="{_f(hy - 18)}" width="28" height="22" rx="6"/><rect x="{_f(fx + 10)}" y="{_f(hy - 18)}" width="28" height="22" rx="6"/>'
                  f'<path d="M{_f(fx - 10)} {_f(hy - 8)} h20 M{_f(fx - 38)} {_f(hy - 10)} h-18 M{_f(fx + 38)} {_f(hy - 10)} h18"/></g>')
-    # nose
-    g.append(f'<path d="M{_f(fx + 2)} {_f(hy + 2)} q6 12 -4 14" stroke="{skin_d}" stroke-width="2.4" fill="none" stroke-linecap="round"/>')
+    # cheek blush (subtle warmth)
+    blush_op = ".12" if p["age"] == "child" else ".06"
+    g.append(f'<ellipse cx="{_f(fx - 26)}" cy="{_f(hy + 12)}" rx="14" ry="9" fill="#E57373" opacity="{blush_op}"/>'
+             f'<ellipse cx="{_f(fx + 26)}" cy="{_f(hy + 12)}" rx="14" ry="9" fill="#E57373" opacity="{blush_op}"/>')
+    # nose — bridge highlight + shadow
+    g.append(f'<path d="M{_f(fx + 2)} {_f(hy + 2)} q6 12 -4 14" stroke="{skin_d}" stroke-width="2.4" fill="none" stroke-linecap="round"/>'
+             f'<path d="M{_f(fx - 1)} {_f(hy - 6)} q1 8 0 14" stroke="#FFFFFF" stroke-width="1.2" fill="none" opacity=".2" stroke-linecap="round"/>')
     if "bindi" in (p.get("accessories") or []):
         g.append(f'<circle cx="{_f(fx)}" cy="{_f(hy - 36)}" r="4" fill="#C62828"/>')
     # facial hair + mouth
@@ -408,6 +485,9 @@ def svg(params: dict, pose: dict | None = None, *, width: int | None = None, hei
             g.append(f'<path d="M{_f(fx - 24)} {_f(hy + 28)} q12 -14 24 -2 q12 -12 24 2 q-12 8 -24 2 q-12 6 -24 -2z" fill="{hair_c}"/>')
     # hair front, hat
     g.append(_hair_front(p, cx, hy, rx, ry, hair_c))
+    # hair highlight sheen for depth
+    if p["hair"] not in ("bald", "buzz"):
+        g.append(f'<ellipse cx="{_f(cx - 8)}" cy="{_f(hy - ry * 0.55)}" rx="{_f(rx * 0.45)}" ry="{_f(ry * 0.25)}" fill="#FFFFFF" opacity=".1"/>')
     if p["hat"] != "none":
         g.append(_hat(p["hat"], cx, hy, rx, ry, top if p["hat"] in ("cap", "hat") else "#F57C00" if p["hat"] == "turban" else top))
     g.append("</g>")
@@ -422,5 +502,8 @@ def svg(params: dict, pose: dict | None = None, *, width: int | None = None, hei
         return inner
     w = width or VIEW_W
     h = height or VIEW_H
+    defs = _defs(skin, skin_d, hair_c, top, bottom)
+    # ground contact shadow — soft ellipse beneath feet
+    shadow = f'<ellipse cx="{_f(cx)}" cy="{_f(GROUND + 6)}" rx="{_f(62 * s)}" ry="{_f(10 * s)}" fill="#000" opacity=".12"/>'
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {VIEW_W} {VIEW_H}" '
-            f'preserveAspectRatio="xMidYMax meet">{inner}</svg>')
+            f'preserveAspectRatio="xMidYMax meet">{defs}{shadow}{inner}</svg>')

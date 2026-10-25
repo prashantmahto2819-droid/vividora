@@ -49,7 +49,7 @@ def svg_to_png(svg: str, out: Path, w: int, h: int) -> Path:
 
 def preview_png(params: dict, pose: dict | None = None, w: int = 300, h: int = 600) -> Path:
     p = rig.validate(params)
-    out = cache_dir() / "png" / f"{_key(p, pose or {}, w, h, 'v2')}.png"
+    out = cache_dir() / "png" / f"{_key(p, pose or {}, w, h, 'v3')}.png"
     if out.exists():
         return out
     return svg_to_png(rig.svg(p, pose, width=w, height=h), out, w, h)
@@ -85,7 +85,7 @@ def clip_webm(params: dict, spec: dict, w: int = 480, h: int = 960, on_progress=
     fps = int(spec.get("fps") or FPS)
     dur = max(0.2, float(spec.get("dur") or 2.0))
     lip = spec.get("lip") or {}
-    key = _key(p, {k: v for k, v in spec.items() if k != "lip"}, {"words": lip.get("words"), "wav": lip.get("wav_sig")}, w, h, "v2")
+    key = _key(p, {k: v for k, v in spec.items() if k != "lip"}, {"words": lip.get("words"), "wav": lip.get("wav_sig")}, w, h, "v3")
     out = cache_dir() / "webm" / f"{key}.webm"
     if out.exists():
         return out

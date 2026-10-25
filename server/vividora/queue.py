@@ -86,7 +86,7 @@ def _priority(kind: str, payload: dict | None = None) -> int:
 def _running_counts(c) -> dict:
     """Returns {'total': N, 'heavy': N, 'by_user': {user_id: N}}."""
     rows = c.execute(
-        "SELECT j.kind, p.user_id FROM jobs j "
+        "SELECT j.kind, p.created_by FROM jobs j "
         "JOIN projects p ON p.id = j.project_id "
         "WHERE j.status = 'running'").fetchall()
     total = len(rows)
@@ -113,7 +113,7 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
 
     # Fetch candidates ordered by priority tier, then creation time
     cands = db.rows(c.execute(
-        f"SELECT j.*, p.workspace_id AS ws, p.user_id AS uid FROM jobs j "
+        f"SELECT j.*, p.workspace_id AS ws, p.created_by AS uid FROM jobs j "
         f"JOIN projects p ON p.id = j.project_id "
         f"WHERE j.status = 'queued' AND j.kind IN ({marks}) "
         "AND (j.run_after IS NULL OR j.run_after <= ?) "
@@ -184,8 +184,8 @@ def _pick_fair(c, cands: list[dict], counts: dict) -> dict | None:
     # ── Self-hosted: per-user round-robin ───────────────────────────────
     # Within the highest available priority tier, pick the user who waited longest
     last_user = {r[0]: r[1] or "" for r in c.execute(
-        "SELECT p.user_id, MAX(j.started_at) FROM jobs j JOIN projects p ON p.id = j.project_id "
-        "WHERE j.started_at IS NOT NULL GROUP BY p.user_id").fetchall()}
+        "SELECT p.created_by, MAX(j.started_at) FROM jobs j JOIN projects p ON p.id = j.project_id "
+        "WHERE j.started_at IS NOT NULL GROUP BY p.created_by").fetchall()}
 
     first_pri = _priority(cands[0]["kind"], cands[0].get("payload"))
     cls = [j for j in cands if _priority(j["kind"], j.get("payload")) == first_pri]
@@ -217,7 +217,7 @@ def queue_status(c) -> dict:
         "SELECT j.kind, COUNT(*) FROM jobs j WHERE j.status = 'queued' "
         "AND (j.run_after IS NULL OR j.run_after <= ?) GROUP BY j.kind", (db.now(),)).fetchall()
     running = c.execute(
-        "SELECT j.kind, j.worker, p.user_id, j.progress, j.message "
+        "SELECT j.kind, j.worker, p.created_by, j.progress, j.message "
         "FROM jobs j JOIN projects p ON p.id = j.project_id "
         "WHERE j.status = 'running' ORDER BY j.started_at").fetchall()
 

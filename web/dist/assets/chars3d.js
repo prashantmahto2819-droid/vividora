@@ -50,6 +50,7 @@ export const DEFAULT_SPEC = { height: 1.72, build: 1.0, age: "adult", gender: "m
 function capsule(r, len, seg = 10) { return new THREE.CapsuleGeometry(r, Math.max(0.001, len - 2 * r), 4, seg); }
 function tf(geom, m) { geom.applyMatrix4(m); return geom; }
 function mat(color, opts = {}) { return new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.02, ...opts }); }
+function skinMat(color) { return new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.01, envMapIntensity: 0.6 }); }
 
 /** Merge non-indexed geometries into one BufferGeometry with skinIndex/skinWeight + a material group per part. */
 function mergeSkinned(parts) {
@@ -107,7 +108,7 @@ export function buildCharacter(input = {}) {
   const skin = SKIN[spec.skin] ?? SKIN.wheat;
   const o = OUTFITS[spec.outfit] || OUTFITS.tshirt;
   const col = (k, def) => (spec.colors[k] != null ? spec.colors[k] : def);
-  const mats = [mat(skin), mat(col("torso", o.torso)), mat(o.sleeves == null ? skin : col("sleeves", o.sleeves)), mat(col("legs", o.legs)), mat(col("shoes", o.shoes), { roughness: 0.5 })];
+  const mats = [skinMat(skin), mat(col("torso", o.torso), { roughness: 0.7 }), mat(o.sleeves == null ? skin : col("sleeves", o.sleeves), { roughness: 0.7 }), mat(col("legs", o.legs), { roughness: 0.75 }), mat(col("shoes", o.shoes), { roughness: 0.5, metalness: 0.1 })];
   const M = { skin: 0, torso: 1, sleeves: 2, legs: 3, shoes: 4 };
   // body parts (geometry in bone space → world bind space) -------------
   const parts = [];
@@ -172,7 +173,7 @@ export function buildCharacter(input = {}) {
   // skin weights for the head: all Head bone
   { const n = headGeom.getAttribute("position").count; const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4); for (let i = 0; i < n; i++) { si[i * 4] = idx.Head; sw[i * 4] = 1; }
     headGeom.setAttribute("skinIndex", new THREE.BufferAttribute(si, 4)); headGeom.setAttribute("skinWeight", new THREE.BufferAttribute(sw, 4)); }
-  const head = new THREE.SkinnedMesh(headGeom, mat(skin)); head.frustumCulled = false; head.castShadow = true;
+  const head = new THREE.SkinnedMesh(headGeom, skinMat(skin)); head.frustumCulled = false; head.castShadow = true;
   head.morphTargetDictionary = Object.fromEntries(names.map((n, i) => [n, i]));
   head.morphTargetInfluences = new Array(names.length).fill(0);
   head.bind(skeleton); group.add(head);
@@ -181,18 +182,18 @@ export function buildCharacter(input = {}) {
   const eyeY = R * 0.95, eyeZ = R * 0.78, eyeX = R * 0.34;
   const eyes = [];
   for (const sx of [-1, 1]) {
-    const w = new THREE.Mesh(new THREE.SphereGeometry(R * 0.165, 12, 10), mat(0xffffff, { roughness: 0.3 })); w.position.set(sx * eyeX, eyeY, eyeZ); w.scale.set(1, 1, 0.5); face.add(w);
-    const p = new THREE.Mesh(new THREE.SphereGeometry(R * 0.085, 10, 8), mat(0x1b1b1b, { roughness: 0.2 })); p.position.set(sx * eyeX, eyeY, eyeZ + R * 0.06); face.add(p);
+    const w = new THREE.Mesh(new THREE.SphereGeometry(R * 0.165, 12, 10), mat(0xffffff, { roughness: 0.3, emissive: 0xffffff, emissiveIntensity: 0.15 })); w.position.set(sx * eyeX, eyeY, eyeZ); w.scale.set(1, 1, 0.5); face.add(w);
+    const p = new THREE.Mesh(new THREE.SphereGeometry(R * 0.085, 10, 8), mat(0x1b1b1b, { roughness: 0.1, metalness: 0.15 })); p.position.set(sx * eyeX, eyeY, eyeZ + R * 0.06); face.add(p);
     const br = new THREE.Mesh(new THREE.BoxGeometry(R * 0.32, R * 0.05, R * 0.06), mat(spec.hairColor)); br.position.set(sx * eyeX, eyeY + R * 0.22, eyeZ + R * 0.02); br.rotation.z = sx * -0.15; face.add(br);
     eyes.push({ white: w, pupil: p, brow: br, sx });
   }
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(R * 0.08, R * 0.22, 8), mat(skin)); nose.rotation.x = Math.PI / 2; nose.position.set(0, R * 0.78, R * 0.92); face.add(nose);
-  for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(R * 0.11, 8, 8), mat(skin)); e.position.set(sx * R * 0.9, R * 0.85, 0); e.scale.set(0.5, 1, 0.7); face.add(e); }
-  const mouth = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 14, 10), mat(0x6b1a1a, { roughness: 0.4 })); mouth.position.set(0, R * 0.5, R * 0.86); mouth.scale.set(1.3, 0.25, 0.4); face.add(mouth);
-  const lips = new THREE.Mesh(new THREE.TorusGeometry(R * 0.17, R * 0.035, 6, 16), mat(0xa0453c)); lips.position.copy(mouth.position); lips.scale.set(1.2, 0.5, 0.4); face.add(lips);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(R * 0.08, R * 0.22, 8), skinMat(skin)); nose.rotation.x = Math.PI / 2; nose.position.set(0, R * 0.78, R * 0.92); face.add(nose);
+  for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(R * 0.11, 8, 8), skinMat(skin)); e.position.set(sx * R * 0.9, R * 0.85, 0); e.scale.set(0.5, 1, 0.7); face.add(e); }
+  const mouth = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 14, 10), mat(0x6b1a1a, { roughness: 0.3, emissive: 0x3a0808, emissiveIntensity: 0.15 })); mouth.position.set(0, R * 0.5, R * 0.86); mouth.scale.set(1.3, 0.25, 0.4); face.add(mouth);
+  const lips = new THREE.Mesh(new THREE.TorusGeometry(R * 0.17, R * 0.035, 6, 16), mat(0xa0453c, { roughness: 0.45, metalness: 0.05 })); lips.position.copy(mouth.position); lips.scale.set(1.2, 0.5, 0.4); face.add(lips);
   if (spec.beard) { const bg = new THREE.SphereGeometry(R * 1.0, 16, 12, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.45); bg.scale(0.95, 1.0, 0.98); const bd = new THREE.Mesh(bg, mat(spec.hairColor)); bd.position.set(0, R * 0.88, 0); face.add(bd); }
   // hair ---------------------------------------------------------------
-  const hm = mat(spec.hairColor, { roughness: 0.9 });
+  const hm = mat(spec.hairColor, { roughness: 0.65, metalness: 0.08 });
   // hair caps leave the face free: the sphere segment covers the top/back, the front edge sits above the brows
   const cap = (phi = 0.42, sc = 1.05) => { const g = new THREE.SphereGeometry(R * sc, 20, 14, Math.PI * 0.75, Math.PI * 1.5, 0, Math.PI * phi); const g2 = new THREE.SphereGeometry(R * sc, 20, 14, Math.PI * 0.25, Math.PI * 0.5, 0, Math.PI * 0.3); const m = new THREE.Group(); m.add(new THREE.Mesh(g, hm), new THREE.Mesh(g2, hm)); m.position.set(0, R * 0.9, -R * 0.03); m.scale.set(0.96, 1.05, 0.98); return m; };
   const hairStyle = spec.hair;
@@ -422,7 +423,8 @@ export function applyLighting(scene, lighting = "day", name = "") {
     night: { sky: 0x1a2a55, ground: 0x0b0f1a, hemi: 0.5, sun: 0x9ab4ff, sunI: 0.9, pos: [2, 5, -2], amb: 0.15 } }[lighting] || {};
   const hemi = new THREE.HemisphereLight(cfg.sky, cfg.ground, cfg.hemi); scene.add(hemi);
   const sun = new THREE.DirectionalLight(cfg.sun, cfg.sunI); sun.position.set(...cfg.pos); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.left = -6; sun.shadow.camera.right = 6; sun.shadow.camera.top = 6; sun.shadow.camera.bottom = -6; sun.shadow.camera.far = 30; scene.add(sun);
+  sun.shadow.camera.left = -6; sun.shadow.camera.right = 6; sun.shadow.camera.top = 6; sun.shadow.camera.bottom = -6; sun.shadow.camera.far = 30; sun.shadow.bias = -0.001; sun.shadow.normalBias = 0.02; scene.add(sun);
+  const rim = new THREE.DirectionalLight(0xaaccff, 0.3); rim.position.set(-2, 3, -3); scene.add(rim);
   scene.add(new THREE.AmbientLight(0xffffff, cfg.amb));
   if (name === "stage" || name === "gym") { const fill = new THREE.PointLight(0xff8800, lighting === "night" ? 30 : 8, 10); fill.position.set(0, 3, 2); scene.add(fill); }
   scene.background = name === "park" ? null : new THREE.Color(lighting === "night" ? 0x0f172a : lighting === "evening" ? 0x3b2a1a : 0x1e2430);

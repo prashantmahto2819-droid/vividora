@@ -65,17 +65,15 @@ def vaapi_supported_codecs() -> set[str]:
     dev = vaapi_device()
     if not dev:
         return set()
-    supported = set()
-    for codec_id, vaapi_enc in VAAPI_ENCODERS.items():
-        try:
-            out = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-encoders"],
-                capture_output=True, text=True, timeout=10,
-            ).stdout
-            if f" {vaapi_enc} " in out:
-                supported.add(codec_id)
-        except Exception:  # noqa: BLE001
-            pass
+    try:
+        out = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:  # noqa: BLE001
+        return set()
+    supported = {codec_id for codec_id, vaapi_enc in VAAPI_ENCODERS.items()
+                 if f" {vaapi_enc} " in out}
     log.info("VAAPI encoders: %s", supported or "none")
     return supported
 
