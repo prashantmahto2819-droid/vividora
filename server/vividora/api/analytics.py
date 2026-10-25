@@ -40,9 +40,12 @@ def _rows(workspace_id: str, channel_id: str | None = None) -> list[dict]:
         meta = p["asset_meta"] if isinstance(p["asset_meta"], dict) else json.loads(p["asset_meta"] or "{}")
         rs = (p["project_settings"] if isinstance(p["project_settings"], dict) else json.loads(p["project_settings"] or "{}")).get("render", {})
         published_at = (st or {}).get("extra", {}).get("published") or p["finished_at"]
+        extra = (st or {}).get("extra") or {}
+        extra = extra if isinstance(extra, dict) else json.loads(extra or "{}")
         out.append({"id": p["id"], "project_id": p["project_id"], "title": p["payload"].get("title") or p["project_title"],
                     "platform": p["platform"], "url": p["url"], "label": p["asset_label"], "published_at": published_at,
                     "views": (st or {}).get("views", 0), "likes": (st or {}).get("likes", 0), "comments": (st or {}).get("comments", 0),
+                    "shares": int(extra.get("shares") or 0), "saves": int(extra.get("saves") or 0),
                     "fetched_at": (st or {}).get("fetched_at"), "features": analytics.features(meta, rs, published_at)})
     # YouTube Analytics cache (retention curve, avg % viewed, CTR) — see retention_job
     from ..retention_job import cached
@@ -100,6 +103,23 @@ async def refresh(request: Request, user: dict):
                     results[p["id"]] = (analytics.ig_stats if p["platform"] == "instagram" else analytics.fb_stats)(p["remote_id"], tok)
                 except PublishError as e:
                     errors.append(f"{p['platform']}: {e}")
+        # TikTok stats (batched per connection)
+        tt = [p for p in pubs if p["platform"] == "tiktok"]
+        tt_by_conn: dict[str, list[dict]] = {}
+        for p in tt:
+            tt_by_conn.setdefault(p["connection_id"], []).append(p)
+        for cid, items in tt_by_conn.items():
+            if cid not in conns:
+                continue
+            try:
+                from ..publish import tiktok as tiktokmod
+                tok, _ = tiktokmod.access_token(conns[cid]["secrets"])
+                got = analytics.tt_stats([p["remote_id"] for p in items], tok)
+                for p in items:
+                    if p["remote_id"] in got:
+                        results[p["id"]] = got[p["remote_id"]]
+            except PublishError as e:
+                errors.append(f"TikTok: {e}")
         with db.tx() as c:
             for pid, st in results.items():
                 db.insert(c, "stats", {"publication_id": pid, "fetched_at": db.now(), "views": st.get("views", 0),
