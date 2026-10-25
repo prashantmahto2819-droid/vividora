@@ -31,7 +31,10 @@ INDUSTRIES = {"healthcare": "Clinic / Hospital", "grocery": "Grocery / Kirana", 
               "restaurant": "Restaurant / Café / Dhaba", "wedding": "Wedding / Event",
               "astrology": "Astrology / Pandit", "travel": "Travel / Tourism",
               "tech": "Tech / Startup", "podcast": "Podcast / Show",
-              "festival": "Festival / Occasion", "jewellery": "Jewellery / Gold"}
+              "festival": "Festival / Occasion", "jewellery": "Jewellery / Gold",
+              "gaming": "Gaming / Esports", "crypto": "Crypto / Finance",
+              "motivation": "Motivation / Self-help", "food": "Food / Cooking",
+              "entertainment": "Entertainment / Bollywood", "news": "News / Commentary"}
 
 
 def _load_builtin() -> list[dict]:
