@@ -7,7 +7,10 @@ projects (render payloads reference them by id).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import time
+import urllib.parse
 from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
@@ -207,13 +210,193 @@ def _http_json(url: str, headers: dict | None = None) -> dict:
 
 SAFE_CC = {"cc0", "pdm", "by", "by-sa"}  # commercial-safe CC (by/by-sa need credit)
 
+# ---- YouTube Audio (yt-dlp) helpers ----
+# Channels well-known for royalty-free music (YouTube Audio Library, NCS, etc.)
+_YT_FREE_CHANNELS = {
+    "UCht8qITGkBvXKsR1Byln-wA",  # YouTube Audio Library
+    "UC_aEa8K-EOJ3D6gOs7HcyNg",  # NoCopyrightSounds
+    "UCQ2-dDlL1MOT-jGBROoJcSQ",  # Audio Library — Music for content creators
+    "UCHEioEoqyFPk0j2Iani1bvg",  # Vlog No Copyright Music
+    "UCByJTOhXUPnFBSy5C5OQSmA",  # Infraction — No Copyright Music
+    "UCx5VxJh2lYMYpKsbYwjEJIA",  # Chillhop Music
+}
+
+
+def _yt_search(q: str) -> list[dict]:
+    """Search YouTube via yt-dlp for royalty-free / CC music."""
+    try:
+        proc = subprocess.run(
+            ["yt-dlp", "--dump-json", f"ytsearch30:{q} royalty free", "--flat-playlist"],
+            capture_output=True, text=True, timeout=45,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ApiError(502, f"yt-dlp search विफल: {e}")
+    out: list[dict] = []
+    for line in proc.stdout.strip().splitlines():
+        try:
+            r = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        # Keep only CC-licensed videos or videos from known free-music channels
+        lic = (r.get("license") or "").lower()
+        channel_id = r.get("channel_id") or ""
+        is_cc = "creative commons" in lic or lic == "cc-by"
+        is_free_ch = channel_id in _YT_FREE_CHANNELS
+        if not is_cc and not is_free_ch:
+            continue
+        vid_url = r.get("webpage_url") or r.get("url") or f"https://www.youtube.com/watch?v={r.get('id')}"
+        thumb = (r.get("thumbnails") or [{}])[-1].get("url") or r.get("thumbnail") or ""
+        out.append({
+            "title": r.get("title") or "untitled",
+            "url": vid_url,
+            "preview": thumb,
+            "duration": r.get("duration"),
+            "license": "Creative Commons" if is_cc else f"Free music — {r.get('channel') or r.get('uploader') or ''}",
+            "creator": r.get("channel") or r.get("uploader") or "",
+            "page": vid_url,
+            "kind": "music",
+            "source": "youtube-audio",
+            "yt_id": r.get("id"),
+        })
+    return out
+
+
+def _yt_extract_audio(url: str, dst: Path) -> Path:
+    """Extract audio from a YouTube URL into dst directory. Returns the output file path."""
+    out_tpl = str(dst / "%(title).60s.%(ext)s")
+    try:
+        proc = subprocess.run(
+            ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "192K",
+             "--max-filesize", str(MAX_SIZE), "-o", out_tpl, url],
+            capture_output=True, text=True, timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        raise ApiError(504, "YouTube audio extract में बहुत समय लगा")
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ApiError(502, f"yt-dlp extract विफल: {e}")
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip()[-200:]
+        raise ApiError(502, f"yt-dlp extract error: {err}")
+    # find the output file
+    for f in dst.iterdir():
+        if f.suffix.lower() in {".mp3", ".m4a", ".opus", ".ogg", ".wav"}:
+            return f
+    raise ApiError(502, "yt-dlp ने कोई audio file नहीं बनाई")
+
+
+# ---- Freesound.org helpers ----
+
+def _freesound_search(q: str) -> list[dict]:
+    """Search Freesound.org for CC0 sounds."""
+    key = os.getenv("FREESOUND_API_KEY")
+    if not key:
+        raise ApiError(400, ".env में FREESOUND_API_KEY डालें (freesound.org/apiv2 — free)")
+    url = (
+        f"https://freesound.org/apiv2/search/text/"
+        f"?query={urllib.parse.quote(q)}"
+        f'&filter=license:"Creative Commons 0"'
+        f"&fields=id,name,tags,duration,previews,username,license,url"
+        f"&page_size=30"
+        f"&token={key}"
+    )
+    data = _http_json(url)
+    out: list[dict] = []
+    for r in data.get("results", []):
+        previews = r.get("previews") or {}
+        preview_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or ""
+        out.append({
+            "title": r.get("name") or "untitled",
+            "url": preview_url,
+            "preview": preview_url,
+            "duration": round(r.get("duration") or 0, 2),
+            "license": "CC0 1.0",
+            "creator": r.get("username") or "",
+            "page": r.get("url") or f"https://freesound.org/people/{r.get('username')}/sounds/{r.get('id')}/",
+            "kind": "sfx",
+            "source": "freesound",
+            "freesound_id": r.get("id"),
+            "tags": ",".join((r.get("tags") or [])[:10]),
+        })
+    return out
+
+
+def _freesound_download(sound_id: int, dst: Path) -> Path:
+    """Download the full-quality file from Freesound."""
+    key = os.getenv("FREESOUND_API_KEY")
+    if not key:
+        raise ApiError(400, "FREESOUND_API_KEY not configured")
+    import urllib.request
+    # get download URL
+    info = _http_json(f"https://freesound.org/apiv2/sounds/{sound_id}/?fields=name,download&token={key}")
+    dl_url = info.get("download")
+    if not dl_url:
+        raise ApiError(502, "Freesound download URL नहीं मिला")
+    name = storage.safe_name(info.get("name") or f"freesound_{sound_id}")[:60]
+    ext = Path(dl_url.split("?")[0]).suffix.lower() or ".wav"
+    out = dst / f"{name}{ext}"
+    req = urllib.request.Request(dl_url, headers={"Authorization": f"Token {key}", "User-Agent": "Vividora/1.0"})
+    with urllib.request.urlopen(req, timeout=120) as r, out.open("wb") as o:
+        sz = 0
+        while chunk := r.read(1 << 20):
+            sz += len(chunk)
+            if sz > 300 * 1024 * 1024:
+                raise ApiError(413, "file बहुत बड़ी")
+            o.write(chunk)
+    return out
+
+
+# ---- Trending Audio Discovery ----
+_trending_cache: dict = {"ts": 0, "data": []}
+_TRENDING_TTL = 6 * 3600  # 6 hours
+
+
+def _fetch_trending() -> list[dict]:
+    """Fetch trending music from YouTube Music charts (India) via yt-dlp. Cached for 6h."""
+    now = time.time()
+    if _trending_cache["data"] and now - _trending_cache["ts"] < _TRENDING_TTL:
+        return _trending_cache["data"]
+    try:
+        proc = subprocess.run(
+            ["yt-dlp", "--dump-json",
+             "https://www.youtube.com/feed/trending?bp=4gINGgt5dG1hX2NoYXJ0cw%3D%3D",
+             "--flat-playlist", "--playlist-items", "1-20"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # fallback: try YouTube Music charts
+        try:
+            proc = subprocess.run(
+                ["yt-dlp", "--dump-json", "https://music.youtube.com/playlist?list=RDCLAK5uy_k2a",
+                 "--flat-playlist", "--playlist-items", "1-20"],
+                capture_output=True, text=True, timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return _trending_cache["data"]  # return stale cache on failure
+    out: list[dict] = []
+    for line in proc.stdout.strip().splitlines():
+        try:
+            r = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        vid_url = r.get("webpage_url") or r.get("url") or f"https://www.youtube.com/watch?v={r.get('id')}"
+        thumb = (r.get("thumbnails") or [{}])[-1].get("url") or r.get("thumbnail") or ""
+        out.append({
+            "title": r.get("title") or "untitled",
+            "artist": r.get("channel") or r.get("uploader") or "",
+            "duration": r.get("duration"),
+            "thumbnail": thumb,
+            "url": vid_url,
+            "yt_id": r.get("id"),
+        })
+    if out:
+        _trending_cache["ts"] = now
+        _trending_cache["data"] = out
+    return out or _trending_cache["data"]
+
 
 @require("viewer")
 async def search_free(request: Request, user: dict):
-    """Search free libraries. source: openverse-audio | openverse-image | pixabay-video | pixabay-image | jamendo"""
-    import os
-    import urllib.parse
-    from starlette.concurrency import run_in_threadpool
+    """Search free libraries. source: openverse-audio | openverse-image | pixabay-video | pixabay-image | jamendo | youtube-audio | freesound"""
     src = request.query_params.get("source", "openverse-audio")
     q = (request.query_params.get("q") or "").strip()[:100]
     if not q:
@@ -263,6 +446,10 @@ async def search_free(request: Request, user: dict):
                 out.append({"title": f"{r.get('name')} — {r.get('artist_name')}", "url": r.get("audio"), "preview": r.get("audio"),
                             "duration": r.get("duration"), "license": lic, "creator": r.get("artist_name"), "page": r.get("shareurl"),
                             "kind": "music", "source": "jamendo"})
+        elif src == "youtube-audio":
+            out.extend(_yt_search(q))
+        elif src == "freesound":
+            out.extend(_freesound_search(q))
         return [o for o in out if o.get("url")]
 
     try:
@@ -278,9 +465,55 @@ async def import_free(request: Request, user: dict):
     """Download one search result into the library (keeps licence + credit)."""
     import tempfile
     import urllib.request
-    from starlette.concurrency import run_in_threadpool
     data = json.loads(await request.body() or b"{}")
     url, kind = data.get("url"), data.get("kind")
+    source = data.get("source") or "web"
+
+    # YouTube audio: url is a YouTube page, not a direct file
+    if source == "youtube-audio":
+        if not url:
+            raise ApiError(422, "url गलत")
+        kind = kind or "music"
+        if kind not in KINDS:
+            raise ApiError(422, "kind गलत")
+
+        def work() -> dict:
+            with tempfile.TemporaryDirectory() as td:
+                f = _yt_extract_audio(url, Path(td))
+                credit = f"{data.get('title') or ''} by {data.get('creator') or 'unknown'} ({data.get('license') or 'YouTube'}) {data.get('page') or url}".strip()
+                return _add_file(user["workspace_id"], user["id"], kind, f, name=(data.get("title") or f.stem)[:120],
+                                 tags=",".join(filter(None, ["youtube-audio", *(str(data.get("tags") or "").split(","))])),
+                                 source="youtube-audio", license=credit[:500], channel_id=data.get("channel_id"), move=True)
+        try:
+            item = await run_in_threadpool(work)
+        except ApiError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ApiError(502, f"YouTube extract नहीं हुआ: {e}")
+        return ok(_view(item), 201)
+
+    # Freesound: download full quality via API
+    if source == "freesound" and data.get("freesound_id"):
+        kind = kind or "sfx"
+        if kind not in KINDS:
+            raise ApiError(422, "kind गलत")
+
+        def work() -> dict:
+            with tempfile.TemporaryDirectory() as td:
+                f = _freesound_download(int(data["freesound_id"]), Path(td))
+                credit = f"{data.get('title') or ''} by {data.get('creator') or 'unknown'} (CC0 1.0) {data.get('page') or ''}".strip()
+                return _add_file(user["workspace_id"], user["id"], kind, f, name=(data.get("title") or f.stem)[:120],
+                                 tags=",".join(filter(None, ["freesound", *(str(data.get("tags") or "").split(","))])),
+                                 source="freesound", license=credit[:500], channel_id=data.get("channel_id"), move=True)
+        try:
+            item = await run_in_threadpool(work)
+        except ApiError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ApiError(502, f"Freesound download नहीं हुआ: {e}")
+        return ok(_view(item), 201)
+
+    # Default: direct HTTP download (openverse, pixabay, jamendo, etc.)
     if not url or kind not in KINDS or not str(url).startswith("https://"):
         raise ApiError(422, "url/kind गलत")
 
@@ -310,6 +543,78 @@ async def import_free(request: Request, user: dict):
     except Exception as e:  # noqa: BLE001
         raise ApiError(502, f"download नहीं हुआ: {e}")
     return ok(_view(item), 201)
+
+
+@require("viewer")
+async def trending(request: Request, user: dict):
+    """Trending music from YouTube Music charts — metadata only (no download)."""
+    try:
+        items = await run_in_threadpool(_fetch_trending)
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(502, f"trending नहीं मिला: {e}")
+    return ok(items)
+
+
+@require("editor")
+async def import_playlist(request: Request, user: dict):
+    """Import audio from a YouTube playlist (up to 50 tracks)."""
+    import tempfile
+    data = json.loads(await request.body() or b"{}")
+    pl_url = (data.get("url") or "").strip()
+    if not pl_url or "youtube.com" not in pl_url and "youtu.be" not in pl_url:
+        raise ApiError(422, "YouTube playlist URL डालें")
+    max_tracks = min(int(data.get("max") or 50), 50)
+
+    def work() -> list[dict]:
+        # Step 1: list playlist entries
+        try:
+            proc = subprocess.run(
+                ["yt-dlp", "--dump-json", "--flat-playlist", "--playlist-items", f"1-{max_tracks}", pl_url],
+                capture_output=True, text=True, timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            raise ApiError(502, f"playlist पढ़ नहीं सकी: {e}")
+        entries = []
+        for line in proc.stdout.strip().splitlines():
+            try:
+                entries.append(json.loads(line))
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if not entries:
+            raise ApiError(404, "playlist में कोई video नहीं मिला")
+        # Step 2: extract audio one by one
+        imported: list[dict] = []
+        errors: list[str] = []
+        for entry in entries[:max_tracks]:
+            vid_url = entry.get("webpage_url") or entry.get("url") or f"https://www.youtube.com/watch?v={entry.get('id')}"
+            title = entry.get("title") or "untitled"
+            artist = entry.get("channel") or entry.get("uploader") or ""
+            try:
+                with tempfile.TemporaryDirectory() as td:
+                    f = _yt_extract_audio(vid_url, Path(td))
+                    credit = f"{title} by {artist} (YouTube playlist) {vid_url}".strip()
+                    item = _add_file(
+                        user["workspace_id"], user["id"], "music", f,
+                        name=title[:120],
+                        tags=",".join(filter(None, ["youtube-audio", "playlist", artist[:40]])),
+                        source="youtube-audio", license=credit[:500],
+                        channel_id=data.get("channel_id"), move=True,
+                    )
+                    imported.append({"id": item["id"], "name": item["name"]})
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{title[:40]}: {str(e)[:80]}")
+        return imported, errors
+
+    try:
+        imported, errors = await run_in_threadpool(work)
+    except ApiError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(502, f"playlist import नहीं हुआ: {e}")
+    with db.tx() as c:
+        service.log(c, user["workspace_id"], "library.playlist_import", user_id=user["id"],
+                    detail={"imported": len(imported), "errors": len(errors)})
+    return ok({"imported": imported, "errors": errors}, 201)
 
 
 @require("editor")
@@ -532,6 +837,8 @@ routes = [
     Route("/library/starter", starter, methods=["POST"]),
     Route("/library/search", search_free),
     Route("/library/import", import_free, methods=["POST"]),
+    Route("/library/trending", trending),
+    Route("/library/import-playlist", import_playlist, methods=["POST"]),
     Route("/library/analyze-music", analyze_music, methods=["POST"]),
     Route("/library/music-filters", music_filters),
     Route("/library", list_items),

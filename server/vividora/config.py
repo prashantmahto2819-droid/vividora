@@ -88,6 +88,8 @@ class Settings:
     invite_only: bool = field(default_factory=lambda: _bool("INVITE_ONLY"))
     require_email_verify: bool = field(default_factory=lambda: _bool("REQUIRE_EMAIL_VERIFY"))
     backup_keep_days: int = field(default_factory=lambda: int(os.getenv("BACKUP_KEEP_DAYS", "7")))
+    # Freesound.org API key (https://freesound.org/apiv2 — free tier)
+    freesound_api_key: str = field(default_factory=lambda: os.getenv("FREESOUND_API_KEY", ""))
     # the operator's (your) workspace id: sees every workspace in Admin; default = the first workspace created
     operator_workspace: str = field(default_factory=lambda: os.getenv("OPERATOR_WORKSPACE", ""))
 
