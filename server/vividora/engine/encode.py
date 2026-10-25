@@ -13,7 +13,7 @@ import hashlib
 import json
 import subprocess
 
-RENDER_VERSION = 5  # bump when render output changes for the same inputs (invalidates every signature)
+RENDER_VERSION = 6  # bump when render output changes for the same inputs (invalidates every signature)
 
 RESOLUTIONS = ["source", "360p", "480p", "720p", "1080p", "1440p", "2160p", "custom"]
 _SHORT = {"360p": 360, "480p": 480, "720p": 720, "1080p": 1080, "1440p": 1440, "2160p": 2160}
