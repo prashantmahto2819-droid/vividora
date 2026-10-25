@@ -2154,14 +2154,16 @@ function textGallery(dis) {
     <div class="chips">${[["", "सब"], ...Object.entries(T.template_cats)].map(([k, l]) => `<button class="${cat === k ? "on" : ""}" data-tcat="${k}">${esc(l)}</button>`).join("")}</div>
     <p class="small muted">${list.length} templates · क्लिक = playhead पर जुड़ेगा · animation बाद में बदलें</p>
     <div class="tplgrid">${list.map((x) => { const st = { ...x.style, size: Math.min(0.11, Math.max(0.05, (x.style.size || 0.075) * (x.text.length > 16 ? 0.62 : x.text.length > 9 ? 0.85 : 1.1))) };
-      return `<button class="tpl" data-tpl="${x.id}" ${dis} title="${esc(x.label)} · ${esc(T.anim_in[x.anim_in]?.label || "")} → ${esc(T.anim_out[x.anim_out]?.label || "")}"><span class="tplv"><span style="${TFX.textStyle(st, 300)}color:${st.color || "#fff"};display:inline-block;max-width:100%;line-height:1.15;transform:rotate(${-(st.rotate || 0)}deg)">${esc(x.text.split("|")[0])}</span></span><small>${esc(x.label)}${x.anim_loop !== "none" ? " · ∞" : ""}</small></button>`; }).join("")}</div>`;
+      const subLine = x.subtitle ? `<span style="display:block;font-size:${(Math.max(8, (st.size || 0.075) * 300 * (st.subtitle_size_ratio || 0.7))).toFixed(0)}px;color:${st.subtitle_color || "#BBB"};font-weight:400;margin-top:1px">${esc(x.subtitle)}</span>` : "";
+      return `<button class="tpl" data-tpl="${x.id}" ${dis} title="${esc(x.label)} · ${esc(T.anim_in[x.anim_in]?.label || "")} → ${esc(T.anim_out[x.anim_out]?.label || "")}"><span class="tplv"><span style="${TFX.textStyle(st, 300)}color:${st.color || "#fff"};display:inline-block;max-width:100%;line-height:1.15;transform:rotate(${-(st.rotate || 0)}deg)">${esc(x.text.split("|")[0])}${subLine}</span></span><small>${esc(x.label)}${x.anim_loop !== "none" ? " · ∞" : ""}</small></button>`; }).join("")}</div>`;
 }
 function addTemplate(id) {
   if (!E.canEdit) return; const T = E.ctx.S.presets?.textfx; const fx = E.rs.effects; const st = +outOf(E.t).toFixed(2);
   const x = id ? T.templates.find((t) => t.id === id) : null;
   const ti = { _id: uid(), start: st, end: +Math.min(outDur(), st + 3).toFixed(2), track: 0,
     ...(x ? x.style : { pos: "center", size: 0.075, color: "#FFFFFF", font: "Poppins", outline: "#000000", outline_w: 0.006 }),
-    text: x ? x.text : "अपना text", anim_in: x ? x.anim_in : "pop", anim_out: x ? x.anim_out : "fade", anim_loop: x ? x.anim_loop : "none", template: id || "" };
+    text: x ? x.text : "अपना text", anim_in: x ? x.anim_in : "pop", anim_out: x ? x.anim_out : "fade", anim_loop: x ? x.anim_loop : "none", template: id || "",
+    ...(x?.subtitle ? { subtitle: x.subtitle } : {}), ...(x?.cat ? { cat: x.cat } : {}) };
   fx.titles.push(ti); touch(); select({ type: "title", id: ti._id }); renderPanel();
   setTimeout(() => { const ta = $('#inspector [data-k="text"]', E.root); if (ta) { ta.focus(); ta.select(); } }, 40);
 }
@@ -2174,7 +2176,9 @@ function titleInspector(it, dis) {
   const { esc } = E.ctx; const ti = TFX.normalize(it); Object.assign(it, { anim_in: ti.anim_in, anim_out: ti.anim_out, anim_loop: ti.anim_loop }); delete it.anim;
   const fonts = E.ctx.S.presets?.fonts || []; const on = { _outline: (it.outline_w ?? 0) > 0 && !!it.outline, _shadow: !!it.shadow }; const chk = (k, l) => `<label class="chk small"><input type="checkbox" data-k="${k}" ${(k in on ? on[k] : it[k]) ? "checked" : ""} ${dis}> ${l}</label>`;
   const rng = (k, l, min, max, step, def) => field(`${l} <b>${(+(it[k] ?? def)).toFixed(step < 0.01 ? 3 : step < 1 ? 2 : 0)}</b>`, `<input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${it[k] ?? def}" ${dis}>`);
-  return `<h3>Text</h3>${field("लिखें ( | से नई लाइन )", `<textarea data-k="text" rows="2" ${dis}>${esc(it.text)}</textarea>`)}
+  const isLT = (it.template || "").includes("lt_") || (it.cat || "") === "lower_third";
+  return `<h3>Text</h3>${field(isLT ? "नाम / Name" : "लिखें ( | से नई लाइन )", `<textarea data-k="text" rows="2" ${dis}>${esc(it.text)}</textarea>`)}
+    ${isLT || it.subtitle != null ? field("पद / Title (subtitle)", `<input data-k="subtitle" value="${esc(it.subtitle || "")}" placeholder="जैसे: Director, CEO" ${dis}>`) : ""}
     <div class="irow">${field("शुरू", num("start", it.start, 0.1, 0))}${field("ख़त्म", num("end", it.end, 0.1, 0))}${field("track", num("track", it.track || 0, 1, 0, 9))}</div>
     <details open class="insp"><summary>Style</summary>
       <div class="irow">${field("font", `<select data-k="font" ${dis}><option value="">Poppins</option>${fonts.map((f) => `<option ${it.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${rng("size", "आकार", 0.025, 0.25, 0.005, 0.075)}</div>

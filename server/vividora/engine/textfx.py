@@ -158,7 +158,8 @@ LEGACY = {"none": ("none", "none", "none"), "fade": ("fade", "fade", "none"), "p
 
 # ---------------------------------------------------------------- text styles / templates
 STYLE_KEYS = ("font", "size", "color", "bold", "italic", "underline", "spacing", "outline", "outline_w", "shadow",
-              "shadow_d", "box", "box_color", "box_alpha", "box_pad", "rotate", "opacity", "align", "pos", "x", "y")
+              "shadow_d", "box", "box_color", "box_alpha", "box_pad", "rotate", "opacity", "align", "pos", "x", "y",
+              "accent_color", "subtitle_color", "subtitle_size_ratio")
 
 _STYLES = [
     # id, label, category, style
@@ -192,6 +193,49 @@ _STYLES = [
     ("question", "सवाल", "hook", {"font": "Baloo 2", "size": .085, "color": "#FFFFFF", "outline": "#7C3AED", "outline_w": .008}),
     ("warning", "चेतावनी", "hook", {"font": "Poppins", "size": .075, "color": "#111111", "box": True, "box_color": "#FACC15", "box_pad": .02}),
     ("success", "Success green", "hook", {"font": "Mukta", "size": .08, "color": "#22C55E", "outline": "#052E16", "outline_w": .008}),
+    # ---- lower_third: professional name plates, interview titles, news bars ----
+    ("lt_modern", "Modern name plate", "lower_third",
+     {"font": "Poppins", "size": .055, "color": "#FFFFFF", "box": True, "box_color": "#111111", "box_alpha": .15, "box_pad": .018,
+      "pos": "bottom", "subtitle_color": "#B0B0B0", "subtitle_size_ratio": .7}),
+    ("lt_gradient", "Gradient strip", "lower_third",
+     {"font": "Poppins", "size": .055, "color": "#FFFFFF", "box": True, "box_color": "#1A1A2E", "box_alpha": .1, "box_pad": .02,
+      "pos": "bottom", "subtitle_color": "#CCCCCC", "subtitle_size_ratio": .68}),
+    ("lt_accent_bar", "Accent bar (बाएँ)", "lower_third",
+     {"font": "Hind", "size": .052, "color": "#FFFFFF", "box": True, "box_color": "#1F2937", "box_alpha": .12, "box_pad": .016,
+      "pos": "bottom", "align": "left", "accent_color": "#E5252A", "subtitle_color": "#D1D5DB", "subtitle_size_ratio": .7}),
+    ("lt_split", "Split two-tone", "lower_third",
+     {"font": "Poppins", "size": .052, "color": "#FFFFFF", "box": True, "box_color": "#0EA5E9", "box_pad": .016,
+      "pos": "bottom", "subtitle_color": "#111111", "subtitle_size_ratio": .72}),
+    ("lt_news_modern", "News bar (modern)", "lower_third",
+     {"font": "Hind", "size": .048, "color": "#FFFFFF", "box": True, "box_color": "#0B3D91", "box_pad": .014,
+      "pos": "bottom", "accent_color": "#E5252A", "subtitle_color": "#E0E0E0", "subtitle_size_ratio": .72}),
+    ("lt_ticker", "Ticker scroll", "lower_third",
+     {"font": "Hind", "size": .042, "color": "#FFFFFF", "box": True, "box_color": "#C8102E", "box_pad": .012,
+      "pos": "bottom", "subtitle_color": "#FFD400", "subtitle_size_ratio": .75}),
+    ("lt_banner", "Wide banner", "lower_third",
+     {"font": "Poppins", "size": .05, "color": "#FFFFFF", "box": True, "box_color": "#000000", "box_alpha": .25, "box_pad": .022,
+      "pos": "bottom", "subtitle_color": "#A3A3A3", "subtitle_size_ratio": .68}),
+    ("lt_social", "Social pill", "lower_third",
+     {"font": "Poppins", "size": .048, "color": "#FFFFFF", "box": True, "box_color": "#FF0050", "box_pad": .02,
+      "pos": "bottom", "subtitle_color": "#FFE0E8", "subtitle_size_ratio": .7}),
+    ("lt_subscribe", "Subscribe prompt", "lower_third",
+     {"font": "Poppins", "size": .05, "color": "#FFFFFF", "box": True, "box_color": "#FF0000", "box_pad": .018,
+      "pos": "bottom", "subtitle_color": "#FFE0E0", "subtitle_size_ratio": .72}),
+    ("lt_hashtag", "Hashtag trending", "lower_third",
+     {"font": "Poppins", "size": .05, "color": "#FFFFFF", "box": True, "box_color": "#1DA1F2", "box_pad": .016,
+      "pos": "bottom", "subtitle_color": "#B8E0FF", "subtitle_size_ratio": .7}),
+    ("lt_glass", "Glass (frosted)", "lower_third",
+     {"font": "Poppins", "size": .052, "color": "#FFFFFF", "box": True, "box_color": "#FFFFFF", "box_alpha": .7, "box_pad": .02,
+      "pos": "bottom", "outline": "#FFFFFF", "outline_w": .001, "subtitle_color": "#E0E0E0", "subtitle_size_ratio": .7}),
+    ("lt_neon_bar", "Neon lower third", "lower_third",
+     {"font": "Poppins", "size": .052, "color": "#E8FFFF", "outline": "#00E5FF", "outline_w": .003,
+      "pos": "bottom", "shadow": "#00E5FF", "shadow_d": 0, "subtitle_color": "#80F0FF", "subtitle_size_ratio": .7}),
+    ("lt_minimal_line", "Minimal line", "lower_third",
+     {"font": "Poppins", "size": .05, "color": "#FFFFFF", "bold": False,
+      "pos": "bottom", "subtitle_color": "#999999", "subtitle_size_ratio": .68}),
+    ("lt_cinematic", "Cinematic plate", "lower_third",
+     {"font": "Poppins", "size": .048, "color": "#FFFFFF", "bold": False, "spacing": .025,
+      "pos": "bottom", "subtitle_color": "#AAAAAA", "subtitle_size_ratio": .65}),
 ]
 
 _TEXTS = {
@@ -206,6 +250,7 @@ _TEXTS = {
     "fun": [("hi", "वाह!"), ("hi", "क्या बात है!"), ("en", "WOW!"), ("en", "OMG")],
     "cta": [("hi", "▶ सब्सक्राइब करें"), ("hi", "फ़ॉलो करें"), ("en", "▶ SUBSCRIBE"), ("en", "+ FOLLOW")],
     "hook": [("hi", "क्या आप जानते हैं?"), ("hi", "ये गलती मत करना!"), ("en", "Did you know?"), ("en", "Don't make this mistake!")],
+    "lower_third": [("hi", "प्रशांत महतो|मोटिवेशनल स्पिकर"), ("hi", "करण जौहर|डायरेक्टर"), ("en", "John Smith|CEO, TechCorp"), ("en", "Sarah Johnson|Senior Producer")],
 }
 
 _ANIM_BY_CAT = {
@@ -220,11 +265,12 @@ _ANIM_BY_CAT = {
     "fun": [("elastic", "pop_out", "wiggle"), ("drop_bounce", "drop_out", "bob"), ("shake_in", "spin_out", "shake"), ("squeeze", "stretch_out", "pulse")],
     "cta": [("pop", "pop_out", "pulse"), ("rise_bounce", "drop_out", "heartbeat"), ("bounce_in", "shrink", "pulse"), ("elastic", "pop_out", "bob")],
     "hook": [("zoom_out", "fade", "shake"), ("typewriter", "typewriter_out", "none"), ("swing_in", "rotate_out", "wiggle"), ("word_flash", "word_out", "none")],
+    "lower_third": [("slide_right", "slide_left_out", "none"), ("reveal_center", "collapse", "none"), ("lift", "fade", "none"), ("wipe_right", "wipe_left_out", "none")],
 }
 
 TEMPLATE_CATS = {"heading": "Heading", "highlight": "Highlight / Box", "neon": "Neon", "premium": "Premium / Gold",
-                 "news": "News / Lower third", "quote": "Quote / विचार", "minimal": "Minimal", "number": "Number / List",
-                 "fun": "Fun / Comic", "cta": "CTA / Subscribe", "hook": "Hook / सवाल"}
+                 "news": "News / Lower third", "lower_third": "Lower Third / नाम पट्टी", "quote": "Quote / विचार", "minimal": "Minimal",
+                 "number": "Number / List", "fun": "Fun / Comic", "cta": "CTA / Subscribe", "hook": "Hook / सवाल"}
 
 
 def _templates() -> list[dict]:
@@ -237,9 +283,16 @@ def _templates() -> list[dict]:
                 font = "Baloo 2" if cat in ("fun", "number", "heading") else "Mukta"
             if lang == "en" and font in ("FreeSerif",):
                 font = "Lora"
-            out.append({"id": f"{sid}_{i}", "label": label, "cat": cat, "lang": lang, "text": text,
-                        "style": {"pos": "center", **st, "font": font},
-                        "anim_in": a_in, "anim_out": a_out, "anim_loop": a_loop})
+            entry = {"id": f"{sid}_{i}", "label": label, "cat": cat, "lang": lang, "text": text,
+                     "style": {"pos": "center", **st, "font": font},
+                     "anim_in": a_in, "anim_out": a_out, "anim_loop": a_loop}
+            # lower_third templates: split "Name|Title" into text + subtitle
+            if cat == "lower_third" and "|" in text:
+                parts = text.split("|", 1)
+                entry["text"] = parts[0]
+                entry["subtitle"] = parts[1]
+                entry["style"]["pos"] = st.get("pos", "bottom")
+            out.append(entry)
     return out
 
 
@@ -491,6 +544,106 @@ def _unit_event(ctx, anim: dict, a_ms: float, b_ms: float, raw: str, layer: int,
     return f"Dialogue: {layer},{_fmt_t(a_ms)},{_fmt_t(b_ms)},Title,,0,0,0,,{{{head}}}" + "".join(pieces)
 
 
+def _subtitle_events(t: dict, ctx: _Ctx, width: int, height: int, s_ms: float, e_ms: float, layer: int) -> list[str]:
+    """Generate ASS events for the subtitle line below the main text."""
+    subtitle = str(t.get("subtitle", "")).strip()
+    if not subtitle:
+        return []
+    ratio = float(t.get("subtitle_size_ratio", .7))
+    sub_color = t.get("subtitle_color") or "#BBBBBB"
+    # Build a modified title dict for the subtitle
+    sub_t = dict(t)
+    sub_t["text"] = subtitle
+    sub_t["size"] = float(t.get("size", .075)) * ratio
+    sub_t["color"] = sub_color
+    # For split style: subtitle gets a different box color (white box, dark text)
+    if t.get("_id", "").startswith("lt_split") or (t.get("template") or "").startswith("lt_split"):
+        sub_t["box_color"] = "#FFFFFF"
+        sub_t["color"] = "#111111"
+    # Position the subtitle below the main text
+    base = min(width, height)
+    main_size = float(t.get("size", .075)) * base
+    sub_size = main_size * ratio
+    offset = (main_size * 0.7 + sub_size * 0.7) / height
+    pos = t.get("pos") or "bottom"
+    if pos == "free":
+        sub_t["y"] = float(t.get("y", .5)) + offset
+    else:
+        base_y = {"top": .18, "center": .5, "bottom": .78}.get(pos, .78)
+        sub_t["y"] = base_y + offset
+        sub_t["pos"] = "free"
+        sub_t["x"] = float(t.get("x", .5)) if t.get("pos") == "free" else .5
+    # Remove subtitle from the sub dict to avoid recursion
+    sub_t.pop("subtitle", None)
+    sub_t["bold"] = False
+    ctx2 = _Ctx(sub_t, width, height)
+    text = _esc(subtitle).replace("|", "\\N")
+    evs: list[str] = []
+    ain = ANIM_IN.get(t.get("anim_in") or "fade") or ANIM_IN["fade"]
+    aout = ANIM_OUT.get(t.get("anim_out") or "fade") or ANIM_OUT["fade"]
+    aloop = ANIM_LOOP.get(t.get("anim_loop") or "none") or ANIM_LOOP["none"]
+    has_in = bool(ain.get("kf") or ain.get("unit"))
+    has_out = bool(aout.get("kf") or aout.get("unit"))
+    dur = max(200.0, e_ms - s_ms)
+    raw = subtitle
+    in_ms = float(t.get("in_ms") or (min(1600, 70 * len(clusters(raw))) if ain.get("unit") == "char" else 450)) if has_in else 0
+    out_ms = float(t.get("out_ms") or 350) if has_out else 0
+    if in_ms + out_ms > dur * .9:
+        k = dur * .9 / (in_ms + out_ms)
+        in_ms, out_ms = in_ms * k, out_ms * k
+    a1, a2 = s_ms + in_ms, e_ms - out_ms
+    # Use only keyframe anims for subtitle (skip unit-based to keep it simple)
+    if has_in and ain.get("kf"):
+        _phase_events(ctx2, ain["kf"], s_ms, a1, text, layer, evs)
+    elif has_in:
+        _phase_events(ctx2, ANIM_IN["fade"]["kf"], s_ms, a1, text, layer, evs)
+    if a2 - a1 > 5:
+        if aloop.get("kf"):
+            if aloop.get("span"):
+                _phase_events(ctx2, aloop["kf"], a1, a2, text, layer, evs, step_ms=400)
+            else:
+                per = max(80.0, float(t.get("loop_ms") or aloop.get("period", 1000)))
+                tcur = a1
+                while tcur < a2 - 5 and len(evs) < 300:
+                    tend = min(a2, tcur + per)
+                    frac = (tend - tcur) / per
+                    kf = aloop["kf"] if frac >= .999 else [k for k in aloop["kf"] if k[0] <= frac] + [[frac, state(aloop["kf"], frac)]]
+                    sub = []
+                    _phase_events(ctx2, [[k[0] / frac if frac < .999 else k[0], k[1], *(k[2:] if len(k) > 2 else [])] for k in kf],
+                                  tcur, tend, text, layer, sub, step_ms=max(40, per / 6))
+                    evs.extend(sub)
+                    tcur = tend
+        else:
+            evs.append(_segment(ctx2, a1, a2, dict(REST), dict(REST), text, layer))
+    if has_out and aout.get("kf"):
+        _phase_events(ctx2, aout["kf"], a2, e_ms, text, layer, evs)
+    elif has_out:
+        _phase_events(ctx2, ANIM_IN["fade"]["kf"], a2, e_ms, text, layer, evs)
+    if sub_t.get("box"):
+        evs = [ev.replace(",Title,,", ",TitleBox,,", 1) for ev in evs]
+    return evs
+
+
+def _accent_bar_events(t: dict, width: int, height: int, s_ms: float, e_ms: float, layer: int) -> list[str]:
+    """Generate an accent bar (colored vertical strip) to the left of a lower third."""
+    accent = t.get("accent_color")
+    if not accent:
+        return []
+    base = min(width, height)
+    bar_w = base * .006  # thin accent bar
+    bar_h = float(t.get("size", .055)) * base * 2.8
+    pos = t.get("pos") or "bottom"
+    cy = {"top": .18, "center": .5, "bottom": .78}.get(pos, .78) * height
+    # Position bar to the left of the text box
+    main_text = str(t.get("text", ""))
+    text_w = len(clusters(main_text)) * float(t.get("size", .055)) * base * .62
+    cx = width / 2 - min(width * .48, text_w / 2 + base * .04)
+    rgb = _hex(accent)
+    # Use a simple coloured rect drawn via ASS drawing command
+    draw = f"{{\\an5\\pos({cx:.0f},{cy:.0f})\\p1\\bord0\\shad0\\1c{_ass_c(rgb)}\\1a&H00&}}m 0 0 l {bar_w:.0f} 0 {bar_w:.0f} {bar_h:.0f} 0 {bar_h:.0f}"
+    return [f"Dialogue: {layer - 1},{_fmt_t(s_ms)},{_fmt_t(e_ms)},Title,,0,0,0,,{draw}"]
+
+
 def title_events(titles: list[dict], width: int, height: int, font: str = "Poppins") -> tuple[str, list[str]]:
     """ASS style + events for every text item (in / middle+loop / out phases)."""
     base = min(width, height)
@@ -552,4 +705,10 @@ def title_events(titles: list[dict], width: int, height: int, font: str = "Poppi
         if t.get("box"):
             evs = [ev.replace(",Title,,", ",TitleBox,,", 1) for ev in evs]
         out.extend(evs)
+        # Subtitle line for lower thirds and any item with a subtitle field
+        if t.get("subtitle"):
+            out.extend(_subtitle_events(t, ctx, width, height, s_ms, e_ms, layer + 1))
+        # Accent bar for styles that specify one
+        if t.get("accent_color"):
+            out.extend(_accent_bar_events(t, width, height, s_ms, e_ms, layer))
     return style + "\n" + style_box, out
