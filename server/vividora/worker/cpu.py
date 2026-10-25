@@ -47,7 +47,8 @@ def _progress(client: ApiClient, job_id: str):
 def _is_image(p: Path) -> bool:
     """Library files are downloaded without an extension — sniff the header."""
     try:
-        head = p.open("rb").read(16)
+        with p.open("rb") as f:
+            head = f.read(16)
     except OSError:
         return False
     return (head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff" or head[:4] == b"GIF8"
@@ -86,8 +87,6 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
     e = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
          for k, v in (effects or {}).items()}
     cache: dict[str, Path | None] = {}
-    missing = e.setdefault("_missing", [])
-
     missing: list[str] = []
 
     def fetch(item_id: str) -> Path | None:
