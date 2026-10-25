@@ -67,6 +67,93 @@ def prop_svg(pid: str) -> str:
         "fridge": _rect(-70, -320, 140, 320, "#ECEFF1", 8, 'stroke="#B0BEC5" stroke-width="6"') + '<path d="M-70 -200 h140" stroke="#B0BEC5" stroke-width="6"/>' + _rect(40, -260, 10, 40, "#90A4AE", 3),
         "sofa": _rect(-200, -110, 400, 80, "#7E57C2", 12) + _rect(-210, -150, 420, 60, "#9575CD", 14) + _rect(-215, -120, 40, 90, "#5E35B1", 10) + _rect(175, -120, 40, 90, "#5E35B1", 10),
         "tv": _rect(-170, -330, 340, 200, "#212121", 8) + _rect(-160, -320, 320, 180, "#1565C0") + _rect(-40, -130, 80, 14, "#424242", 4),
+        # --- new props for expanded scenes ---
+        "temple_arch": '<path d="M-180 0 v-320 q0 -60 30 -90 q30 -30 60 -30 h60 q30 0 60 30 q30 30 30 90 v320" fill="#D4A017" stroke="#B8860B" stroke-width="8"/>'
+                       + '<path d="M-140 -340 q140 -90 280 0" fill="#D4A017" stroke="#B8860B" stroke-width="6"/>'
+                       + '<circle cx="0" cy="-380" r="30" fill="#FF6F00"/>'
+                       + '<path d="M-10 -420 l10 -30 l10 30" fill="#FF6F00"/>',
+        "diya": '<ellipse cx="0" cy="-14" rx="24" ry="10" fill="#D4A017"/><ellipse cx="0" cy="-20" rx="18" ry="6" fill="#FFD54F"/>'
+                + '<path d="M0 -20 q-4 -16 0 -32 q4 16 0 32" fill="#FF6F00" opacity=".9"/><ellipse cx="0" cy="-50" rx="6" ry="10" fill="#FFAB00" opacity=".8"/>',
+        "bell": '<path d="M0 -100 v-20" stroke="#B8860B" stroke-width="6"/><path d="M-40 -30 q0 -70 40 -70 q40 0 40 70z" fill="#D4A017" stroke="#B8860B" stroke-width="4"/>'
+                + '<circle cx="0" cy="-26" r="8" fill="#B8860B"/>',
+        "market_stall": _rect(-200, -220, 400, 220, "#8D6E63", 6) + _rect(-210, -230, 420, 18, "#6D4C41", 4)
+                        + '<path d="M-220 -230 l-30 -60 h500 l-30 60" fill="#E53935"/>'
+                        + "".join(f'<rect x="{-180 + i * 50}" y="-200" width="40" height="60" rx="4" fill="{c}"/>' for i, c in enumerate(["#FF7043", "#66BB6A", "#42A5F5", "#FFA726", "#AB47BC", "#EF5350", "#26C6DA"])),
+        "awning": '<path d="M-300 -300 h600 l40 80 h-680z" fill="#E53935"/>' + "".join(f'<path d="M{-300 + i * 100} -300 q50 40 100 0" fill="#C62828"/>' for i in range(6)),
+        "chai_kettle": '<ellipse cx="0" cy="-30" rx="50" ry="30" fill="#78909C"/><path d="M-50 -30 q-20 -10 -20 -30 q0 -14 14 -14" stroke="#546E7A" stroke-width="6" fill="none"/>'
+                       + '<path d="M-10 -60 q-6 -30 0 -50 M10 -58 q6 -24 0 -44" stroke="#B0BEC5" stroke-width="4" fill="none" opacity=".6"/>'
+                       + "".join(f'<rect x="{-40 + i * 22}" y="-8" width="16" height="20" rx="4" fill="{c}"/>' for i, c in enumerate(["#ECEFF1", "#CFD8DC", "#ECEFF1", "#CFD8DC"])),
+        "chai_bench": _rect(-100, -50, 200, 10, "#8D6E63") + _rect(-90, -40, 8, 40, "#6D4C41") + _rect(82, -40, 8, 40, "#6D4C41"),
+        "train_platform": _rect(-400, -20, 800, 20, "#9E9E9E", 4) + '<path d="M-400 -20 h800" stroke="#FFC107" stroke-width="8"/>'
+                          + _rect(-400, 0, 800, 60, "#757575")
+                          + '<text x="0" y="-40" font-size="36" fill="#1A237E" text-anchor="middle" font-family="sans-serif">प्लेटफ़ॉर्म 1</text>',
+        "train_roof": '<rect x="-500" y="-500" width="1000" height="120" fill="#BDBDBD" rx="20"/>'
+                      + "".join(f'<rect x="{-400 + i * 200}" y="-380" width="160" height="100" rx="6" fill="#E3F2FD" stroke="#90A4AE" stroke-width="4"/>' for i in range(4))
+                      + '<rect x="-500" y="-380" width="1000" height="12" fill="#9E9E9E"/>',
+        "auto_rickshaw": '<path d="M-120 -40 h240 v-120 q0 -40 -40 -40 h-160 q-40 0 -40 40z" fill="#2E7D32"/>'
+                         + '<rect x="-100" y="-190" width="200" height="70" rx="6" fill="#E8F5E9"/>'
+                         + '<circle cx="-100" cy="-30" r="30" fill="#212121"/><circle cx="100" cy="-30" r="30" fill="#212121"/>'
+                         + '<circle cx="-100" cy="-30" r="12" fill="#9E9E9E"/><circle cx="100" cy="-30" r="12" fill="#9E9E9E"/>'
+                         + '<path d="M-120 -190 l-30 -30 h280 l-30 30" fill="#1B5E20"/>',
+        "mandap": '<rect x="-220" y="-400" width="440" height="400" fill="none"/>'
+                  + "".join(f'<rect x="{x}" y="-400" width="20" height="400" fill="#D4A017"/>' for x in [-220, 200])
+                  + '<rect x="-240" y="-420" width="480" height="30" fill="#D4A017" rx="4"/>'
+                  + '<path d="M-240 -420 q240 -80 480 0" fill="#C62828"/>'
+                  + "".join(f'<circle cx="{-220 + i * 55}" cy="{-415 - (1 - abs(i - 4) / 4) * 40}" r="12" fill="{c}"/>' for i, c in enumerate(["#FF8F00", "#E53935", "#FF8F00", "#E53935", "#FF8F00", "#E53935", "#FF8F00", "#E53935", "#FF8F00"])),
+        "fire_pit": '<ellipse cx="0" cy="-10" rx="60" ry="20" fill="#5D4037" stroke="#3E2723" stroke-width="4"/>'
+                    + '<path d="M-20 -10 q0 -50 20 -60 q20 10 20 60" fill="#FF6F00" opacity=".85"/>'
+                    + '<path d="M-8 -10 q0 -30 8 -40 q8 10 8 40" fill="#FFAB00" opacity=".9"/>',
+        "wheat_field": "".join(f'<path d="M{-500 + i * 30} 0 v-{120 + (i * 7) % 40}" stroke="#8BC34A" stroke-width="4"/>'
+                               f'<ellipse cx="{-500 + i * 30}" cy="{-120 - (i * 7) % 40}" rx="6" ry="14" fill="#CDDC39"/>' for i in range(34)),
+        "tractor": '<rect x="-140" y="-100" width="200" height="70" rx="8" fill="#E53935"/>'
+                   + '<rect x="-160" y="-130" width="80" height="40" rx="6" fill="#B3E5FC"/>'
+                   + '<circle cx="-120" cy="-20" r="40" fill="#212121"/><circle cx="80" cy="-20" r="50" fill="#212121"/>'
+                   + '<circle cx="-120" cy="-20" r="16" fill="#9E9E9E"/><circle cx="80" cy="-20" r="22" fill="#9E9E9E"/>',
+        "news_desk": _rect(-280, -100, 560, 100, "#1A237E", 8) + _rect(-260, -110, 520, 16, "#283593", 4)
+                     + '<text x="0" y="-130" font-size="48" font-weight="700" fill="#FFFFFF" text-anchor="middle" font-family="sans-serif">BREAKING NEWS</text>'
+                     + _rect(140, -90, 90, 60, "#B3E5FC", 4),
+        "camera": _rect(-30, -120, 60, 80, "#37474F", 4) + '<circle cx="0" cy="-80" r="22" fill="#263238" stroke="#546E7A" stroke-width="4"/>'
+                  + _rect(-6, -40, 12, 40, "#37474F") + _rect(-40, -10, 80, 10, "#546E7A", 4),
+        "flag": _rect(-6, -300, 12, 300, "#616161") + '<rect x="6" y="-300" width="120" height="80" fill="none"/>'
+                + '<rect x="6" y="-300" width="120" height="27" fill="#FF9933"/>'
+                + '<rect x="6" y="-273" width="120" height="26" fill="#FFFFFF"/>'
+                + '<rect x="6" y="-247" width="120" height="27" fill="#138808"/>'
+                + '<circle cx="66" cy="-260" r="9" fill="#000080" stroke="#000080" stroke-width="1.5"/>',
+        "podium": _rect(-100, -60, 200, 60, "#5D4037", 6) + _rect(-80, -100, 160, 40, "#8D6E63", 4)
+                  + '<rect x="-4" y="-140" width="8" height="50" fill="#616161"/><circle cx="0" cy="-150" r="12" fill="#424242"/>',
+        "judge_bench": _rect(-240, -180, 480, 180, "#5D4037", 6) + _rect(-250, -190, 500, 16, "#3E2723", 4)
+                       + '<path d="M-40 -200 v-40 l40 -30 l40 30 v40" fill="#5D4037" stroke="#3E2723" stroke-width="4"/>',
+        "gavel": '<path d="M-30 -20 l60 -40" stroke="#8D6E63" stroke-width="14" stroke-linecap="round"/>'
+                 + '<rect x="20" y="-70" width="30" height="20" rx="4" fill="#6D4C41" transform="rotate(-34 35 -60)"/>',
+        "barricade": _rect(-80, -80, 160, 10, "#FF6F00") + _rect(-80, -50, 160, 10, "#FFFFFF") + _rect(-80, -20, 160, 10, "#FF6F00")
+                     + _rect(-70, -10, 8, 10, "#616161") + _rect(62, -10, 8, 10, "#616161"),
+        "police_desk": _rect(-180, -100, 360, 100, "#455A64", 6) + _rect(-190, -110, 380, 16, "#37474F", 4)
+                       + _rect(-160, -90, 80, 60, "#B3E5FC", 4)
+                       + '<text x="80" y="-60" font-size="30" fill="#ECEFF1" text-anchor="middle" font-family="sans-serif">FIR</text>',
+        "college_gate": '<rect x="-200" y="-350" width="20" height="350" fill="#795548"/><rect x="180" y="-350" width="20" height="350" fill="#795548"/>'
+                        + '<rect x="-220" y="-370" width="440" height="30" fill="#795548" rx="4"/>'
+                        + '<text x="0" y="-380" font-size="28" fill="#1A237E" text-anchor="middle" font-family="sans-serif">विद्यालय</text>',
+        "village_hut": '<path d="M-160 -180 l160 -100 l160 100z" fill="#E65100"/>'
+                       + _rect(-140, -180, 280, 180, "#FFCC80", 4)
+                       + _rect(-40, -120, 80, 120, "#8D6E63", 4)
+                       + _rect(-120, -150, 50, 40, "#B3E5FC", 4) + _rect(70, -150, 50, 40, "#B3E5FC", 4),
+        "well": '<ellipse cx="0" cy="-10" rx="60" ry="22" fill="#78909C" stroke="#546E7A" stroke-width="6"/>'
+                + '<ellipse cx="0" cy="-30" rx="52" ry="18" fill="#29B6F6"/>'
+                + '<rect x="-4" y="-100" width="8" height="70" fill="#795548"/><rect x="-50" y="-110" width="100" height="10" rx="4" fill="#795548"/>',
+        "dhaba_table": _rect(-120, -80, 240, 12, "#A1887F", 4) + _rect(-110, -68, 10, 68, "#8D6E63") + _rect(100, -68, 10, 68, "#8D6E63")
+                       + "".join(f'<circle cx="{-80 + i * 50}" cy="-92" r="14" fill="{c}"/>' for i, c in enumerate(["#BDBDBD", "#E53935", "#43A047", "#BDBDBD"])),
+        "bookshelf": _rect(-160, -360, 320, 360, "#6D4C41", 4) + "".join(
+            _rect(-150, -350 + i * 70, 300, 8, "#5D4037") + "".join(
+                f'<rect x="{-140 + j * 34}" y="{-342 + i * 70}" width="28" height="54" rx="3" fill="{c}"/>'
+                for j, c in enumerate(["#1565C0", "#C62828", "#2E7D32", "#6A1B9A", "#E65100", "#00838F", "#AD1457", "#F57F17"])
+            ) for i in range(5)),
+        "reading_lamp": '<rect x="-6" y="-160" width="12" height="140" fill="#37474F"/>'
+                        + '<path d="M-50 -170 q50 -30 100 0 l-10 20 h-80z" fill="#FDD835"/>'
+                        + '<rect x="-30" y="-10" width="60" height="10" rx="4" fill="#455A64"/>',
+        "curtain": '<rect x="-20" y="-500" width="40" height="500" fill="#C62828" opacity=".9"/>'
+                   + '<path d="M-20 -500 q-80 100 -80 250 q0 120 60 250 h20z" fill="#B71C1C" opacity=".85"/>'
+                   + '<path d="M20 -500 q80 100 80 250 q0 120 -60 250 h-20z" fill="#B71C1C" opacity=".85"/>',
+        "spotlight": '<circle cx="0" cy="-600" r="30" fill="#FFEE58"/><path d="M-30 -580 l-100 580 h260 l-100 -580z" fill="#FFF176" opacity=".15"/>',
     }
     return P.get(pid, "")
 
@@ -113,6 +200,67 @@ ENVS: dict[str, dict] = {
     "festival": {"label": "त्योहार / स्टेज", "wall": "#4A148C", "floor": "#6A1B9A", "props": [("stage_light", .5, .98, 1.0), ("garland", .5, .95, 1.0), ("plant", .05, .99, 1.0), ("plant", .95, .99, 1.0)],
                  "slots": [(.35, .99, 1.0), (.65, .99, 1.0), (.5, .99, .95)]},
     "studio": {"label": "स्टूडियो (सादा)", "wall": "#1E293B", "floor": "#0F172A", "props": [("stage_light", .5, .98, .8)], "slots": [(.5, .99, 1.0), (.25, .99, 1.0), (.75, .99, 1.0)]},
+    # --- 20 new Indian-market scenes ---
+    "temple": {"label": "मंदिर", "wall": "#FFF3E0", "floor": "#D7CCC8",
+               "props": [("temple_arch", .5, .99, 1.0), ("diya", .25, .99, .9), ("diya", .75, .99, .9), ("bell", .5, .72, .8), ("garland", .5, .9, .8), ("flag", .92, .99, .7)],
+               "slots": [(.35, .99, 1.0), (.65, .99, 1.0)]},
+    "bazaar": {"label": "बाज़ार / स्ट्रीट मार्केट", "sky": True, "wall": "#FFF9C4", "floor": "#9E9E9E",
+               "props": [("market_stall", .22, .99, .9), ("market_stall", .78, .99, .9), ("awning", .5, .72, .6), ("fruitstand", .5, .95, .9), ("lamp", .1, .99, .9), ("sign", .5, .58, .4)],
+               "slots": [(.5, .99, 1.0), (.35, .99, .95)]},
+    "train_station": {"label": "रेलवे स्टेशन", "wall": "#ECEFF1", "floor": "#757575",
+                      "props": [("train_roof", .5, .55, .9), ("train_platform", .5, .99, 1.0), ("bench", .3, .99, .9), ("clock", .5, .3, .8), ("lamp", .12, .99, 1.0), ("lamp", .88, .99, 1.0)],
+                      "slots": [(.5, .99, 1.0), (.72, .99, .95)]},
+    "auto_stand": {"label": "ऑटो रिक्शा स्टैंड", "sky": True, "wall": "#B3E5FC", "floor": "#616161", "road": True,
+                   "props": [("auto_rickshaw", .35, .99, .9), ("auto_rickshaw", .7, .99, .8), ("tree", .06, .72, 1.0), ("sign", .88, .68, .4), ("lamp", .5, .99, 1.0)],
+                   "slots": [(.22, .99, 1.0), (.55, .99, 1.0)]},
+    "farm": {"label": "खेत / फ़ार्म", "sky": True, "wall": "#AED581", "floor": "#8BC34A",
+             "props": [("wheat_field", .5, .92, 1.0), ("tractor", .82, .99, .8), ("tree", .06, .8, 1.1), ("well", .3, .94, .9)],
+             "slots": [(.45, .99, 1.0), (.65, .99, .95)]},
+    "chai_tapri": {"label": "चाय की टपरी", "sky": True, "wall": "#FFF9C4", "floor": "#9E9E9E",
+                   "props": [("market_stall", .4, .99, .7), ("chai_kettle", .4, .92, .9), ("chai_bench", .7, .99, .9), ("tree", .06, .8, 1.0), ("lamp", .92, .99, .9), ("sign", .4, .62, .35)],
+                   "slots": [(.55, .99, 1.0), (.8, .99, .95)]},
+    "wedding": {"label": "शादी / मंडप", "wall": "#880E4F", "floor": "#AD1457",
+                "props": [("mandap", .5, .99, 1.0), ("fire_pit", .5, .95, .8), ("garland", .25, .88, .7), ("garland", .75, .88, .7), ("diya", .15, .99, .8), ("diya", .85, .99, .8), ("stage_light", .5, .98, .7)],
+                "slots": [(.35, .99, 1.0), (.65, .99, 1.0)]},
+    "college": {"label": "कॉलेज कैंपस", "sky": True, "wall": "#B3E5FC", "floor": "#8BC34A",
+                "props": [("college_gate", .5, .88, .9), ("tree", .12, .82, 1.0), ("tree", .88, .82, 1.0), ("bench", .3, .99, .9), ("lamp", .7, .99, .9), ("flag", .95, .99, .6)],
+                "slots": [(.4, .99, 1.0), (.65, .99, 1.0)]},
+    "news_studio": {"label": "न्यूज़ स्टूडियो", "wall": "#1A237E", "floor": "#0D47A1",
+                    "props": [("news_desk", .5, .99, 1.0), ("camera", .15, .99, .9), ("camera", .85, .99, .9), ("stage_light", .3, .98, .6), ("stage_light", .7, .98, .6)],
+                    "slots": [(.5, .99, 1.0), (.35, .99, .9)]},
+    "hospital_ward": {"label": "अस्पताल (गहन चिकित्सा)", "wall": "#E8F5E9", "floor": "#C8E6C9",
+                      "props": [("bed", .3, .99, 1.1), ("bed", .75, .99, 1.1), ("cabinet", .05, .99, .9), ("window", .5, .62, .9), ("clock", .88, .3, .7), ("curtain", .53, .99, .7)],
+                      "slots": [(.15, .99, 1.0), (.6, .99, .95)]},
+    "police_station": {"label": "पुलिस स्टेशन", "wall": "#ECEFF1", "floor": "#B0BEC5",
+                       "props": [("police_desk", .5, .99, 1.0), ("flag", .9, .99, .6), ("barricade", .2, .99, .7), ("clock", .5, .3, .7), ("chair", .5, .99, .9)],
+                       "slots": [(.3, .99, 1.0), (.72, .99, 1.0)]},
+    "courtroom": {"label": "कोर्ट रूम", "wall": "#EFEBE9", "floor": "#D7CCC8",
+                  "props": [("judge_bench", .5, .85, 1.0), ("gavel", .5, .78, .8), ("flag", .88, .99, .6), ("chair", .3, .99, .9), ("chair", .7, .99, .9), ("desk", .3, .99, .8), ("desk", .7, .99, .8)],
+                  "slots": [(.3, .99, 1.0), (.7, .99, 1.0)]},
+    "village": {"label": "गाँव", "sky": True, "wall": "#B3E5FC", "floor": "#8BC34A",
+                "props": [("village_hut", .3, .88, .9), ("village_hut", .75, .88, .7), ("well", .55, .95, .8), ("tree", .08, .8, 1.1), ("tree", .95, .8, .9)],
+                "slots": [(.45, .99, 1.0), (.65, .99, .95)]},
+    "dhaba": {"label": "ढाबा / रेस्टोरेंट", "wall": "#FFF3E0", "floor": "#BCAAA4",
+              "props": [("dhaba_table", .35, .99, 1.0), ("dhaba_table", .7, .99, .9), ("chai_kettle", .1, .92, .8), ("tv", .85, .78, .7), ("plant", .95, .99, .8), ("awning", .5, .68, .5)],
+              "slots": [(.5, .99, 1.0), (.25, .99, .95)]},
+    "library": {"label": "पुस्तकालय", "wall": "#EFEBE9", "floor": "#D7CCC8",
+                "props": [("bookshelf", .12, .99, 1.0), ("bookshelf", .88, .99, 1.0), ("desk", .5, .99, .9), ("reading_lamp", .5, .9, .8), ("chair", .5, .99, .8), ("window", .5, .62, .8)],
+                "slots": [(.35, .99, 1.0), (.7, .99, 1.0)]},
+    "stage": {"label": "मंच / स्टेज", "wall": "#1A237E", "floor": "#283593",
+              "props": [("curtain", .02, .99, .8), ("curtain", .98, .99, .8), ("spotlight", .5, .99, .6), ("podium", .5, .99, .9), ("stage_light", .25, .98, .6), ("stage_light", .75, .98, .6)],
+              "slots": [(.5, .99, 1.0), (.3, .99, .95)]},
+    "home_kitchen": {"label": "घर का किचन (मॉडर्न)", "wall": "#FAFAFA", "floor": "#EEEEEE",
+                     "props": [("fridge", .08, .99, 1.0), ("stove", .4, .99, 1.0), ("counter", .4, .99, .9), ("cabinet", .7, .99, .9), ("window", .85, .66, .8), ("plant", .95, .99, .7)],
+                     "slots": [(.55, .99, 1.0), (.25, .99, .95)]},
+    "garden": {"label": "बगीचा / गार्डन", "sky": True, "wall": "#B3E5FC", "floor": "#66BB6A",
+               "props": [("tree", .1, .82, 1.2), ("tree", .9, .82, 1.0), ("bench", .5, .99, .9), ("plant", .3, .99, 1.0), ("plant", .7, .99, 1.0), ("lamp", .5, .99, .8)],
+               "slots": [(.35, .99, 1.0), (.65, .99, 1.0)]},
+    "yoga_studio": {"label": "योगा स्टूडियो", "wall": "#E8F5E9", "floor": "#C8E6C9",
+                    "props": [("mirror", .5, .72, 1.1), ("plant", .05, .99, 1.0), ("plant", .95, .99, 1.0), ("window", .25, .62, .9), ("window", .75, .62, .9)],
+                    "slots": [(.35, .99, 1.0), (.65, .99, 1.0), (.5, .99, .95)]},
+    "warehouse": {"label": "गोदाम / वेयरहाउस", "wall": "#CFD8DC", "floor": "#90A4AE",
+                  "props": [("shelf", .15, .99, 1.2), ("shelf", .85, .99, 1.2), ("shelf", .5, .99, 1.0), ("barricade", .35, .99, .6), ("lamp", .3, .99, 1.0), ("lamp", .7, .99, 1.0)],
+                  "slots": [(.3, .99, 1.0), (.7, .99, .95)]},
 }
 FRAMING = {"wide": (0, 0, BW, BH), "medium": (BW * .18, BH * .12, BW * .64, BH * .64 * 1.0), "close": (BW * .3, BH * .18, BW * .4, BH * .4)}
 LIGHT = {"day": None, "evening": ("#FF8F00", .22), "night": ("#0D1B4B", .45), "warm": ("#FFCC80", .12), "cool": ("#90CAF9", .15)}
