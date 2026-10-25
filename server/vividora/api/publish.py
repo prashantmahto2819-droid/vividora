@@ -206,7 +206,7 @@ async def tiktok_callback(request: Request):
                                          "created_by": st["user_id"], "created_at": db.now(), **row})
         service.log(c, st["workspace_id"], "connection.add", user_id=st["user_id"],
                     detail={"platform": "tiktok", "name": display})
-    return _done_page(f"TikTok "@{display}" जुड़ गया ✓")
+    return _done_page(f"TikTok @{display} जुड़ गया ✓")
 
 
 # ---- publications

@@ -2691,7 +2691,7 @@ async function loadPublishData() {
   clearTimeout(E.pubT);
   if (E.exportOpen && (E.pubs || []).some((x) => x.status === "queued")) E.pubT = setTimeout(loadPublishData, 4000);
 }
-const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook" };
+const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok" };
 function renderExport() {
   const m = $("#ed-modal", E.root); const { esc, S, api, toast, load } = E.ctx; const p = E.p;
   if (!E.exportOpen) { m.hidden = true; m.innerHTML = ""; E.pubFor = null; return; }
@@ -2847,7 +2847,7 @@ function publishForm(f) {
   const label = a.label?.startsWith("short-") ? a.meta.title || a.label : (E.ctx.S.presets?.platforms.find((x) => x.id === a.label) || {}).label || a.label;
   return `<div class="box" id="pubform"><div class="row between"><h3 style="margin:0">Publish: ${esc(label)}</h3><button class="ibtn" id="pub-close">✕</button></div>
     <div class="irow">${field("कहाँ", `<select id="pub-conn">${fit.map((c) => `<option value="${c.id}" ${c.id === f.conn ? "selected" : ""}>${PLAT[c.platform]} · ${esc(c.name)}</option>`).join("")}</select>`)}
-      ${conn?.platform === "youtube" ? field("दिखे", `<select id="pub-privacy">${[["private", "Private (बाद में public करेंगे)"], ["unlisted", "Unlisted"], ["public", "Public"]].map(([v, l]) => `<option value="${v}" ${f.privacy === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : ""}
+      ${conn?.platform === "youtube" ? field("दिखे", `<select id="pub-privacy">${[["private", "Private (बाद में public करेंगे)"], ["unlisted", "Unlisted"], ["public", "Public"]].map(([v, l]) => `<option value="${v}" ${f.privacy === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : conn?.platform === "tiktok" ? field("दिखे", `<select id="pub-privacy">${[["private", "Private (सिर्फ़ मैं)"], ["friends", "Friends"], ["public", "Public"]].map(([v, l]) => `<option value="${v}" ${f.privacy === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : ""}
       ${field("schedule (खाली = अभी)", `<input type="datetime-local" id="pub-when" value="${f.when}">`)}
       <button class="btn small" id="pub-ai" title="transcript से title/description/tags">✨ AI से लिखें</button></div>
     ${field("Title", `<input id="pub-title" maxlength="100" value="${esc(f.title)}" placeholder="वीडियो का title">`)}
@@ -2857,7 +2857,7 @@ function publishForm(f) {
     <div class="irow">${field("Playlist", `<input id="pub-pl" list="pub-pl-list" value="${esc(f.pl || "")}" placeholder="${f.plDefault ? "खाली = brand playlist" : "playlist ID या link (खाली = कोई नहीं)"}"><datalist id="pub-pl-list">${(f.playlists || []).map((x) => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("")}</datalist>`)}
       <label class="small" style="align-self:end"><input type="checkbox" id="pub-synth" ${f.synth ? "checked" : ""}> AI-generated/altered content (YouTube को बताएँ)</label></div>
     ${f.ytNote ? `<p class="small muted">⚠️ ${esc(f.ytNote)}</p>` : ""}` : ""}
-    <div class="row between"><span class="small muted">${conn?.platform === "youtube" ? "YouTube quota: ~6 upload/दिन" : conn?.platform === "instagram" ? "Instagram: Reel के रूप में, caption 2200 तक" : conn ? "Facebook: Page पर" : "पहले Settings → Channels में channel जोड़ें"}</span><button class="btn primary" id="pub-go" ${conn ? "" : "disabled"}>Upload करें</button></div></div>`;
+    <div class="row between"><span class="small muted">${conn?.platform === "youtube" ? "YouTube quota: ~6 upload/दिन" : conn?.platform === "instagram" ? "Instagram: Reel के रूप में, caption 2200 तक" : conn?.platform === "tiktok" ? "TikTok: 20 post/दिन, caption 150 तक" : conn ? "Facebook: Page पर" : "पहले Settings → Channels में channel जोड़ें"}</span><button class="btn primary" id="pub-go" ${conn ? "" : "disabled"}>Upload करें</button></div></div>`;
 }
 function bindPublishForm(m) {
   const f = E.pubFor; if (!f) return; const { api, toast } = E.ctx;

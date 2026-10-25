@@ -904,7 +904,8 @@ function settingsView() {
     <div id="sched-wrap">${scheduleSection()}</div>
     <div class="section"><h2>एक बार का setup</h2>
       <details><summary><b>YouTube</b> (free, 10 मिनट)</summary><ol class="small muted"><li>console.cloud.google.com → नया project → "YouTube Data API v3" enable करें</li><li>OAuth consent screen → External → अपना Gmail test user में जोड़ें</li><li>Credentials → OAuth client ID → Web application → Authorized redirect URI: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/youtube/callback</code></li><li>client id/secret को .env में <code>YT_CLIENT_ID</code> / <code>YT_CLIENT_SECRET</code> में डालें, <code>docker compose up -d</code>, फिर यहाँ "+ YouTube"</li></ol><p class="small muted">quota: ~6 upload/दिन (10,000 units, upload 1,600)।</p></details>
-      <details><summary><b>Instagram / Facebook</b> (free, Business account चाहिए)</summary><ol class="small muted"><li>Instagram को Professional (Creator/Business) बनाएँ और एक Facebook Page से link करें</li><li>developers.facebook.com → Create App (Business) → products: Facebook Login for Business + Instagram Graph API</li><li>Facebook Login → Settings → Valid OAuth Redirect URIs: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/meta/callback</code></li><li>App ID/Secret को .env में <code>META_APP_ID</code> / <code>META_APP_SECRET</code>; फिर "+ Instagram / Facebook"</li><li>Cloudflare Access में <code>/pub/*</code> path को bypass करें (Meta वहीं से वीडियो उठाता है)</li></ol><p class="small muted">limit: Instagram 100 post/24h, Facebook Reels ~30/24h।</p></details></div>`;
+      <details><summary><b>Instagram / Facebook</b> (free, Business account चाहिए)</summary><ol class="small muted"><li>Instagram को Professional (Creator/Business) बनाएँ और एक Facebook Page से link करें</li><li>developers.facebook.com → Create App (Business) → products: Facebook Login for Business + Instagram Graph API</li><li>Facebook Login → Settings → Valid OAuth Redirect URIs: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/meta/callback</code></li><li>App ID/Secret को .env में <code>META_APP_ID</code> / <code>META_APP_SECRET</code>; फिर "+ Instagram / Facebook"</li><li>Cloudflare Access में <code>/pub/*</code> path को bypass करें (Meta वहीं से वीडियो उठाता है)</li></ol><p class="small muted">limit: Instagram 100 post/24h, Facebook Reels ~30/24h।</p></details>
+      <details><summary><b>TikTok</b> (free, Content Posting API)</summary><ol class="small muted"><li>developers.tiktok.com → Create App → "Content Posting API" और "Login Kit" products add करें</li><li>Redirect URI: <code>${esc(st.public_url || "https://<PUBLIC_URL>")}/api/connect/tiktok/callback</code></li><li>Client Key/Secret को .env में <code>TIKTOK_CLIENT_KEY</code> / <code>TIKTOK_CLIENT_SECRET</code> में डालें</li><li><code>docker compose up -d</code>, फिर यहाँ "+ TikTok"</li></ol><p class="small muted">limit: 20 post/दिन per user। Video: 3s–10min, H.264, max 4GB।</p></details></div>`;
 }
 // ---------- autopilot switches + posting schedule (per channel) ----------
 function autopilotSection() {
@@ -915,7 +916,7 @@ function autopilotSection() {
       <label class="field" style="margin:0"><span class="small">${esc(ap.labels.shorts || "Shorts")}</span><select name="shorts" ${admin ? "" : "disabled"}>${[0, 1, 2, 3, 4, 5, 6, 8].map((n) => `<option ${+cur.shorts === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       ${admin ? `<div><button class="btn primary">Autopilot सेव करें</button></div>` : ""}</form></div>`;
 }
-const LANES = [["youtube_long", "YouTube — लंबा वीडियो"], ["youtube_short", "YouTube Shorts"], ["instagram", "Instagram Reels"], ["facebook", "Facebook Reels"]];
+const LANES = [["youtube_long", "YouTube — लंबा वीडियो"], ["youtube_short", "YouTube Shorts"], ["instagram", "Instagram Reels"], ["facebook", "Facebook Reels"], ["tiktok", "TikTok"]];
 const DAYH = { mon: "सो", tue: "मं", wed: "बु", thu: "गु", fri: "शु", sat: "श", sun: "र" };
 function scheduleSection() {
   const d = S.sched; if (!d) return "";
@@ -1410,7 +1411,7 @@ function calendarView(pubs) {
   }
   return `<div class="cal"><div class="row between"><button class="btn small quiet" data-cal="-1" title="पिछला महीना" aria-label="पिछला महीना">‹</button><b>${base.toLocaleDateString("hi-IN", { month: "long", year: "numeric" })}</b><button class="btn small quiet" data-cal="1" title="अगला महीना" aria-label="अगला महीना">›</button></div>
     <div class="cal-g">${["सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि", "रवि"].map((d) => `<div class="cal-h">${d}</div>`).join("")}${cells.join("")}</div>
-    <p class="small muted"><span class="plat youtube">YouTube</span> <span class="plat instagram">Instagram</span> <span class="plat facebook">Facebook</span> — scheduled समय, या publish होने का दिन</p></div>`;
+    <p class="small muted"><span class="plat youtube">YouTube</span> <span class="plat instagram">Instagram</span> <span class="plat facebook">Facebook</span> <span class="plat tiktok">TikTok</span> — scheduled समय, या publish होने का दिन</p></div>`;
 }
 function bindPublish() {
   $$("[data-ptab]").forEach((b) => (b.onclick = () => { S.pubTab = b.dataset.ptab; render(); }));
@@ -1459,7 +1460,7 @@ function helpView() {
   const mods = [["rec", "Record", "#/record", "Camera और teleprompter के साथ सीधे browser में record करें; upload अपने-आप होता है।"], ["upload", "Upload", "#/new", "एक या कई clips डालें — टूटे upload वहीं से आगे चलते हैं।"],
     ["music", "Montage", "#/new?type=montage", "बिना आवाज़ वाले clips और music से beat पर कटा reel।"], ["image", "Thumbnails", "#/thumbs", "Best frame, cutout, बड़ा हिंदी text, 13 layouts और A/B variants।"],
     ["film", "Editor", "#/projects", "कट, captions, text, B-roll, music, effects और Shorts — एक जगह।"], ["bulb", "Plan", "#/plan", "Trends से ideas, ideas से script, फिर record।"],
-    ["trend", "Trends", "#/trends", "Google Trends, YouTube Top और आपके पसंदीदा channels।"], ["send", "Publish", "#/publish", "YouTube, Instagram और Facebook पर — मंज़ूरी के बाद, तय समय पर।"],
+    ["trend", "Trends", "#/trends", "Google Trends, YouTube Top और आपके पसंदीदा channels।"], ["send", "Publish", "#/publish", "YouTube, Instagram, Facebook और TikTok पर — मंज़ूरी के बाद, तय समय पर।"],
     ["chart", "Analytics", "#/analytics", "क्या चल रहा है — style, hook और लंबाई से सीख।"], ["lib", "Library", "#/library", "Music, SFX, stickers, frames और LUTs — सब licence-safe।"],
     ["tv", "Channels & Brand", "#/settings", "कई channels, brand kit और connections।"], ["gear", "Settings", "#/account", "Password, users और storage की सफ़ाई।"]];
   return `<div class="pghead"><div><h1>Help</h1><p class="muted small">Vividora के सारे modules — एक नज़र में।</p></div></div>
@@ -1480,7 +1481,7 @@ function accountView() {
         <div class="row" style="gap:.5rem;flex-wrap:wrap"><button class="btn quiet danger" id="logout2">${ic("out")} बाहर निकलें</button><button class="btn quiet small" id="logout-all" title="हर phone/laptop से logout — token बदल जाते हैं">सब devices से बाहर</button></div></section>
       ${S.planInfo?.saas ? `<section class="card"><div class="card-h"><h2>Plan</h2><a class="btn small" href="#/billing">देखें / बदलें</a></div>${planMini(S.planInfo)}</section>` : ""}
       <section class="card"><div class="card-h"><h2>Workspace</h2></div><ul class="hlist">
-        <li><a href="#/settings">Channels & Brand kit, YouTube / Instagram connections</a></li>${admin ? `<li><a href="#/users">Users और roles (${(S.users || []).length})</a></li><li><a href="#/admin">Admin — workspaces, audit log, backups</a></li>` : ""}<li><a href="#/status">Workers, queue और archive की स्थिति</a></li>
+        <li><a href="#/settings">Channels & Brand kit, YouTube / Instagram / TikTok connections</a></li>${admin ? `<li><a href="#/users">Users और roles (${(S.users || []).length})</a></li><li><a href="#/admin">Admin — workspaces, audit log, backups</a></li>` : ""}<li><a href="#/status">Workers, queue और archive की स्थिति</a></li>
         <li><span>Home के sections</span><button class="btn small quiet" id="home-reset">Default पर लौटें</button></li></ul></section>
     </div>
     ${admin ? `<section class="card" id="storage"><div class="card-h"><h2>Storage</h2><button class="btn small" id="st-load">फिर जाँचें</button></div>
