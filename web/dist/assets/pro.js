@@ -894,12 +894,14 @@ export function textDocHtml(dis) {
   const ed = E(); const K = H.keeps(); const rip = ed.ripple ?? LS("vividora_ripple", true); const gap = ed.silGap ?? 0.8;
   const segs = ed.tr.segments.filter((s) => (s.words || []).length);
   const nGone = ed.words.filter((w) => wordGone(w, K)).length; const nFill = ed.words.filter((w) => FILL.has(fnorm(w.w)) && !wordGone(w, K)).length;
+  const tapMode = ed.tapCut ?? LS("vividora_tapcut", false);
   return `<div class="tedit"><div class="irow"><label class="chk small" title="text से कटा हिस्सा हटने पर बाद के titles / overlays / effects / markers उतना पीछे खिसकें"><input type="checkbox" data-ripple ${rip ? "checked" : ""}> Ripple</label>
-      <button class="btn small" data-tfill ${dis} title="अं, उम, um, uh…">🧹 सारे filler हटाएँ${nFill ? ` (${nFill})` : ""}</button></div>
+      <label class="chk small ${tapMode ? "tap-on" : ""}" title="tap करें = शब्द कटे · फिर tap = वापस"><input type="checkbox" data-tapcut ${tapMode ? "checked" : ""}> ✂ Tap to cut</label>
+      <button class="btn small" data-tfill ${dis} title="अं, उम, um, uh…">🧹 filler हटाएँ${nFill ? ` (${nFill})` : ""}</button></div>
     <div class="irow"><button class="btn small" data-tsil ${dis}>🤫 <span>${gap}</span> s से लंबी चुप्पी हटाएँ</button><input type="range" data-tgap min="0.3" max="3" step="0.1" value="${gap}" title="कितनी लंबी चुप्पी" style="flex:1"></div>
     <div class="irow"><button class="btn small quiet" data-tdel ${dis} title="Delete / Backspace">🗑 चुने शब्द हटाएँ</button><button class="btn small quiet" data-trest ${dis} title="कटे शब्द वापस">↺ वापस लाएँ</button><span class="small muted grow">${nGone} शब्द कटे</span></div>
-    <p class="small muted">शब्द चुनें (खींचकर) → <b>Delete</b>/<b>Backspace</b> = वीडियो से हटे · कटे (~~) शब्द चुनकर Delete या double-click = वापस · क्लिक = वहाँ जाएँ · <b>Ctrl+Z</b> undo</p>
-    <div class="tdoc" tabindex="0" data-tdoc>${segs.map((s) => `<p>${(s.words || []).map((w) => `<span class="tw ${wordGone(w, K) ? "gone" : ""} ${FILL.has(fnorm(w.w)) ? "fill" : ""}" data-ws="${w.start}" data-we="${w.end}">${esc(w.w)}</span>`).join(" ")}</p>`).join("") || `<p class="small muted">transcript नहीं है</p>`}</div></div>`;
+    <p class="small muted">${tapMode ? `<b>✂ Tap mode ON</b> — हर शब्द पर tap करो = कट जाएगा · कटे शब्द पर tap = वापस · <b>Ctrl+Z</b> undo` : `शब्द चुनें (खींचकर) → <b>Delete</b>/<b>Backspace</b> = वीडियो से हटे · कटे (~~) शब्द चुनकर Delete या double-click = वापस · क्लिक = वहाँ जाएँ · <b>Ctrl+Z</b> undo`}</p>
+    <div class="tdoc ${tapMode ? "tapmode" : ""}" tabindex="0" data-tdoc>${segs.map((s) => `<p>${(s.words || []).map((w) => `<span class="tw ${wordGone(w, K) ? "gone" : ""} ${FILL.has(fnorm(w.w)) ? "fill" : ""}" data-ws="${w.start}" data-we="${w.end}">${esc(w.w)}</span>`).join(" ")}</p>`).join("") || `<p class="small muted">transcript नहीं है</p>`}</div></div>`;
 }
 function selWords(doc) {
   const s = window.getSelection(); if (!s || s.isCollapsed || !s.rangeCount) return [];
@@ -929,16 +931,30 @@ export function ripple(oldCuts, newCuts) {
 }
 export function bindTextDoc(panel) {
   const ed = E(); const doc = $("[data-tdoc]", panel); if (!doc) return;
-  const rp = $("[data-ripple]", panel); if (rp) rp.onchange = () => { ed.ripple = rp.checked; LSset("vividora_ripple", rp.checked); };
-  const gp = $("[data-tgap]", panel); if (gp) gp.oninput = () => { ed.silGap = +gp.value; $("[data-tsil] span", panel).textContent = gp.value; };
-  const fl = $("[data-tfill]", panel); if (fl) fl.onclick = () => textCut({ fillers: true }, "🧹 filler हटे");
-  const sl = $("[data-tsil]", panel); if (sl) sl.onclick = () => textCut({ silences_over: ed.silGap ?? 0.8 }, `🤫 ${ed.silGap ?? 0.8}s से लंबी चुप्पी हटी`);
-  const del = (restore) => { const ws = selWords(doc); if (!ws.length) return ed.ctx.toast("पहले शब्द चुनें (खींचकर)"); const rng = ws.map((w) => [w.start, w.end]);
+  const rp = $(“[data-ripple]”, panel); if (rp) rp.onchange = () => { ed.ripple = rp.checked; LSset(“vividora_ripple”, rp.checked); };
+  const tc = $(“[data-tapcut]”, panel); if (tc) tc.onchange = () => { ed.tapCut = tc.checked; LSset(“vividora_tapcut”, tc.checked); H.renderPanel(); };
+  const gp = $(“[data-tgap]”, panel); if (gp) gp.oninput = () => { ed.silGap = +gp.value; $(“[data-tsil] span”, panel).textContent = gp.value; };
+  const fl = $(“[data-tfill]”, panel); if (fl) fl.onclick = () => textCut({ fillers: true }, “🧹 filler हटे”);
+  const sl = $(“[data-tsil]”, panel); if (sl) sl.onclick = () => textCut({ silences_over: ed.silGap ?? 0.8 }, `🤫 ${ed.silGap ?? 0.8}s से लंबी चुप्पी हटी`);
+  const del = (restore) => { const ws = selWords(doc); if (!ws.length) return ed.ctx.toast(“पहले शब्द चुनें (खींचकर)”); const rng = ws.map((w) => [w.start, w.end]);
     window.getSelection()?.removeAllRanges(); textCut(restore ? { restore: rng } : { delete: rng }, restore ? `↺ ${ws.length} शब्द वापस` : `✂ ${ws.length} शब्द हटे`); };
-  const db = $("[data-tdel]", panel); if (db) db.onclick = () => del(false);
-  const rb = $("[data-trest]", panel); if (rb) rb.onclick = () => del(true);
-  doc.onclick = (e) => { const w = e.target.closest(".tw"); if (!w || !window.getSelection()?.isCollapsed) return; H.seek(+w.dataset.ws + 0.01); };
-  doc.ondblclick = (e) => { const w = e.target.closest(".tw.gone"); if (!w) return; e.preventDefault(); window.getSelection()?.removeAllRanges(); textCut({ restore: [[+w.dataset.ws, +w.dataset.we]] }, `↺ “${w.textContent}” वापस`); };
+  const db = $(“[data-tdel]”, panel); if (db) db.onclick = () => del(false);
+  const rb = $(“[data-trest]”, panel); if (rb) rb.onclick = () => del(true);
+  const tapMode = ed.tapCut ?? LS(“vividora_tapcut”, false);
+  doc.onclick = (e) => { const w = e.target.closest(“.tw”); if (!w) return;
+    if (tapMode) {
+      // Tap-to-cut: single tap toggles cut/restore
+      e.preventDefault(); window.getSelection()?.removeAllRanges();
+      if (!ed.canEdit) return;
+      const rng = [[+w.dataset.ws, +w.dataset.we]];
+      if (w.classList.contains(“gone”)) { textCut({ restore: rng }, `↺ “${w.textContent}” वापस`); }
+      else { textCut({ delete: rng }, `✂ “${w.textContent}” कटा`); }
+    } else {
+      // Normal mode: click = seek to that word
+      if (!window.getSelection()?.isCollapsed) return; H.seek(+w.dataset.ws + 0.01);
+    }
+  };
+  doc.ondblclick = (e) => { if (tapMode) return; const w = e.target.closest(“.tw.gone”); if (!w) return; e.preventDefault(); window.getSelection()?.removeAllRanges(); textCut({ restore: [[+w.dataset.ws, +w.dataset.we]] }, `↺ “${w.textContent}” वापस`); };
   doc._del = del;
 }
 // keyboard inside the text document: Delete/Backspace cut (or restore when everything chosen is already cut)
