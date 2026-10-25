@@ -1,6 +1,6 @@
 // Vividora service worker: the app shell works offline; API calls always go to the network.
-const SHELL = "vividora-shell-v19";
-const FILES = ["/", "/assets/app.css", "/assets/app.js", "/assets/editor.css", "/assets/theme.css", "/assets/fonts/Mukta-Regular.woff", "/assets/fonts/Mukta-Medium.woff", "/assets/fonts/Mukta-SemiBold.woff", "/assets/fonts/Mukta-Bold.woff", "/assets/fonts/TiroDevanagariHindi-Regular.woff", "/assets/editor.js", "/assets/pro.js", "/assets/mix.js", "/assets/lut.js", "/assets/record.js", "/assets/thumbs.js", "/assets/voice.js", "/assets/chars.js", "/assets/scenes.js", "/assets/chars3d.js", "/assets/chars3d-ui.js", "/assets/scenes3d.js", "/assets/three.module.min.js", "/assets/textfx.js", "/assets/cutout.js", "/manifest.webmanifest", "/icon.svg"];
+const SHELL = "vividora-shell-v21";
+const FILES = ["/", "/assets/app.css", "/assets/app.js", "/assets/editor.css", "/assets/theme.css", "/assets/fonts/Mukta-Regular.woff", "/assets/fonts/Mukta-Medium.woff", "/assets/fonts/Mukta-SemiBold.woff", "/assets/fonts/Mukta-Bold.woff", "/assets/fonts/TiroDevanagariHindi-Regular.woff", "/assets/editor.js", "/assets/pro.js", "/assets/mix.js", "/assets/lut.js", "/assets/record.js", "/assets/thumbs.js", "/assets/voice.js", "/assets/chars.js", "/assets/scenes.js", "/assets/chars3d.js", "/assets/chars3d-ui.js", "/assets/scenes3d.js", "/assets/three.module.min.js", "/assets/textfx.js", "/assets/cutout.js", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -14,7 +14,7 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET" || url.pathname.startsWith("/api/")) return;
   e.respondWith(
     fetch(e.request).then((r) => {
-      if (r.ok && FILES.includes(url.pathname)) caches.open(SHELL).then((c) => c.put(e.request, r.clone()));
+      if (r.ok && !r.redirected && FILES.includes(url.pathname)) caches.open(SHELL).then((c) => c.put(e.request, r.clone()));
       return r;
     }).catch(() => caches.match(e.request).then((r) => r || caches.match("/")))
   );

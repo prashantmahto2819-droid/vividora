@@ -552,7 +552,7 @@ function previewHints(it) {
   const r = [];
   if ((it.speed_warp || "off") !== "off") r.push("Speed Warp"); if (renderOnlyColor(it.color)) r.push("HSL/colour match");
   if ((it.stack || []).some((s) => H.fxDef(s.id)?.preview !== "css")) r.push("कुछ effects"); if (it.blend_mode === "subtract") r.push("subtract blend");
-  return r.length ? `<p class="small muted rhint">ℹ ${esc(r.join(", "))} — preview में नहीं, <b>render में दिखेगा</b>। बिल्कुल final frame: “🎞 Preview frame”।</p>` : "";
+  return r.length ? `<p class="small muted rhint">ℹ ${esc(r.join(", "))} — preview में नहीं, <b>render में दिखेगा</b>। बिल्कुल final frame: "🎞 Preview frame"।</p>` : "";
 }
 function rampSvg(it, avail) {
   const r = rampOf(it) || []; const W = 270, Hh = 120, pd = 10; const X = (s) => pd + s / avail * (W - 2 * pd); const Y = (v) => pd + (1 - (Math.log2(clamp(v, 0.25, 4)) + 2) / 4) * (Hh - 2 * pd);
@@ -771,7 +771,7 @@ export function proPanel(dis) {
   const fr = pr.face_refine || {}; const dn = pr.denoise || {}; const sh = pr.sharpen || {}; const st = pr.stabilize || {};
   const mk = ed.rs.markers || []; const MK = PP().markers || { chapter: "Chapter", note: "Note", todo: "To-do" };
   return `<div class="ph"><h3>Pro tools</h3><span class="small muted">पूरे वीडियो पर · render quality</span></div>
-    <p class="small muted">ये सब render में असली ffmpeg से लगते हैं। जो preview में live नहीं दिखता उसके लिए “🎞 Preview frame” दबाएँ।</p>
+    <p class="small muted">ये सब render में असली ffmpeg से लगते हैं। जो preview में live नहीं दिखता उसके लिए "🎞 Preview frame" दबाएँ।</p>
     ${sec("p_morph", "🌗 Morph cut (jump cut smooth)", `<div class="row between">${toolHead("morph_cut", "हर कट पर morph", dis, "talking head में सिर थोड़ा हिलने वाले jump cut को smooth करता है")}${cost("morph_cut")}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" data-mc="all" ${mc.all ? "checked" : ""} ${dis}> सारे कट (${nCuts})</label>${H.field("तरीका", `<select data-mc="mode" class="small" ${dis}><option value="flow" ${mc.mode !== "blend" ? "selected" : ""}>Optical flow (बढ़िया)</option><option value="blend" ${mc.mode === "blend" ? "selected" : ""}>Blend (dissolve)</option></select>`)}</div>
       ${H.field(`frames <b>${mc.frames || 8}</b>`, `<input type="range" data-mc="frames" min="4" max="16" step="2" value="${mc.frames || 8}" ${dis}>`)}
@@ -884,7 +884,7 @@ export function bindMusicFit(panel) {
 
 // ====================================================================== text-based editing (Captions → "Text से edit")
 const FILL = new Set(["अं", "अंं", "उम", "उम्म", "हम्म", "अ", "आ", "um", "uh", "umm", "uhh", "hmm", "erm", "ah", "eh"]);
-const fnorm = (w) => String(w || "").toLowerCase().replace(/[।॥,.!?;:"'“”‘’()\[\]…\-]/g, "");
+const fnorm = (w) => String(w || "").toLowerCase().replace(/[।॥,.!?;:"'""''()\[\]…\-]/g, "");
 function keepsOf(cuts, dur) { const on = cuts.filter((c) => c.enabled !== false && c.end > c.start).sort((a, b) => a.start - b.start); const out = []; let t = 0;
   for (const c of on) { if (c.start > t) out.push([t, Math.min(c.start, dur)]); t = Math.max(t, c.end); } if (t < dur) out.push([t, dur]); return out; }
 const outOfK = (src, K) => { let o = 0; for (const [a, b] of K) { if (src <= a) break; o += Math.min(src, b) - a; } return o; };
@@ -931,30 +931,30 @@ export function ripple(oldCuts, newCuts) {
 }
 export function bindTextDoc(panel) {
   const ed = E(); const doc = $("[data-tdoc]", panel); if (!doc) return;
-  const rp = $(“[data-ripple]”, panel); if (rp) rp.onchange = () => { ed.ripple = rp.checked; LSset(“vividora_ripple”, rp.checked); };
-  const tc = $(“[data-tapcut]”, panel); if (tc) tc.onchange = () => { ed.tapCut = tc.checked; LSset(“vividora_tapcut”, tc.checked); H.renderPanel(); };
-  const gp = $(“[data-tgap]”, panel); if (gp) gp.oninput = () => { ed.silGap = +gp.value; $(“[data-tsil] span”, panel).textContent = gp.value; };
-  const fl = $(“[data-tfill]”, panel); if (fl) fl.onclick = () => textCut({ fillers: true }, “🧹 filler हटे”);
-  const sl = $(“[data-tsil]”, panel); if (sl) sl.onclick = () => textCut({ silences_over: ed.silGap ?? 0.8 }, `🤫 ${ed.silGap ?? 0.8}s से लंबी चुप्पी हटी`);
-  const del = (restore) => { const ws = selWords(doc); if (!ws.length) return ed.ctx.toast(“पहले शब्द चुनें (खींचकर)”); const rng = ws.map((w) => [w.start, w.end]);
+  const rp = $("[data-ripple]", panel); if (rp) rp.onchange = () => { ed.ripple = rp.checked; LSset("vividora_ripple", rp.checked); };
+  const tc = $("[data-tapcut]", panel); if (tc) tc.onchange = () => { ed.tapCut = tc.checked; LSset("vividora_tapcut", tc.checked); H.renderPanel(); };
+  const gp = $("[data-tgap]", panel); if (gp) gp.oninput = () => { ed.silGap = +gp.value; $("[data-tsil] span", panel).textContent = gp.value; };
+  const fl = $("[data-tfill]", panel); if (fl) fl.onclick = () => textCut({ fillers: true }, "🧹 filler हटे");
+  const sl = $("[data-tsil]", panel); if (sl) sl.onclick = () => textCut({ silences_over: ed.silGap ?? 0.8 }, `🤫 ${ed.silGap ?? 0.8}s से लंबी चुप्पी हटी`);
+  const del = (restore) => { const ws = selWords(doc); if (!ws.length) return ed.ctx.toast("पहले शब्द चुनें (खींचकर)"); const rng = ws.map((w) => [w.start, w.end]);
     window.getSelection()?.removeAllRanges(); textCut(restore ? { restore: rng } : { delete: rng }, restore ? `↺ ${ws.length} शब्द वापस` : `✂ ${ws.length} शब्द हटे`); };
-  const db = $(“[data-tdel]”, panel); if (db) db.onclick = () => del(false);
-  const rb = $(“[data-trest]”, panel); if (rb) rb.onclick = () => del(true);
-  const tapMode = ed.tapCut ?? LS(“vividora_tapcut”, false);
-  doc.onclick = (e) => { const w = e.target.closest(“.tw”); if (!w) return;
+  const db = $("[data-tdel]", panel); if (db) db.onclick = () => del(false);
+  const rb = $("[data-trest]", panel); if (rb) rb.onclick = () => del(true);
+  const tapMode = ed.tapCut ?? LS("vividora_tapcut", false);
+  doc.onclick = (e) => { const w = e.target.closest(".tw"); if (!w) return;
     if (tapMode) {
       // Tap-to-cut: single tap toggles cut/restore
       e.preventDefault(); window.getSelection()?.removeAllRanges();
       if (!ed.canEdit) return;
       const rng = [[+w.dataset.ws, +w.dataset.we]];
-      if (w.classList.contains(“gone”)) { textCut({ restore: rng }, `↺ “${w.textContent}” वापस`); }
-      else { textCut({ delete: rng }, `✂ “${w.textContent}” कटा`); }
+      if (w.classList.contains("gone")) { textCut({ restore: rng }, `↺ "${w.textContent}" वापस`); }
+      else { textCut({ delete: rng }, `✂ "${w.textContent}" कटा`); }
     } else {
       // Normal mode: click = seek to that word
       if (!window.getSelection()?.isCollapsed) return; H.seek(+w.dataset.ws + 0.01);
     }
   };
-  doc.ondblclick = (e) => { if (tapMode) return; const w = e.target.closest(“.tw.gone”); if (!w) return; e.preventDefault(); window.getSelection()?.removeAllRanges(); textCut({ restore: [[+w.dataset.ws, +w.dataset.we]] }, `↺ “${w.textContent}” वापस`); };
+  doc.ondblclick = (e) => { if (tapMode) return; const w = e.target.closest(".tw.gone"); if (!w) return; e.preventDefault(); window.getSelection()?.removeAllRanges(); textCut({ restore: [[+w.dataset.ws, +w.dataset.we]] }, `↺ "${w.textContent}" वापस`); };
   doc._del = del;
 }
 // keyboard inside the text document: Delete/Backspace cut (or restore when everything chosen is already cut)
