@@ -134,7 +134,10 @@ async def variants(request: Request, user: dict):
     _has_video(p)
     data = await body(request)
     size = data.get("size") if data.get("size") in T.SIZES else "yt"
-    n = max(1, min(6, int(data.get("n") or 3)))
+    try:
+        n = max(1, min(6, int(data.get("n") or 3)))
+    except (TypeError, ValueError):
+        n = 3
     made = await run_in_threadpool(lambda: thumbs.make_variants(p, n, size, data.get("base") or None, user_id=user["id"]))
     if not made:
         raise ApiError(500, "variants नहीं बने")

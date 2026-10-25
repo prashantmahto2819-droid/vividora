@@ -28,6 +28,16 @@ from .deps import ApiError, body, need, ok, own_project, require
 
 PLATFORMS = ("youtube", "instagram", "facebook")
 _states: dict[str, dict] = {}  # oauth state → {workspace_id, user_id, platform}
+_STATE_TTL = 600  # 10 minutes — OAuth must complete within this window
+
+
+def _prune_states() -> None:
+    """Drop OAuth states older than _STATE_TTL so the dict doesn't grow forever."""
+    import time as _t
+    now = _t.time()
+    stale = [k for k, v in _states.items() if now - v.get("_ts", 0) > _STATE_TTL]
+    for k in stale:
+        _states.pop(k, None)
 
 
 def conn_view(c: dict) -> dict:
@@ -72,18 +82,20 @@ async def delete_connection(request: Request, user: dict):
 
 @require("admin")
 async def connect_start(request: Request, user: dict):
+    import time as _t
+    _prune_states()
     platform = request.path_params["platform"]
     if platform == "youtube":
         if not youtube.configured():
             raise ApiError(400, ".env में YT_CLIENT_ID / YT_CLIENT_SECRET / PUBLIC_URL सेट करें")
         state = pysecrets.token_urlsafe(24)
-        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel")}
+        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel"), "_ts": _t.time()}
         return ok({"url": youtube.auth_url(state)})
     if platform == "meta":
         if not metaapi.configured():
             raise ApiError(400, ".env में META_APP_ID / META_APP_SECRET / PUBLIC_URL सेट करें")
         state = pysecrets.token_urlsafe(24)
-        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel")}
+        _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel"), "_ts": _t.time()}
         return ok({"url": metaapi.auth_url(state)})
     raise ApiError(404, "unknown platform")
 

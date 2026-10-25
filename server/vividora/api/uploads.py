@@ -18,7 +18,10 @@ async def start(request: Request, user: dict):
     p = own_project(request, user)
     data = await body(request)
     need(data, "filename", "size")
-    size = int(data["size"])
+    try:
+        size = int(data["size"])
+    except (TypeError, ValueError):
+        raise ApiError(422, "size must be a number")
     if size <= 0 or size > MAX_UPLOAD:
         raise ApiError(422, "file size out of range")
     from .. import saas
@@ -72,7 +75,10 @@ async def chunk(request: Request, user: dict):
     p, up = _upload(request, user)
     if up["done"]:
         raise ApiError(409, "upload already finished")
-    offset = int(request.headers.get("x-offset", "-1"))
+    try:
+        offset = int(request.headers.get("x-offset", "-1"))
+    except (TypeError, ValueError):
+        raise ApiError(422, "X-Offset must be a number")
     path = storage.abs_path(up["path"])
     have = path.stat().st_size if path.exists() else 0
     if offset != have:
@@ -120,7 +126,7 @@ async def finish(request: Request, user: dict):
     with db.tx() as c:
         db.update(c, "uploads", up["id"], {"done": True, "received": received})
         if is_clip:
-            order = db.conn().execute("SELECT COUNT(*) FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)).fetchone()[0]
+            order = c.execute("SELECT COUNT(*) FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)).fetchone()[0]
             service.add_asset(c, p["id"], "clip", up["path"], label=up["filename"], meta={"order": order})
             job = service.start_pipeline(c, p, merge=True) if data.get("start") else None
         else:
@@ -154,6 +160,9 @@ async def adopt_raw(request: Request, user: dict):
     if db.conn().execute("SELECT COUNT(*) FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)).fetchone()[0]:
         return ok({"adopted": False})
     src = storage.abs_path(raw["path"])
+    src_size = src.stat().st_size if src.exists() else 0
+    from .. import saas
+    saas.check_storage(db.conn(), p["workspace_id"], src_size)
     name = "clip01_" + src.name
     rel = str(storage.project_dir(p["workspace_id"], p["id"]) / "raw" / name)
     dst = storage.ensure_parent(rel)

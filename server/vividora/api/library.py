@@ -128,12 +128,14 @@ async def list_items(request: Request, user: dict):
         args.append(ch)
     tag = request.query_params.get("tag")
     if tag:
-        q += " AND (',' || tags || ',') LIKE ?"
-        args.append(f"%,{tag},%")
+        q += " AND (',' || tags || ',') LIKE ? ESCAPE '\\'"
+        safe_tag = tag.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        args.append(f"%,{safe_tag},%")
     text = request.query_params.get("q")
     if text:
-        q += " AND (name LIKE ? OR tags LIKE ?)"
-        args += [f"%{text}%", f"%{text}%"]
+        q += " AND (name LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')"
+        safe_text = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        args += [f"%{safe_text}%", f"%{safe_text}%"]
     rows = db.rows(db.conn().execute(q + " ORDER BY created_at DESC LIMIT 1500", args))
     return ok([_view(r) for r in rows])
 
