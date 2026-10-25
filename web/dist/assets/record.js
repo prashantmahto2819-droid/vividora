@@ -63,6 +63,7 @@ export function mount(root, ctx) {
         <div class="tp-text" id="tp-text"></div><i class="tp-resize" id="tp-resize"></i>
       </div>
       <div class="rec-meter"><i id="rec-level"></i></div>
+      <div class="rec-quiet" id="rec-quiet" hidden></div>
       <div class="rec-hud"><span id="rec-time">0:00</span><span id="rec-q" class="small"></span><span id="rec-local" class="small" title="recording इसी phone/PC में भी save होती रहती है"></span></div>
       <div class="rec-recover" id="rec-recover" hidden></div>
       <div class="rec-count" id="rec-count" hidden>3</div>
@@ -130,7 +131,23 @@ async function start() {
   if (caps) $("#s-caps", R.root).textContent = `यह camera दे सकता है: ${caps.width?.max || "?"}×${caps.height?.max || "?"} तक, ${caps.frameRate?.max || "?"} fps तक${caps.facingMode ? " · " + caps.facingMode.join("/") : ""}`;
   // level meter
   try { const ac = new (window.AudioContext || window.webkitAudioContext)(); const src = ac.createMediaStreamSource(R.stream); const an = ac.createAnalyser(); an.fftSize = 512; src.connect(an); const buf = new Uint8Array(an.frequencyBinCount);
-    const tick = () => { if (!R) return; an.getByteTimeDomainData(buf); let s = 0; for (const x of buf) s += (x - 128) ** 2; const lvl = Math.min(1, Math.sqrt(s / buf.length) / 40); $("#rec-level", R.root).style.width = (lvl * 100) + "%"; R.raf = requestAnimationFrame(tick); }; tick(); R.ac = ac; } catch {}
+    // The meter also watches for a take that is being recorded far too quietly: a far mic at
+    // this level lands ~20 dB under the music, and no amount of editing afterwards brings the
+    // voice back cleanly — so it is said here, while it can still be fixed.
+    let peak = 0, since = performance.now(), agcTried = false;
+    const quiet = $("#rec-quiet", R.root);
+    const tick = () => { if (!R) return; an.getByteTimeDomainData(buf); let s = 0; for (const x of buf) s += (x - 128) ** 2; const lvl = Math.min(1, Math.sqrt(s / buf.length) / 40); $("#rec-level", R.root).style.width = (lvl * 100) + "%";
+      peak = Math.max(peak, lvl);
+      const now = performance.now();
+      if (now - since > 4000) {
+        if (peak > 0.02 && peak < 0.14) {  // something is being said, but far too softly
+          if (!agcTried) { agcTried = true; R.stream?.getAudioTracks()[0]?.applyConstraints({ autoGainControl: true }).catch(() => {}); }
+          quiet.hidden = false;
+          quiet.textContent = "🔇 आवाज़ बहुत धीमी आ रही है — mic पास लाएँ, या नीचे settings में सही mic चुनें। ऐसे record करने पर music के नीचे आवाज़ दब जाती है।";
+        } else if (peak >= 0.14) quiet.hidden = true;
+        peak = 0; since = now;
+      }
+      R.raf = requestAnimationFrame(tick); }; tick(); R.ac = ac; } catch {}
   await listDevices();
 }
 function stop() { if (R?.stream) { R.stream.getTracks().forEach((t) => t.stop()); R.stream = null; } if (R?.ac) { R.ac.close().catch(() => {}); R.ac = null; } }

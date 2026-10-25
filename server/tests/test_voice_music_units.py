@@ -14,7 +14,7 @@ os.environ["VIVIDORA_TTS"] = "fake"
 TMP = Path(tempfile.mkdtemp(prefix="vm_units_"))
 os.environ["TTS_LINE_CACHE"] = str(TMP / "cache")
 
-from vividora.engine import dub, musictag, refanalyze, tts  # noqa: E402
+from vividora.engine import dub, musictag, refanalyze, render, tts  # noqa: E402
 
 
 def test_text_helpers():
@@ -123,12 +123,27 @@ def test_refanalyze():
     print("PASS refanalyze", m["cuts"], m["avg_shot"], g["grade_preset"], g["music_mood"])
 
 
+def test_voice_level():
+    """A take recorded far too quietly must be lifted to a normal speaking level BEFORE the
+    music and SFX join it — otherwise the final loudnorm raises the music over a buried voice."""
+    g = render.voice_level_db
+    assert g({"analysis": {"audio": {"speech_db": -30.0, "snr_db": 25}}}, {}) == 14.0   # quiet take → lifted
+    assert g({"analysis": {"audio": {"speech_db": -16.0, "snr_db": 30}}}, {}) == 0.0    # already normal → untouched
+    assert g({"analysis": {"audio": {"speech_db": -8.0, "snr_db": 30}}}, {}) == -6.0    # too hot → trimmed, clamped
+    assert g({"analysis": {"audio": {"speech_db": -50.0, "snr_db": 8}}}, {}) == 10.0    # noisy room → small lift only
+    assert g({"analysis": {"audio": {"speech_db": -45.0, "snr_db": 14}}}, {}) == 16.0
+    assert g({}, {}) == 0.0 and g({"analysis": {"audio": {}}}, {}) == 0.0               # not measured → untouched
+    assert g({"analysis": {"audio": {"speech_db": -30.0, "snr_db": 25}}}, {"speech_target": -20}) == 10.0
+    print("PASS voice_level")
+
+
 if __name__ == "__main__":
     try:
         test_text_helpers()
         test_line_cache_and_track()
         test_musictag()
         test_refanalyze()
+        test_voice_level()
         print("OK")
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

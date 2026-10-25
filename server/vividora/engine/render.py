@@ -259,6 +259,27 @@ def _fx_clips(e: dict, w: int, h: int, fps: float, dur: float, cur: str, chains:
     return cur
 
 
+def voice_level_db(meta: dict, a_cfg: dict) -> float:
+    """How much to lift (or trim) the recorded voice BEFORE music and SFX join it.
+
+    Music and SFX volumes in the editor (music 0.12, sfx 0.7 …) are fractions of a
+    normally-spoken voice. A far mic or a phone held at arm's length records 15-20 dB
+    below that, and nothing downstream fixes it: the final loudnorm lifts the whole
+    mix, so the music and the bell come up loud and the voice stays buried. So the
+    voice is brought to a known speaking level first, from what analyze.py measured
+    (speech_db = the 90th-percentile RMS of the take). The lift is capped by the
+    take's SNR, because boosting a noisy room any further only boosts the room.
+    """
+    a = ((meta or {}).get("analysis") or {}).get("audio") or {}
+    sp = a.get("speech_db")
+    if not isinstance(sp, (int, float)) or sp <= -70 or sp >= 0:
+        return 0.0
+    gain = float(a_cfg.get("speech_target", -16)) - float(sp)
+    snr = float(a.get("snr_db") or 40)
+    cap = 24.0 if snr >= 18 else 16.0 if snr >= 12 else 10.0
+    return round(max(-6.0, min(cap, gain)), 2)
+
+
 def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript: dict | None,
            preset: dict, style: dict | None, out_dir: Path, name: str, hook: dict | None = None,
            focus_x: float = 0.5, focus_y: float = 0.5, burn_captions: bool | None = None,
@@ -678,6 +699,10 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             if vchain:
                 chains.append(f"[voice]{vchain}[voicefx]")
                 cur_a = "[voicefx]"
+            lift = voice_level_db(meta, a_cfg)
+            if abs(lift) >= 0.5:
+                chains.append(f"{cur_a}volume={lift:.2f}dB[vlvl]")
+                cur_a = "[vlvl]"
         elif seg_audio_label:
             chains.append(f"{seg_audio_label}anullsink")  # the cut original is not heard
         if dub_path:
