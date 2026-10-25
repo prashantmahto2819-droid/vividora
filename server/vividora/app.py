@@ -163,6 +163,8 @@ def create_app() -> Starlette:
     api_routes += ytshorts_api.routes  # YouTube → Shorts/Reels converter
     from .api import scriptgen_api
     api_routes += scriptgen_api.routes  # AI Script Generator
+    from .api import dashboard_api
+    api_routes += dashboard_api.routes  # Creator performance dashboard
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))

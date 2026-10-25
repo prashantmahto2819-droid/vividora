@@ -68,6 +68,32 @@ def fb_stats(video_id: str, page_token: str) -> dict:
             "published": r.get("created_time")}
 
 
+def tt_stats(video_ids: list[str], token: str) -> dict[str, dict]:
+    """Fetch TikTok video stats via /v2/video/query/ (needs video.list scope)."""
+    out: dict[str, dict] = {}
+    if not video_ids or not token:
+        return out
+    for i in range(0, len(video_ids), 20):
+        batch = video_ids[i:i + 20]
+        try:
+            data = request("POST", "https://open.tiktokapis.com/v2/video/query/",
+                           params={"fields": "id,title,view_count,like_count,comment_count,share_count,create_time"},
+                           data={"filters": {"video_ids": batch}},
+                           headers={"Authorization": f"Bearer {token}",
+                                    "Content-Type": "application/json; charset=UTF-8"})
+            for v in (data.get("data") or {}).get("videos") or []:
+                out[v["id"]] = {
+                    "views": int(v.get("view_count") or 0),
+                    "likes": int(v.get("like_count") or 0),
+                    "comments": int(v.get("comment_count") or 0),
+                    "shares": int(v.get("share_count") or 0),
+                    "published": datetime.fromtimestamp(v["create_time"], tz=timezone.utc).isoformat() if v.get("create_time") else None,
+                }
+        except PublishError:
+            pass  # best-effort — TikTok may not return stats for all videos
+    return out
+
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 

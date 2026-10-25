@@ -372,7 +372,11 @@ a.stat:hover { border-color: #46546A; } .stat b { font-size: 1.55rem; font-varia
 .jobs li:last-child { border-bottom: 0; } .jobs a { text-decoration: none; display: flex; flex-direction: column; min-width: 0; } .jobs a b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .9rem; }
 .jobs a span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .plat { display: inline-block; font-size: .68rem; font-weight: 700; padding: .05rem .45rem; border-radius: 5px; background: var(--panel-3); }
-.plat.youtube { background: #FF3B30; color: #fff; } .plat.instagram { background: linear-gradient(45deg, #F58529, #DD2A7B, #8134AF); color: #fff; } .plat.facebook { background: #1877F2; color: #fff; }
+.plat.youtube { background: #FF3B30; color: #fff; } .plat.instagram { background: linear-gradient(45deg, #F58529, #DD2A7B, #8134AF); color: #fff; } .plat.facebook { background: #1877F2; color: #fff; } .plat.tiktok { background: #010101; color: #FE2C55; }
+.dash-bars { display: flex; align-items: flex-end; gap: 4px; height: 100px; padding: .5rem 0; }
+.dash-bar { display: flex; flex-direction: column; align-items: center; flex: 1; gap: 2px; height: 100%; }
+.dash-bar-fill { width: 100%; min-width: 14px; max-width: 36px; background: var(--amber); border-radius: 4px 4px 0 0; transition: height .3s; }
+.dash-bar .small { font-size: .6rem; }
 .tip { background: var(--amber-soft); border-radius: 10px; padding: .7rem .8rem; }
 .qtile { display: flex; align-items: center; gap: .5rem; padding: .6rem; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); text-decoration: none; font-size: .85rem; } .qtile i { font-style: normal; } .qtile:hover { border-color: var(--amber); }
 .hcust { margin-top: .8rem; }

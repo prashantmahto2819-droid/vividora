@@ -132,6 +132,7 @@ async function load() {
   if (r.kind === "compress") { const [c, src] = await Promise.all([api("GET", "/compress").catch(() => ({ jobs: [], presets: {} })), api("GET", "/compress/sources").catch(() => [])]); S.comp = c; S.compSrc = src; }
   if (r.kind === "yt-shorts") { S.ytShorts = await api("GET", "/yt-shorts").catch(() => ({ jobs: [] })); }
   if (r.kind === "analytics") S.analytics = await api("GET", `/analytics?channel=${S.channel}`).catch(() => ({ videos: [], learn: {} }));
+  if (r.kind === "dashboard") S.dash = await api("GET", `/dashboard?channel=${S.channel}`).catch(() => ({ projects: {}, publishes: {}, renders: {}, storage: {}, recent: [], weekly: [], templates: [] }));
   if (r.kind === "copilot") { const [h, a] = await Promise.all([api("GET", `/copilot/hooks?channel=${S.channel}`).catch(() => []), api("GET", `/copilot/audit?channel=${S.channel}`).catch(() => null)]); S.copilotHooks = h; S.copilotAudit = a; }
   if (r.kind === "settings") { S.conns = await api("GET", "/connections").catch(() => ({ connections: [], setup: {} })); S.brand = await api("GET", `/brand?channel=${S.channel}`).catch(() => ({})); S.lib = await api("GET", "/library").catch(() => []); const sc = S.channel ? await api("GET", `/schedule?channel=${S.channel}`).catch(() => null) : null; if (!sc || sc.channel_id !== S.sched?.channel_id) S.schedEdit = null; S.sched = sc; S.notify = await api("GET", "/notify").catch(() => null); }
   const ids = new Set(S.projects.map((p) => p.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
@@ -152,7 +153,7 @@ function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SE
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
   ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["yt-shorts", "#/yt-shorts", "film", "YT → Shorts", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1]]],
-  ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["copilot", "#/copilot", "pulse", "Copilot"], ["publish", "#/publish", "send", "Publish"]]],
+  ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["dashboard", "#/dashboard", "grid", "Dashboard"], ["copilot", "#/copilot", "pulse", "Copilot"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
 function navActive(id) {
@@ -240,12 +241,12 @@ function render() {
     return;
   }
   app.dataset.mode = "shell"; ED.unmount();
-  const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, copilot: copilotView, library: libraryView,
+  const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, dashboard: dashboardView, copilot: copilotView, library: libraryView,
                   thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView, "yt-shorts": ytShortsView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
-  const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, copilot: bindCopilot, library: bindLibrary, home: bindHome,
+  const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, dashboard: bindDashboard, copilot: bindCopilot, library: bindLibrary, home: bindHome,
                   publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
@@ -1253,6 +1254,33 @@ function bindCopilot() {
       $$(".cp-copy").forEach((b) => (b.onclick = () => { const ta = $(`.cp-reply[data-cid="${b.dataset.cid}"]`); if (ta) { navigator.clipboard.writeText(ta.value).then(() => toast("Reply copy हो गया")).catch(() => toast("Copy नहीं हुआ")); } }));
     } catch (e) { toast(e.message); } db2.disabled = false; db2.textContent = "AI Reply Drafts बनाएँ";
   };
+}
+
+function dashboardView() {
+  const d = S.dash || {}; const p = d.projects || {}; const pub = d.publishes || {}; const ren = d.renders || {}; const st = d.storage || {};
+  const n = (x) => (x || 0).toLocaleString("en-IN");
+  const gb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(1) + " GB" : b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : b >= 1024 ? (b / 1024).toFixed(0) + " KB" : (b || 0) + " B";
+  const statusCards = Object.entries(p.by_status || {}).map(([s, c]) => `<span class="pill">${esc(s)} <b>${c}</b></span>`).join(" ");
+  const platCards = Object.entries(pub.by_platform || {}).map(([pl, c]) => `<span class="pill">${esc(pl)} <b>${c}</b></span>`).join(" ");
+  // weekly publish trend — inline SVG bar chart
+  const wk = d.weekly || []; const wMax = Math.max(1, ...wk.map((w) => w.count));
+  const weekChart = wk.length > 1 ? `<div class="section"><h2>Weekly Publish Trend</h2><div class="dash-bars">${wk.map((w) => `<div class="dash-bar" title="${esc(w.week)}: ${w.count}"><div class="dash-bar-fill" style="height:${Math.max(4, w.count / wMax * 100).toFixed(0)}%"></div><span class="small muted">${esc((w.week || "").replace(/^\d{4}-W/, "W"))}</span></div>`).join("")}</div></div>` : "";
+  // top templates
+  const tpls = d.templates || [];
+  const tplSec = tpls.length ? `<div class="section"><h2>Top Templates</h2><div class="tablewrap"><table><tr><th>Template</th><th>Uses</th></tr>${tpls.map((t) => `<tr><td>${esc(t.template_id)}</td><td><b>${t.count}</b></td></tr>`).join("")}</table></div></div>` : "";
+  // recent activity
+  const recent = d.recent || [];
+  const recentSec = recent.length ? `<div class="section"><h2>Recent Activity</h2><div class="tablewrap"><table><tr><th>Project</th><th>Kind</th><th>Status</th><th>Finished</th></tr>${recent.map((r) => `<tr><td>${esc(r.title)}</td><td>${esc(r.kind)}</td><td><span class="pill ${r.status === "done" ? "" : "err"}">${esc(r.status)}</span></td><td class="small muted">${r.finished_at ? relTime(r.finished_at) : ""}</td></tr>`).join("")}</table></div></div>` : "";
+  return `<div class="pghead"><div><h1>Dashboard</h1><p class="muted">Workspace performance at a glance — projects, publishes, renders, storage।</p></div><button class="btn small" id="dash-refresh">Refresh</button></div>
+    <div class="stats2"><div class="stat"><b>${n(p.total)}</b><span>Projects</span></div><div class="stat"><b>${n(pub.total)}</b><span>Published</span></div><div class="stat"><b>${n(ren.done)}</b><span>Renders Done</span></div><div class="stat"><b style="color:#ef4444">${n(ren.failed)}</b><span>Failed</span></div><div class="stat"><b>${gb(st.total_bytes)}</b><span>Storage</span></div></div>
+    ${statusCards ? `<div class="section"><h2>Projects by Status</h2><div style="display:flex;flex-wrap:wrap;gap:.4rem">${statusCards}</div></div>` : ""}
+    ${platCards ? `<div class="section"><h2>Publishes by Platform</h2><div style="display:flex;flex-wrap:wrap;gap:.4rem">${platCards}</div></div>` : ""}
+    ${weekChart}${tplSec}
+    <div class="section"><h2>Storage Breakdown</h2><div class="stats2"><div class="stat"><b>${gb(st.assets_bytes)}</b><span>Assets</span></div><div class="stat"><b>${gb(st.library_bytes)}</b><span>Library</span></div></div></div>
+    ${recentSec}`;
+}
+function bindDashboard() {
+  const r = $("#dash-refresh"); if (r) r.onclick = async () => { r.disabled = true; r.textContent = "ला रहे हैं…"; try { S.dash = await api("GET", `/dashboard?channel=${S.channel}`); } catch (e) { toast(e.message); } render(); };
 }
 
 function analyticsView() {

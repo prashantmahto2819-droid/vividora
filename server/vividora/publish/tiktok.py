@@ -24,7 +24,7 @@ from .http import PublishError, request
 API = "https://open.tiktokapis.com/v2"
 AUTH = "https://www.tiktok.com/v2/auth/authorize/"
 
-SCOPES = "user.info.basic,video.publish,video.upload"
+SCOPES = "user.info.basic,video.publish,video.upload,video.list"
 
 
 def configured() -> bool:
