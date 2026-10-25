@@ -1307,7 +1307,13 @@ function analyticsView() {
   // date range
   const dates = filtered.filter((v) => v.published_at).map((v) => v.published_at).sort();
   const dateRange = dates.length >= 2 ? `<span class="small muted" style="margin-left:.5rem">${new Date(dates[0]).toLocaleDateString("hi-IN")} — ${new Date(dates[dates.length - 1]).toLocaleDateString("hi-IN")}</span>` : "";
+  // summary stats
+  const tv = filtered.reduce((s, v) => s + (v.views || 0), 0); const tl = filtered.reduce((s, v) => s + (v.likes || 0), 0);
+  const tc = filtered.reduce((s, v) => s + (v.comments || 0), 0); const ts = filtered.reduce((s, v) => s + (v.shares || 0), 0);
+  const eng = tv > 0 ? ((tl + tc + ts) / tv * 100).toFixed(1) : "0.0";
+  const sumCards = filtered.length ? `<div class="stats2"><div class="stat"><b>${n(filtered.length)}</b><span>Videos</span></div><div class="stat"><b>${n(tv)}</b><span>Views</span></div><div class="stat"><b>${n(tl)}</b><span>Likes</span></div><div class="stat"><b>${n(tc)}</b><span>Comments</span></div><div class="stat"><b>${n(ts)}</b><span>Shares</span></div><div class="stat"><b>${eng}%</b><span>Engagement</span></div></div>` : "";
   return `<div class="pghead"><div><h1>Analytics</h1><p class="muted">Published videos का हाल और उनसे सीख: कौन-सा style, hook और लंबाई ज़्यादा चलती है (index 1.0 = औसत)।</p></div><div style="display:flex;gap:.5rem">${canEdit ? `<button class="btn small" id="an-refresh">Stats ताज़ा करें</button>` : ""}<button class="btn small" id="an-csv" title="CSV Export">⬇ CSV</button></div></div>
+    ${sumCards}
     ${Object.keys(rec).length ? `<div class="note"><b>सीख:</b> ${Object.entries(rec).map(([k, v]) => `${recLabels[k] || k} → <b>${esc(v)}</b>`).join(" · ")}
       ${S.user.role === "admin" ? `<br><button class="btn small primary" id="an-apply" style="margin-top:.5rem">नए projects के लिए यही default बनाएँ</button>` : ""}
       ${a.defaults && Object.keys(a.defaults).length ? `<span class="small muted" style="margin-left:.5rem">अभी default: ${esc(JSON.stringify(a.defaults))}</span>` : ""}</div>` : `<p class="small muted">${L.note || "अभी सीखने के लिए data कम है।"}</p>`}
@@ -1504,7 +1510,7 @@ function helpView() {
     ["music", "Montage", "#/new?type=montage", "बिना आवाज़ वाले clips और music से beat पर कटा reel।"], ["image", "Thumbnails", "#/thumbs", "Best frame, cutout, बड़ा हिंदी text, 13 layouts और A/B variants।"],
     ["film", "Editor", "#/projects", "कट, captions, text, B-roll, music, effects और Shorts — एक जगह।"], ["bulb", "Plan", "#/plan", "Trends से ideas, ideas से script, फिर record।"],
     ["trend", "Trends", "#/trends", "Google Trends, YouTube Top और आपके पसंदीदा channels।"], ["send", "Publish", "#/publish", "YouTube, Instagram, Facebook और TikTok पर — मंज़ूरी के बाद, तय समय पर।"],
-    ["chart", "Analytics", "#/analytics", "क्या चल रहा है — style, hook और लंबाई से सीख।"], ["lib", "Library", "#/library", "Music, SFX, stickers, frames और LUTs — सब licence-safe।"],
+    ["chart", "Analytics", "#/analytics", "क्या चल रहा है — style, hook और लंबाई से सीख।"], ["grid", "Dashboard", "#/dashboard", "Projects, publishes, renders, storage — सब stats एक नज़र में।"], ["lib", "Library", "#/library", "Music, SFX, stickers, frames और LUTs — सब licence-safe।"],
     ["tv", "Channels & Brand", "#/settings", "कई channels, brand kit और connections।"], ["gear", "Settings", "#/account", "Password, users और storage की सफ़ाई।"]];
   return `<div class="pghead"><div><h1>Help</h1><p class="muted small">Vividora के सारे modules — एक नज़र में।</p></div></div>
     <div class="helpgrid">${mods.map(([i, t, h, d]) => `<a class="hcard" href="${h}">${ic(i)}<b>${t}</b><span class="small muted">${d}</span></a>`).join("")}</div>
