@@ -24,9 +24,17 @@ def ok(data: Any = None, status: int = 200) -> JSONResponse:
     return JSONResponse(data if data is not None else {"ok": True}, status_code=status)
 
 
+_MAX_BODY = 2 * 1024 * 1024  # 2 MB — generous for any JSON API payload
+
+
 async def body(request: Request) -> dict:
+    cl = int(request.headers.get("content-length", "0"))
+    if cl > _MAX_BODY:
+        raise ApiError(413, f"request body बहुत बड़ा है (max {_MAX_BODY // (1024 * 1024)} MB)")
     try:
         raw = await request.body()
+        if len(raw) > _MAX_BODY:
+            raise ApiError(413, f"request body बहुत बड़ा है (max {_MAX_BODY // (1024 * 1024)} MB)")
         data = json.loads(raw or b"{}")
     except json.JSONDecodeError:
         raise ApiError(400, "invalid JSON")

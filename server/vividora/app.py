@@ -171,29 +171,53 @@ def create_app() -> Starlette:
                 routes.append(Route(f"/{extra}", (lambda p: (lambda r: FileResponse(p)))(settings.web_dist / extra)))
     routes.append(Route("/{path:path}", spa))
 
-    class _Revalidate:
-        """Cache policy:
-        /assets/*  → immutable, 1 year (filenames contain content hashes from the build)
-        everything else (index.html, manifest, sw.js) → no-cache (304 when unchanged)
-        /api/ and /pub/ → untouched (backend sets its own headers)
+    class _SecurityHeaders:
+        """Production security headers + cache policy.
+
+        Security (every response):
+          X-Content-Type-Options: nosniff          — prevent MIME-sniffing attacks
+          X-Frame-Options: DENY                    — block clickjacking
+          Referrer-Policy: strict-origin-when-cross-origin  — limit Referer leakage
+          Permissions-Policy: camera=(), microphone=(), geolocation=()  — disable unused browser APIs
+
+        Cache (non-API only):
+          /assets/*  → immutable, 1 year (filenames contain content hashes from the build)
+          everything else (index.html, manifest, sw.js) → no-cache (304 when unchanged)
+          /api/ and /pub/ → untouched (backend sets its own headers)
         """
+        _SEC_HEADERS = [
+            (b"x-content-type-options", b"nosniff"),
+            (b"x-frame-options", b"DENY"),
+            (b"referrer-policy", b"strict-origin-when-cross-origin"),
+            (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+        ]
+
         def __init__(self, app):
             self.app = app
 
         async def __call__(self, scope, receive, send):
-            path = scope.get("path", "") if scope["type"] == "http" else ""
-            if not path or path.startswith("/api/") or path.startswith("/pub/"):
+            if scope["type"] != "http":
                 return await self.app(scope, receive, send)
 
+            path = scope.get("path", "")
+            is_api = path.startswith("/api/") or path.startswith("/pub/")
             is_hashed = path.startswith("/assets/")
 
             async def send2(msg):
                 if msg["type"] == "http.response.start":
-                    hs = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
-                    if is_hashed:
-                        hs.append((b"cache-control", b"public, max-age=31536000, immutable"))
-                    else:
-                        hs.append((b"cache-control", b"no-cache"))
+                    hs = list(msg.get("headers", []))
+                    # security headers on every response
+                    present = {k.lower() for k, _ in hs}
+                    for k, v in self._SEC_HEADERS:
+                        if k not in present:
+                            hs.append((k, v))
+                    # cache policy on non-API routes
+                    if not is_api:
+                        hs = [(k, v) for k, v in hs if k.lower() != b"cache-control"]
+                        if is_hashed:
+                            hs.append((b"cache-control", b"public, max-age=31536000, immutable"))
+                        else:
+                            hs.append((b"cache-control", b"no-cache"))
                     msg = {**msg, "headers": hs}
                 await send(msg)
             return await self.app(scope, receive, send2)
@@ -220,7 +244,7 @@ def create_app() -> Starlette:
                         break
             return await self.app(scope, receive, send)
 
-    middleware = [Middleware(_Revalidate), Middleware(_RateLimit)]
+    middleware = [Middleware(_SecurityHeaders), Middleware(_RateLimit)]
     if settings.cors_origins:
         middleware.append(Middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                                      allow_methods=["*"], allow_headers=["*"], allow_credentials=True))
@@ -235,8 +259,14 @@ def create_app() -> Starlette:
         task.cancel()
         wd.cancel()
 
+    async def server_error(request: Request, exc: Exception) -> JSONResponse:
+        """Catch-all: unhandled exceptions → clean JSON 500, no stack trace leak in production."""
+        log.exception("unhandled error: %s %s", request.method, request.url.path)
+        detail = str(exc) if settings.debug else "internal server error"
+        return JSONResponse({"error": detail}, status_code=500)
+
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan,
-                    exception_handlers={HTTPException: error_handler})
+                    exception_handlers={HTTPException: error_handler, Exception: server_error})
     log.info("Vividora %s · media=%s · db=%s", __version__, settings.media_root, settings.database_path)
     return app
 

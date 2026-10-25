@@ -20,7 +20,9 @@ def _session(user: dict):
     tok = access_token(user["id"], user.get("token_version") or 0)
     resp = ok({"token": tok, "user": public_user(user), "workspace": {"id": ws["id"], "name": ws["name"]},
                "saas": saas.enabled()})
-    resp.set_cookie("vividora_token", tok, httponly=True, samesite="lax", max_age=72 * 3600, path="/")
+    # Secure=True when PUBLIC_URL is https (production behind Cloudflare); False for local dev (http)
+    secure = settings.public_url.startswith("https")
+    resp.set_cookie("vividora_token", tok, httponly=True, samesite="lax", max_age=72 * 3600, path="/", secure=secure)
     return resp
 
 
