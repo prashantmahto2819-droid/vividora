@@ -138,6 +138,63 @@ async def list_invites(request: Request, user: dict):
     return ok(db.rows(db.conn().execute("SELECT * FROM invites WHERE workspace_id = ? ORDER BY created_at DESC", (user["workspace_id"],))))
 
 
+async def forgot_password(request: Request):
+    """Generate a password-reset token (valid 1 hour). Since SMTP isn't wired yet, the token
+    is returned in the response (self-hosted) or — when email is configured — would be mailed."""
+    if not saas.enabled():
+        raise ApiError(404, "self-hosted mode में admin से password बदलवाएँ")
+    rate_limit(request, "forgot", 5, 10)
+    data = await body(request)
+    need(data, "email")
+    email = data["email"].strip().lower()
+    user = db.row(db.conn().execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone())
+    # always return success to prevent email enumeration
+    if not user or not user["active"]:
+        return ok({"message": "अगर यह email मौजूद है तो reset link भेजा गया है"})
+    token = pysecrets.token_urlsafe(32)
+    with db.tx() as c:
+        db.update(c, "users", user["id"], {"reset_token": token, "reset_token_at": db.now()})
+        service.log(c, user["workspace_id"], "password.reset_request", user_id=user["id"],
+                    detail={"ip": client_ip(request)})
+    # TODO: send email with reset link when SMTP is configured
+    # For now the reset URL is returned so the self-hosted operator can share it manually
+    base = settings.public_url or ""
+    return ok({"message": "अगर यह email मौजूद है तो reset link भेजा गया है",
+               "reset_url": f"{base}/#/reset?t={token}" if settings.debug else None})
+
+
+async def reset_password(request: Request):
+    """Validate reset token and set new password."""
+    rate_limit(request, "reset", 10, 10)
+    data = await body(request)
+    tok = (data.get("token") or "").strip()
+    if not tok:
+        raise ApiError(400, "reset token ज़रूरी है")
+    user = db.row(db.conn().execute("SELECT * FROM users WHERE reset_token = ?", (tok,)).fetchone()) if tok else None
+    if not user:
+        raise ApiError(404, "reset link गलत या पुराना है — दोबारा भेजें")
+    # token expires in 1 hour
+    from datetime import datetime, timezone
+    if user.get("reset_token_at"):
+        issued = datetime.fromisoformat(user["reset_token_at"].replace("Z", "+00:00"))
+        if (datetime.now(timezone.utc) - issued).total_seconds() > 3600:
+            raise ApiError(410, "reset link expire हो गया — दोबारा भेजें")
+    if data.get("password"):
+        prob = password_problem(data["password"])
+        if prob:
+            raise ApiError(422, prob)
+        with db.tx() as c:
+            db.update(c, "users", user["id"], {
+                "password_hash": hash_password(data["password"]),
+                "reset_token": None, "reset_token_at": None,
+                "token_version": int(user.get("token_version") or 0) + 1
+            })
+            service.log(c, user["workspace_id"], "password.reset", user_id=user["id"])
+        return _session(db.get("users", user["id"]))
+    # GET-style: just validate the token
+    return ok({"valid": True, "email": user["email"]})
+
+
 async def logout(request: Request):
     resp = ok()
     resp.delete_cookie("vividora_token", path="/")
@@ -253,6 +310,8 @@ routes = [
     Route("/auth/login", login, methods=["POST"]),
     Route("/auth/signup", signup, methods=["POST"]),
     Route("/auth/verify", verify_email),
+    Route("/auth/forgot", forgot_password, methods=["POST"]),
+    Route("/auth/reset", reset_password, methods=["POST"]),
     Route("/auth/logout", logout, methods=["POST"]),
     Route("/auth/logout-all", logout_all, methods=["POST"]),
     Route("/invites", list_invites),

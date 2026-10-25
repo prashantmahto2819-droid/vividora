@@ -206,6 +206,8 @@ MIGRATIONS = [
     ("users", "verified", "INTEGER NOT NULL DEFAULT 1"),
     ("users", "verify_token", "TEXT"),
     ("workspaces", "owner_id", "TEXT"),
+    ("users", "reset_token", "TEXT"),
+    ("users", "reset_token_at", "TEXT"),
 ]
 
 

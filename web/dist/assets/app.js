@@ -92,7 +92,7 @@ function toast(msg, ms = 2600) {
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|characters|scenes|characters3d|scenes3d|copilot|yt-shorts)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|forgot|reset|characters|scenes|characters3d|scenes3d|copilot|yt-shorts)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -194,7 +194,7 @@ function render() {
   const app = $("#app");
   closeMenu();
   if (!S.token) { ED.unmount(); TH.unmount(); VO.unmount(); app.dataset.mode = ""; app.innerHTML = loginView(); bindLogin(); return; }
-  if (S.route.kind === "signup") { go("/"); return; }
+  if (S.route.kind === "signup" || S.route.kind === "forgot" || S.route.kind === "reset") { go("/"); return; }
   const r = S.route;
   if (S.user?.role !== "viewer") VO.mount({ api, toast, reload: () => { $("#app").dataset.mode = ""; load().then(render); } });
   document.body.classList.toggle("ed-mode", r.kind === "projects" && !!r.id);
@@ -464,24 +464,57 @@ function loginView() {
     <div class="field"><label>आपका नाम</label><input name="name" required maxlength="80" autocomplete="name"></div>
     ${invite ? "" : `<div class="field"><label>Studio / channel का नाम</label><input name="workspace" maxlength="80" placeholder="जैसे: Prashant Motivation"></div>`}
     <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
-    <div class="field"><label>Password (8+ अक्षर, अक्षर और अंक दोनों)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div>
+    <div class="field"><label>Password (8+ अक्षर, अक्षर और अंक दोनों)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required><div id="pw-meter" class="small" style="margin-top:.25rem"></div></div>
     <input type="hidden" name="invite" value="${esc(invite)}">
     <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Account बनाएँ</button>
     <p class="small muted" style="margin-top:.8rem;text-align:center">पहले से account है? <a href="#/" id="to-login">Login करें</a></p></form></div>`;
+  const reset = /^#\/reset/.test(location.hash);
+  if (reset) { const rt = new URLSearchParams((location.hash.split("?")[1] || "")).get("t") || "";
+    return `<div class="login"><form id="reset-pw"><div class="brand"><i></i>Vividora</div><p class="muted">नया password सेट करें।</p>
+    <div class="field"><label>नया password (8+ अक्षर, अक्षर और अंक दोनों)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div>
+    <div class="field"><label>फिर से लिखें</label><input name="confirm" type="password" autocomplete="new-password" minlength="8" required></div>
+    <input type="hidden" name="token" value="${esc(rt)}">
+    <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Password बदलें</button>
+    <p class="small muted" style="margin-top:.8rem;text-align:center"><a href="#/">← Login पर जाएँ</a></p></form></div>`; }
+  const forgot = /^#\/forgot/.test(location.hash);
+  if (forgot) return `<div class="login"><form id="forgot-pw"><div class="brand"><i></i>Vividora</div><p class="muted">अपना email लिखें — reset link भेजेंगे।</p>
+    <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
+    <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Reset link भेजें</button>
+    <p class="small muted" style="margin-top:.8rem;text-align:center"><a href="#/">← Login पर जाएँ</a></p></form></div>`;
   return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका video studio — आगे बढ़ने के लिए login करें।</p>
     <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
     <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
     <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Login करें</button>
-    <p class="small muted" id="signup-link" style="margin-top:.8rem;text-align:center" hidden>नया हैं? <a href="#/signup">Free trial शुरू करें</a></p></form></div>`;
+    <p class="small muted" style="margin-top:.6rem;text-align:center"><a href="#/forgot">Password भूल गए?</a></p>
+    <p class="small muted" id="signup-link" style="margin-top:.4rem;text-align:center" hidden>नया हैं? <a href="#/signup">Free trial शुरू करें</a></p></form></div>`;
 }
 function bindLogin() {
-  const finish = async (r) => { S.token = r.token; S.user = r.user; S.ws = r.workspace; S.saas = !!r.saas; localStorage.setItem("vividora_token", r.token); location.hash = "#/"; await load(); render(); };
+  const finish = async (r, isNewSignup) => { S.token = r.token; S.user = r.user; S.ws = r.workspace; S.saas = !!r.saas; localStorage.setItem("vividora_token", r.token); location.hash = "#/"; await load(); render();
+    if (isNewSignup) { try { localStorage.setItem("vividora_onboarded", "0"); } catch {} showOnboarding(); }
+    else { try { if (!localStorage.getItem("vividora_onboarded") && (S.projects || []).length === 0) showOnboarding(); } catch {} } };
   const sf = $("#signup");
-  if (sf) { sf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true;
+  if (sf) { const pwm = sf.querySelector("#pw-meter"); const pwi = sf.querySelector("[name=password]");
+    if (pwm && pwi) pwi.addEventListener("input", () => { const v = pwi.value; const has8 = v.length >= 8; const hasLetter = /[a-zA-Z]/.test(v); const hasDigit = /\d/.test(v); const hasSpecial = /[^a-zA-Z0-9]/.test(v); const score = (has8 ? 1 : 0) + (hasLetter ? 1 : 0) + (hasDigit ? 1 : 0) + (hasSpecial ? 1 : 0);
+      const msgs = []; if (!has8) msgs.push("8+ अक्षर"); if (!hasLetter) msgs.push("letter"); if (!hasDigit) msgs.push("अंक");
+      const colors = ["#e5484d", "#e5484d", "#f2b33d", "#46a758", "#46a758"]; const labels = ["", "कमज़ोर", "ठीक", "अच्छा", "बहुत अच्छा"];
+      pwm.innerHTML = v ? `<span style="color:${colors[score]}">${labels[score]}</span>${msgs.length ? ` · <span class="muted">चाहिए: ${msgs.join(", ")}</span>` : ""}` : ""; });
+    sf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true;
       try { const r = await api("POST", "/auth/signup", { name: f.name.value, workspace: f.workspace?.value || "", email: f.email.value, password: f.password.value, invite: f.invite.value });
-        if (r.verify_needed) { $("#login-err").innerHTML = `<div class="note">${esc(r.message)}</div>`; b.disabled = false; return; } await finish(r); }
+        if (r.verify_needed) { $("#login-err").innerHTML = `<div class="note">${esc(r.message)}</div>`; b.disabled = false; return; } await finish(r, true); }
       catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; b.disabled = false; } };
     return; }
+  // reset password form
+  const rpf = $("#reset-pw");
+  if (rpf) { rpf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true;
+    if (f.password.value !== f.confirm.value) { $("#login-err").innerHTML = `<div class="note err">दोनों password एक जैसे नहीं हैं</div>`; b.disabled = false; return; }
+    try { const r = await api("POST", "/auth/reset", { token: f.token.value, password: f.password.value }); await finish(r); toast("Password बदल गया — आप login हो गए!"); }
+    catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; b.disabled = false; } }; return; }
+  // forgot password form
+  const fpf = $("#forgot-pw");
+  if (fpf) { fpf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true;
+    try { const r = await api("POST", "/auth/forgot", { email: f.email.value });
+      $("#login-err").innerHTML = `<div class="note">${esc(r.message)}${r.reset_url ? `<br><a href="${esc(r.reset_url)}" class="small">Reset link (debug mode)</a>` : ""}</div>`; }
+    catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; b.disabled = false; } }; return; }
   // the verify link from the email lands here: #/?verify=<token>
   const vt = new URLSearchParams((location.hash.split("?")[1] || "")).get("verify");
   if (vt) api("GET", `/auth/verify?t=${encodeURIComponent(vt)}`).then(finish).catch((err) => { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; });
@@ -1500,6 +1533,34 @@ function bindAdmin() {
   $("#bk-now").onclick = async (e) => { e.target.disabled = true; try { const r = await api("POST", "/admin/backups"); toast(`backup बना: ${r.file}`); await load(); render(); } catch (err) { toast(err.message); e.target.disabled = false; } };
   const q = $("#audit-q"); if (q) q.oninput = () => { const v = q.value.trim().toLowerCase(); $$("#audit-t tr").forEach((tr) => (tr.hidden = v && !(tr.dataset.a || "").toLowerCase().includes(v))); };
   $$("[data-setplan]").forEach((s) => (s.onchange = async () => { if (!s.value) return; try { await api("POST", `/admin/workspaces/${s.dataset.setplan}/plan`, { plan: s.value, days: 30 }); toast("plan दे दिया"); await load(); render(); } catch (e) { toast(e.message); } }));
+}
+
+// ---------- onboarding ----------
+function showOnboarding() {
+  const overlay = document.createElement("div");
+  overlay.id = "onboard-overlay";
+  overlay.innerHTML = `<div class="onboard-card">
+    <h2>🎬 स्वागत है, ${esc(S.user.name.split(" ")[0])}!</h2>
+    <p>Vividora आपका AI video studio है — record करें, AI editing करवाएँ, और YouTube / Instagram पर publish करें।</p>
+    <div class="onboard-steps">
+      <a href="#/record" class="onboard-step" data-close><span class="onboard-icon">🎙</span><b>Record / Upload</b><span class="small muted">पहला वीडियो बनाना शुरू करें</span></a>
+      <a href="#/templates" class="onboard-step" data-close><span class="onboard-icon">📋</span><b>Templates देखें</b><span class="small muted">${(S.templates || []).length || 80}+ industry templates</span></a>
+      <a href="#/characters" class="onboard-step" data-close><span class="onboard-icon">👤</span><b>2D Characters</b><span class="small muted">200 animated characters</span></a>
+      <a href="#/settings" class="onboard-step" data-close><span class="onboard-icon">🎨</span><b>Brand Kit सेट करें</b><span class="small muted">logo, रंग, font, watermark</span></a>
+    </div>
+    <button class="btn small quiet" id="onboard-close">बाद में देखूँगा</button>
+    ${S.saas ? `<p class="small muted" style="margin-top:.5rem">14 दिन का free trial चालू है — कोई card नहीं लगा।</p>` : ""}
+  </div>`;
+  overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;animation:fadeIn .3s";
+  const card = overlay.querySelector(".onboard-card");
+  card.style.cssText = "background:var(--bg2,#fff);border-radius:12px;padding:2rem;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2);animation:slideUp .3s";
+  overlay.querySelectorAll(".onboard-steps a").forEach(a => { a.style.cssText = "display:flex;align-items:center;gap:.75rem;padding:.75rem;border-radius:8px;text-decoration:none;color:inherit;border:1px solid var(--border,#e5e5e5);margin:.5rem 0;transition:background .15s"; a.onmouseenter = () => a.style.background = "var(--bg3,#f5f5f5)"; a.onmouseleave = () => a.style.background = ""; });
+  overlay.querySelectorAll(".onboard-icon").forEach(i => { i.style.cssText = "font-size:1.5rem;width:2.5rem;text-align:center;flex-shrink:0"; });
+  const close = () => { try { localStorage.setItem("vividora_onboarded", "1"); } catch {} overlay.remove(); };
+  overlay.querySelector("#onboard-close").onclick = close;
+  overlay.querySelectorAll("[data-close]").forEach(a => a.addEventListener("click", close));
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  document.body.appendChild(overlay);
 }
 
 // ---------- boot ----------
