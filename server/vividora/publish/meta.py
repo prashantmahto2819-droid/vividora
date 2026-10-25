@@ -105,7 +105,8 @@ def fb_publish_reel(page_id: str, page_token: str, video_url: str, description: 
     req = urllib.request.Request(f"https://rupload.facebook.com/video-upload/v21.0/{vid}", method="POST",
                                  headers={"Authorization": f"OAuth {page_token}", "file_url": video_url})
     try:
-        urllib.request.urlopen(req, timeout=120).read()
+        with urllib.request.urlopen(req, timeout=120) as r:
+            r.read()
     except urllib.error.HTTPError as e:
         raise PublishError(f"Facebook upload {e.code}: {e.read().decode(errors='replace')[:300]}") from None
     if on_progress:

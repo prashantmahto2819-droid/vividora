@@ -172,7 +172,8 @@ def set_thumbnail(token: str, video_id: str, image: Path) -> None:
                                  headers={"Authorization": f"Bearer {token}", "Content-Type": "image/jpeg",
                                           "Content-Length": str(len(data))})
     try:
-        urllib.request.urlopen(req, timeout=120).read()
+        with urllib.request.urlopen(req, timeout=120) as r:
+            r.read()
     except urllib.error.HTTPError as e:
         raise PublishError(f"thumbnail {e.code}: {e.read().decode(errors='replace')[:300]}") from None
 
