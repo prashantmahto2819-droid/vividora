@@ -27,7 +27,11 @@ VARIANT_ACCENTS = ["#FFD400", "#FF3B30", "#00E5FF", "#00E676", "#FF6A00", "#E040
 INDUSTRIES = {"healthcare": "Clinic / Hospital", "grocery": "Grocery / Kirana", "electronics": "Electronics / FMCG",
               "automobile": "Automobile", "clothing": "Clothing / Fashion", "fitness": "Gym / Spa / Salon",
               "education": "Coaching / Education", "realestate": "Real estate / Construction", "local": "Local service",
-              "corporate": "Corporate / Professional", "creator": "YouTube / Social"}
+              "corporate": "Corporate / Professional", "creator": "YouTube / Social",
+              "restaurant": "Restaurant / Café / Dhaba", "wedding": "Wedding / Event",
+              "astrology": "Astrology / Pandit", "travel": "Travel / Tourism",
+              "tech": "Tech / Startup", "podcast": "Podcast / Show",
+              "festival": "Festival / Occasion", "jewellery": "Jewellery / Gold"}
 
 
 def _load_builtin() -> list[dict]:

@@ -1,0 +1,75 @@
+{
+ "id": "creator_collab",
+ "name": "Creator — Collaboration",
+ "industry": "creator",
+ "format": "yt",
+ "tags": [
+  "creator",
+  "collab",
+  "youtube",
+  "yt"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "@YourChannel",
+  "offer": "Collab with *@GuestCreator*",
+  "tagline": "Coming This Friday · 8 PM"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "yt",
+  "no_person": false,
+  "accent": "#FF0000",
+  "font": "Oswald",
+  "text": "{{offer}}",
+  "style": "shadow",
+  "hl": "#FF0000",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0D0D0D",
+   "color2": "#1A1A1A",
+   "angle": 110
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.1,
+    "size": 0.05,
+    "color": "#FF5252",
+    "font": "Oswald"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.82,
+    "size": 0.035,
+    "color": "#BDBDBD",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": true,
+  "layout": {
+   "yt": {
+    "text": {
+     "x": 0.5,
+     "y": 0.45,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

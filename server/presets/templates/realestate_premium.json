@@ -1,0 +1,125 @@
+{
+ "id": "realestate_premium",
+ "name": "Real Estate — Premium Property",
+ "industry": "realestate",
+ "format": "yt",
+ "tags": [
+  "realestate",
+  "premium",
+  "luxury",
+  "yt"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "cta",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "Prime Properties",
+  "offer": "*Luxury Villa* — Golf Course Road",
+  "price": "₹ 2.5 Cr onwards",
+  "phone": "98765 43210",
+  "cta": "Site Visit Book करें",
+  "tagline": "3/4 BHK · Swimming Pool · Club House"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "yt",
+  "no_person": true,
+  "accent": "#B8860B",
+  "font": "PlayfairDisplay",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#B8860B",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0D0D0D",
+   "color2": "#2D2D2D",
+   "angle": 90
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.1,
+    "size": 0.05,
+    "color": "#B8860B",
+    "font": "PlayfairDisplay"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.62,
+    "size": 0.032,
+    "color": "#D4AF37",
+    "font": "Poppins"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "rect",
+    "x": 0.5,
+    "y": 0.72,
+    "w": 0.35,
+    "h": 0.12,
+    "fill": 1,
+    "color": "#B8860B",
+    "shadow": 1
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.72,
+    "size": 0.042,
+    "color": "#FFFFFF",
+    "font": "PlayfairDisplay",
+    "stroke_w": 0
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.85,
+    "size": 0.035,
+    "color": "#111",
+    "font": "Poppins",
+    "bg": "#D4AF37"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.028,
+    "color": "#B8860B",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "yt": {
+    "text": {
+     "x": 0.5,
+     "y": 0.38,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:pricebox",
+     "s:price",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

@@ -802,7 +802,11 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
     new_settings = {**project.get("settings", {}), "render": opts}
     db.update(c, "projects", pid, {"settings": new_settings, "updated_at": db.now()})
     body = (opts.get("effects") or {}).get("body") or {}
-    if body.get("enabled") and not asset_of(pid, "alpha"):
+    # Smart Layout: behind-mode B-roll also needs the main video's person matte
+    from .engine import layout as smart_layout
+    _needs_alpha = body.get("enabled") or any(
+        smart_layout.needs_main_alpha(it) for it in ((opts.get("effects") or {}).get("broll") or []) if isinstance(it, dict))
+    if _needs_alpha and not asset_of(pid, "alpha"):
         running = c.execute("SELECT COUNT(*) FROM jobs WHERE project_id = ? AND kind = 'matte' AND status IN ('queued','running')", (pid,)).fetchone()[0]
         if not running:
             queue.enqueue(c, pid, "matte", {})
@@ -821,8 +825,19 @@ def request_render(c, project: dict, settings_in: dict) -> list[dict]:
     fonts = [r[0] for r in c.execute("SELECT id FROM library WHERE workspace_id = ? AND kind = 'font'", (project["workspace_id"],))]
     sigs = render_sigs(db.get("projects", pid) or project)
     sig = edit_sig({**project, "settings": new_settings})
+    # Smart reframing: when focus_x is "auto" (or missing), use per-preset face-aware focus;
+    # otherwise honour the user's manual choice (0.25 / 0.5 / 0.75)
+    raw_fx = opts.get("focus_x", 0.5)
+    use_smart = raw_fx == "auto" or raw_fx == "smart"
+    if use_smart:
+        from .engine import multiformat
+        smart_focus = multiformat.batch_focus(project.get("meta") or {}, opts["presets"])
+    else:
+        smart_focus = {}
+    base_fx = 0.5 if use_smart else float(raw_fx)
     return [queue.enqueue(c, pid, "render", {"preset": p, "fonts": fonts, "signature": sigs.get(p), "edit_sig": sig,
-                                             **{k: v for k, v in opts.items() if k != 'presets'}})
+                                             **{k: v for k, v in opts.items() if k not in ('presets', 'focus_x')},
+                                             "focus_x": smart_focus.get(p, base_fx)})
             for p in opts["presets"]]
 
 
@@ -1050,6 +1065,12 @@ def resolve_effects_local(project: dict, effects: dict, *, audio: bool = False) 
                     p = lib_path(body[key]); body[key + "_path"] = str(p) if p else None
         else:
             body["enabled"] = False
+    # Smart Layout: B-roll items with layout="behind" need the main video's person matte
+    from .engine import layout as smart_layout
+    if any(smart_layout.needs_main_alpha(it) for it in (e.get("broll") or []) if isinstance(it, dict)):
+        alpha = alpha if (body and body.get("alpha_path")) else asset_of(project["id"], "alpha")
+        if alpha and storage.abs_path(alpha["path"]).exists():
+            e["_main_alpha_path"] = str(storage.abs_path(alpha["path"]))
     if not audio:
         e["music"] = {}  # no audio in a frame preview
         e["sfx"] = []

@@ -345,6 +345,103 @@ def _freesound_download(sound_id: int, dst: Path) -> Path:
     return out
 
 
+# ---- Tenor GIF/Sticker search ----
+
+_TENOR_CACHE: dict = {"ts": 0, "key": "", "trending": []}
+
+
+def _tenor_search(q: str, kind: str = "sticker") -> list[dict]:
+    """Search Tenor for GIFs/stickers. Uses Google's free Tenor API v2."""
+    from .config import settings as cfg
+    key = cfg.tenor_api_key or os.getenv("TENOR_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+    if not key:
+        raise ApiError(400, ".env में TENOR_API_KEY डालें (tenor.com/developer — free)")
+    content_filter = "medium"  # off, low, medium, high
+    media_filter = "tinygif,gif,webp_transparent"
+    # sticker search gets transparent PNGs/WEBPs; gif search gets animated GIFs
+    search_type = "stickers" if kind == "sticker" else ""
+    url = (
+        f"https://tenor.googleapis.com/v2/search"
+        f"?q={urllib.parse.quote(q)}"
+        f"&key={key}"
+        f"&client_key=vividora"
+        f"&limit=40"
+        f"&contentfilter={content_filter}"
+        f"&media_filter={media_filter}"
+    )
+    if search_type:
+        url += f"&searchfilter={search_type}"
+    data = _http_json(url)
+    out: list[dict] = []
+    for r in data.get("results", []):
+        media = r.get("media_formats") or {}
+        # prefer transparent webp for stickers, gif for animations
+        best = media.get("webp_transparent") or media.get("gif") or media.get("tinygif") or {}
+        preview = (media.get("tinygif") or media.get("gif") or best).get("url", "")
+        full_url = best.get("url", "")
+        if not full_url:
+            continue
+        dims = best.get("dims") or [0, 0]
+        out.append({
+            "title": (r.get("content_description") or q)[:100],
+            "url": full_url,
+            "preview": preview or full_url,
+            "kind": "sticker",
+            "source": "tenor",
+            "license": "Tenor (free for content creation)",
+            "creator": "",
+            "page": r.get("itemurl") or r.get("url") or "",
+            "tenor_id": r.get("id"),
+            "width": dims[0] if len(dims) > 0 else 0,
+            "height": dims[1] if len(dims) > 1 else 0,
+            "tags": ",".join((r.get("tags") or [])[:8]),
+        })
+    return out
+
+
+def _tenor_trending() -> list[dict]:
+    """Trending stickers from Tenor (cached 2h)."""
+    from .config import settings as cfg
+    now = time.time()
+    key = cfg.tenor_api_key or os.getenv("TENOR_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+    if not key:
+        return []
+    if _TENOR_CACHE["trending"] and now - _TENOR_CACHE["ts"] < 7200 and _TENOR_CACHE["key"] == key:
+        return _TENOR_CACHE["trending"]
+    try:
+        url = (
+            f"https://tenor.googleapis.com/v2/featured"
+            f"?key={key}"
+            f"&client_key=vividora"
+            f"&limit=30"
+            f"&contentfilter=medium"
+            f"&media_filter=tinygif,gif,webp_transparent"
+            f"&searchfilter=stickers"
+        )
+        data = _http_json(url)
+        out = []
+        for r in data.get("results", []):
+            media = r.get("media_formats") or {}
+            best = media.get("webp_transparent") or media.get("gif") or media.get("tinygif") or {}
+            preview = (media.get("tinygif") or best).get("url", "")
+            full_url = best.get("url", "")
+            if not full_url:
+                continue
+            out.append({
+                "title": (r.get("content_description") or "")[:100],
+                "url": full_url,
+                "preview": preview or full_url,
+                "kind": "sticker",
+                "source": "tenor",
+                "tenor_id": r.get("id"),
+            })
+        if out:
+            _TENOR_CACHE.update(ts=now, key=key, trending=out)
+        return out or _TENOR_CACHE["trending"]
+    except Exception:  # noqa: BLE001
+        return _TENOR_CACHE["trending"]
+
+
 # ---- Trending Audio Discovery ----
 _trending_cache: dict = {"ts": 0, "data": []}
 _TRENDING_TTL = 6 * 3600  # 6 hours
@@ -396,7 +493,7 @@ def _fetch_trending() -> list[dict]:
 
 @require("viewer")
 async def search_free(request: Request, user: dict):
-    """Search free libraries. source: openverse-audio | openverse-image | pixabay-video | pixabay-image | jamendo | youtube-audio | freesound"""
+    """Search free libraries. source: openverse-audio | openverse-image | pixabay-video | pixabay-image | jamendo | youtube-audio | freesound | tenor | tenor-gif | tenor-trending"""
     src = request.query_params.get("source", "openverse-audio")
     q = (request.query_params.get("q") or "").strip()[:100]
     if not q:
@@ -450,6 +547,12 @@ async def search_free(request: Request, user: dict):
             out.extend(_yt_search(q))
         elif src == "freesound":
             out.extend(_freesound_search(q))
+        elif src == "tenor" or src == "tenor-sticker":
+            out.extend(_tenor_search(q, kind="sticker"))
+        elif src == "tenor-gif":
+            out.extend(_tenor_search(q, kind="gif"))
+        elif src == "tenor-trending":
+            out.extend(_tenor_trending())
         return [o for o in out if o.get("url")]
 
     try:

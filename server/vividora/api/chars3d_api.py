@@ -31,7 +31,9 @@ def _page_url() -> str:
 @require("viewer")
 async def catalogue(request: Request, user: dict):
     cat = c3.catalogue()
-    cat["voices"] = [{"id": v["id"], "label": v["label"], "lang": v["lang"], "gender": v["gender"]} for v in __import__("vividora.engine.tts", fromlist=["x"]).VOICE_PRESETS]
+    _tts = __import__("vividora.engine.tts", fromlist=["x"])
+    cat["voices"] = [{"id": v["id"], "label": v["label"], "lang": v["lang"], "gender": v["gender"],
+                       **({"engine": v["engine"], "cloud": True} if v.get("cloud") else {})} for v in _tts.available_voices()]
     return ok(cat)
 
 

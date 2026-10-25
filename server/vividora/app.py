@@ -156,6 +156,8 @@ def create_app() -> Starlette:
     api_routes += copilot_api.routes  # Channel Copilot: hook scores, weekly audit, comment drafts
     from .api import ytshorts_api
     api_routes += ytshorts_api.routes  # YouTube → Shorts/Reels converter
+    from .api import scriptgen_api
+    api_routes += scriptgen_api.routes  # AI Script Generator
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))

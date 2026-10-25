@@ -1,0 +1,85 @@
+{
+ "id": "restaurant_review",
+ "name": "Restaurant — Review",
+ "industry": "restaurant",
+ "format": "square",
+ "tags": [
+  "restaurant",
+  "review",
+  "testimonial",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "phone"
+ ],
+ "defaults": {
+  "business": "Spice Garden",
+  "offer": "\"Best biryani in town!\" ⭐⭐⭐⭐⭐",
+  "tagline": "— Happy Customer",
+  "phone": "98765 43210"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#FFD700",
+  "font": "Lora",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#FFD700",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "solid",
+   "color": "#1C1C1C"
+  },
+  "vignette": 0.15,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.05,
+    "color": "#FFD700",
+    "font": "Lora"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.7,
+    "size": 0.035,
+    "color": "#AAAAAA",
+    "font": "Lora"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.032,
+    "color": "#888888",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.4,
+     "s": 0.85
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

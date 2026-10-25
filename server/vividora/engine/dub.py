@@ -22,14 +22,14 @@ import re
 from . import llm
 from .autocut import keep_segments, norm
 from .render import out_timeline
-from .tts import LANGS, VOICE_PRESETS, speakers_in, voice_preset
+from .tts import LANGS, VOICE_PRESETS, available_voices, speakers_in, voice_preset
 
 MODES = {"revoice": "आवाज़ बदलें / साफ़ AI आवाज़", "dub": "Dub (दूसरी भाषा)", "script": "Script से voice-over"}
 _DEVA = re.compile(r"[ऀ-ॿ]")
 
 
 def presets_json() -> dict:
-    return {"voices": VOICE_PRESETS, "langs": LANGS, "modes": MODES}
+    return {"voices": available_voices(), "langs": LANGS, "modes": MODES}
 
 
 def detect_lang(text: str, hint: str | None = None) -> str:
@@ -61,9 +61,11 @@ def resolve_voice(voice_id: str | None, description: str | None, lang: str) -> d
         raise ValueError("Kokoro आवाज़ सिर्फ़ English के लिए है — हिन्दी के लिए रोहित/दिव्या/अमन/रानी चुनें")
     if v is None:
         v = next(x for x in VOICE_PRESETS if x["lang"] == lang)
-    out = {k: v.get(k) for k in ("id", "label", "engine", "gender", "description", "kokoro_voice", "kokoro_lang") if v.get(k)}
-    if desc:
-        # a custom description always goes to Parler (Kokoro has fixed voices)
+    _VOICE_KEYS = ("id", "label", "engine", "gender", "description", "kokoro_voice", "kokoro_lang",
+                    "elevenlabs_voice_id", "elevenlabs_settings", "google_voice_name", "google_language_code")
+    out = {k: v.get(k) for k in _VOICE_KEYS if v.get(k)}
+    if desc and v.get("engine") not in ("elevenlabs", "google_cloud"):
+        # a custom description always goes to Parler (Kokoro/cloud have fixed voices)
         out.update(engine="parler", description=desc, id="custom", label="अपनी आवाज़ (description)")
         out.pop("kokoro_voice", None)
         out.pop("kokoro_lang", None)

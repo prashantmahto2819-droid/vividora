@@ -108,10 +108,22 @@ def probe(path: str | Path) -> dict:
 
 
 def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressFn | None = None,
-        label: str = "ffmpeg") -> None:
-    """Run ffmpeg, reporting progress (0..1) from its -progress output."""
+        label: str = "ffmpeg", is_heavy: bool = False) -> None:
+    """Run ffmpeg, reporting progress (0..1) from its -progress output.
+
+    is_heavy: when True, injects thread/buffer limits from hwaccel so heavy
+    renders don't consume all cores and RAM on low-end PCs.
+    """
     check_cancel()
-    full = ["ffmpeg", "-hide_banner", "-y", "-nostats", "-progress", "pipe:1", *cmd]
+    # Inject resource limits for heavy jobs (render, montage, matte)
+    resource_args: list[str] = []
+    if is_heavy:
+        try:
+            from . import hwaccel
+            resource_args = hwaccel.ffmpeg_resource_args(is_heavy=True)
+        except Exception:  # noqa: BLE001
+            pass
+    full = ["ffmpeg", "-hide_banner", "-y", "-nostats", *resource_args, "-progress", "pipe:1", *cmd]
     proc = subprocess.Popen(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     track(proc)
     last = -1.0

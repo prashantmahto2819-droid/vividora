@@ -414,6 +414,9 @@ body.dragging, body.dragging * { user-select: none !important; }
 .hrot::after { content: ""; position: absolute; left: 50%; top: 14px; height: 14px; border-left: 1.5px solid var(--amber); }
 @media (pointer: coarse) { .hh { width: 22px; height: 22px; margin: -11px 0 0 -11px; } .hrot { width: 24px; height: 24px; margin-left: -12px; top: -38px; } }
 .guide { position: absolute; pointer-events: none; background: #ff3ea5; } .guide.gv { left: 50%; top: 0; bottom: 0; width: 1px; } .guide.gh { top: 50%; left: 0; right: 0; height: 1px; }
+.guide.gv3l { left: 33.333%; top: 0; bottom: 0; width: 1px; background: rgba(255,62,165,.5); } .guide.gv3r { left: 66.667%; top: 0; bottom: 0; width: 1px; background: rgba(255,62,165,.5); }
+.guide.gh3t { top: 33.333%; left: 0; right: 0; height: 1px; background: rgba(255,62,165,.5); } .guide.gh3b { top: 66.667%; left: 0; right: 0; height: 1px; background: rgba(255,62,165,.5); }
+.ov-wm { pointer-events: auto; cursor: move; } .ov-wm.sel { outline: 2px solid var(--amber); outline-offset: 2px; }
 .apchips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .3rem 0 .5rem; }
 .apchip { display: inline-flex; align-items: center; gap: .2rem; font-size: .72rem; background: rgba(242,179,61,.1); border: 1px solid rgba(242,179,61,.35); border-radius: 999px; padding: 0 0 0 .5rem; }
 .apchip .ibtn { width: 22px; height: 22px; font-size: .7rem; }

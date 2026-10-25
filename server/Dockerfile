@@ -10,6 +10,10 @@ RUN curl -fsSL -o /usr/local/bin/deep-filter \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# yt-dlp: YouTube → Shorts/Reels converter needs it to download source videos
+RUN pip install --no-cache-dir yt-dlp
+# ElevenLabs + Google Cloud TTS SDKs for cloud voice generation
+RUN pip install --no-cache-dir elevenlabs google-cloud-texttospeech
 # 3D Studio renders three.js scenes in headless Chromium (software GL) — playwright brings the browser + its libs
 RUN pip install --no-cache-dir playwright==1.56.0 && playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/*
 ENV CHARS3D_PAGE_URL=http://api:8000/assets/3d.html

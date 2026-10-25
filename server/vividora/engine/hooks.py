@@ -114,29 +114,65 @@ def options(project: dict, n: int = 3, ai: bool = True) -> list[dict]:
         if hs:
             return hs
     if ai and llm.available() and sents and not pack and not aipack.failed(project):
-        body = " ".join(s["text"] for s in sents[:40])[:3500]
+        # Send the FULL transcript (up to 6000 chars) so AI understands the whole video topic
+        body = " ".join(s["text"] for s in sents)[:6000]
         res = llm.ask_json(
             f"Video transcript ({'Hindi' if lang != 'en' else 'English'}):\n{body}\n\n"
-            "Write 3 different scroll-stopping hooks for the first 2 seconds of this video, in the same language "
-            "(Hindi in Devanagari, Hinglish words allowed). Each: `heading` = on-screen text, max 6 words; "
-            "`say` = an opening line the creator can say/re-record, max 14 words; `type` = question | shock | promise | story. "
-            "No clickbait lies — only what the video delivers. Return JSON {\"hooks\": [{\"heading\",\"say\",\"type\"}]}",
+            "Read the FULL transcript above. Understand the core topic/message of this video.\n"
+            "Write 3 different scroll-stopping hook headings for the first 2 seconds.\n"
+            "The heading must capture the VIDEO's MAIN TOPIC — NOT just copy the first line.\n"
+            "Examples of good headings: 'ये गलती मत करना', '3 दिन में फ़र्क़ दिखेगा', 'Nobody told you this'\n"
+            "Each: `heading` = punchy on-screen text summarizing the video, max 6 words; "
+            "`say` = an opening line the creator can say/re-record, max 14 words; "
+            "`type` = question | shock | promise | story. "
+            "IMPORTANT: heading should be a catchy title about the video's TOPIC, not the first sentence.\n"
+            "No clickbait lies — only what the video delivers. Same language as transcript.\n"
+            "Return JSON {\"hooks\": [{\"heading\",\"say\",\"type\"}]}",
             max_tokens=800)
         hooks = (res or {}).get("hooks") if isinstance(res, dict) else None
         if isinstance(hooks, list) and hooks:
             return [{"heading": str(h.get("heading", ""))[:60], "say": str(h.get("say", ""))[:140], "type": h.get("type", ""), "source": "ai"}
                     for h in hooks[:n] if h.get("heading")]
+    # Improved heuristic fallback: extract topic keywords instead of just taking first words
     out = []
     ranked = sorted(sents[:30], key=shorts._score, reverse=True)
+    # Collect the most impactful/topic words across top sentences
+    all_topic_words = []
+    for s in ranked[:10]:
+        for w in s["words"]:
+            clean = w["w"].strip(" ,।.!?॥\"'")
+            if clean and len(clean) > 2 and clean.lower() not in ("the", "and", "but", "for", "are", "was", "has", "its",
+                "है", "हैं", "को", "से", "में", "की", "का", "के", "यह", "वो", "तो", "ने", "पर", "जो", "ये", "एक", "अपने"):
+                all_topic_words.append(clean)
+    # Deduplicate keeping order
+    seen = set()
+    topic_words = []
+    for tw in all_topic_words:
+        low = tw.lower()
+        if low not in seen:
+            seen.add(low)
+            topic_words.append(tw)
     for s in ranked:
         words = [w["w"].strip(" ,।.!") for w in s["words"]]
-        head = " ".join(words[:6])
+        is_q = "?" in s["text"] or any(k in s["text"] for k in QUESTION[:7])
+        is_p = any(k in s["text"].lower() for k in PROMISE)
+        has_num = bool(NUM.search(s["text"]))
+        # Build a heading from the sentence's key words (not just first 6)
+        key_words = [w for w in words if len(w.strip()) > 2][:6]
+        head = " ".join(key_words) if key_words else " ".join(words[:6])
         if len(head) < 6 or any(o["heading"] == head for o in out):
             continue
-        kind = "question" if "?" in s["text"] or any(k in s["text"] for k in QUESTION[:7]) else "story"
+        kind = "question" if is_q else ("promise" if is_p or has_num else "story")
         out.append({"heading": head, "say": " ".join(words[:14]), "type": kind, "source": "transcript"})
         if len(out) >= n:
             break
+    # If not enough, generate topic-based headings from collected keywords
+    if len(out) < n and topic_words:
+        topic_head = " ".join(topic_words[:5])
+        if lang != "en":
+            out.append({"heading": topic_head, "say": f"{topic_head} — यह वीडियो देखिए", "type": "story", "source": "topic"})
+        else:
+            out.append({"heading": topic_head, "say": f"Let me tell you about {topic_head}", "type": "story", "source": "topic"})
     if lang != "en" and len(out) < n and sents:
         topic = " ".join(w["w"] for w in sents[0]["words"][:4])
         out.append({"heading": "क्या आप ये जानते हैं?", "say": f"क्या आप जानते हैं — {topic}…", "type": "question", "source": "template"})

@@ -1,0 +1,73 @@
+{
+ "id": "wedding_photo",
+ "name": "Wedding — Photo Frame",
+ "industry": "wedding",
+ "format": "square",
+ "tags": [
+  "wedding",
+  "photo",
+  "frame",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "राम ❤ सीता",
+  "tagline": "25.12.2025"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": false,
+  "accent": "#C9A96E",
+  "font": "PlayfairDisplay",
+  "text": "{{business}}",
+  "style": "neon",
+  "hl": "#C9A96E",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "solid",
+   "color": "#0D0D0D"
+  },
+  "vignette": 0.4,
+  "stickers": [
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.92,
+    "size": 0.04,
+    "color": "#C9A96E",
+    "font": "Poppins"
+   },
+   {
+    "uid": "frame",
+    "shape": "rect",
+    "x": 0.5,
+    "y": 0.5,
+    "w": 0.85,
+    "h": 0.85,
+    "fill": 0,
+    "stroke": "#C9A96E",
+    "stroke_w": 0.015
+   }
+  ],
+  "cutout": true,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.12,
+     "s": 0.8
+    },
+    "_order": [
+     "s:frame",
+     "text",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

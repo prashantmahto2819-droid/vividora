@@ -1,0 +1,100 @@
+{
+ "id": "tech_hiring",
+ "name": "Tech — We're Hiring",
+ "industry": "tech",
+ "format": "square",
+ "tags": [
+  "tech",
+  "hiring",
+  "jobs",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "website",
+  "cta"
+ ],
+ "defaults": {
+  "business": "StartupXYZ",
+  "offer": "We're *Hiring!*",
+  "tagline": "React · Node · Python · DevOps",
+  "website": "careers@startup.com",
+  "cta": "Apply Now"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#00E676",
+  "font": "Montserrat",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#00E676",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0D1B2A",
+   "color2": "#1B3A4B",
+   "angle": 110
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.05,
+    "color": "#00E676",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.6,
+    "size": 0.035,
+    "color": "#81C784",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.78,
+    "size": 0.042,
+    "color": "#111",
+    "font": "Montserrat",
+    "bg": "#00E676"
+   },
+   {
+    "uid": "website",
+    "txt": "{{website}}",
+    "x": 0.5,
+    "y": 0.92,
+    "size": 0.03,
+    "color": "#B0BEC5",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.32,
+     "s": 1.1
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:cta",
+     "s:website"
+    ]
+   }
+  }
+ }
+}

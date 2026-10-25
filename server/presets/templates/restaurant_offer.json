@@ -1,0 +1,100 @@
+{
+ "id": "restaurant_offer",
+ "name": "Restaurant — Offer",
+ "industry": "restaurant",
+ "format": "story",
+ "tags": [
+  "restaurant",
+  "food",
+  "offer",
+  "story"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "Food Zone",
+  "offer": "Buy 1 Get 1 *FREE*",
+  "price": "₹ 149 onwards",
+  "phone": "98765 43210",
+  "cta": "Swipe Up to Order"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "story",
+  "no_person": true,
+  "accent": "#E53935",
+  "font": "Anton",
+  "text": "{{offer}}",
+  "style": "shadow",
+  "hl": "#FFAB00",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#2C0000",
+   "color2": "#8B0000",
+   "angle": 180
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.06,
+    "size": 0.042,
+    "color": "#FFAB00",
+    "font": "Anton"
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.6,
+    "size": 0.055,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.88,
+    "size": 0.038,
+    "color": "#111",
+    "font": "Poppins",
+    "bg": "#FFAB00"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.94,
+    "size": 0.03,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "story": {
+    "text": {
+     "x": 0.5,
+     "y": 0.35,
+     "s": 1.2
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:price",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

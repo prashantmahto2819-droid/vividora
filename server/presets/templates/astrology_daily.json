@@ -1,0 +1,86 @@
+{
+ "id": "astrology_daily",
+ "name": "Astrology — Daily Horoscope",
+ "industry": "astrology",
+ "format": "square",
+ "tags": [
+  "astrology",
+  "horoscope",
+  "rashifal",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "आज का राशिफल",
+  "offer": "मेष राशि ♈",
+  "tagline": "आज प्रेम में सफलता मिलेगी · Lucky Color: लाल"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#7B1FA2",
+  "font": "Poppins",
+  "text": "{{offer}}",
+  "style": "neon",
+  "hl": "#E040FB",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0D0033",
+   "color2": "#1A0066",
+   "angle": 225
+  },
+  "vignette": 0.35,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.05,
+    "color": "#E040FB",
+    "font": "Poppins"
+   },
+   {
+    "uid": "stars",
+    "shape": "circle",
+    "x": 0.5,
+    "y": 0.5,
+    "w": 0.6,
+    "fill": 0,
+    "stroke": "#7B1FA2",
+    "stroke_w": 0.005
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.75,
+    "size": 0.032,
+    "color": "#CE93D8",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.4,
+     "s": 1.1
+    },
+    "_order": [
+     "s:stars",
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

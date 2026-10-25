@@ -48,6 +48,11 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       HF_HUB_DISABLE_XET: "1"
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      # Cloud TTS — ElevenLabs (set ELEVENLABS_API_KEY in .env for cloud voices)
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_MODEL: ${ELEVENLABS_MODEL:-eleven_multilingual_v2}
+      # Cloud TTS — Google Cloud (set GOOGLE_APPLICATION_CREDENTIALS path in .env)
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
       # all = every job kind (one worker does everything). With the "quick" profile below this one
       # takes only the long jobs and the quick worker the short steps.
       WORKER_LANE: ${WORKER_LANE:-all}

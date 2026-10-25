@@ -60,8 +60,11 @@ def frame_pose(spec: dict, t: float, sched=None, env=None) -> dict:
     if spec.get("expr"):
         pose["expr"] = spec["expr"]
     if sched is not None:
-        v, j = lipsync.mouth_at(sched, env, t)
+        v, nxt, j, blend = lipsync.mouth_blend(sched, env, t)
         pose["viseme"], pose["mouth_open"] = v, j
+        if blend > 0.1 and nxt != "rest":
+            pose["viseme_next"] = nxt
+            pose["viseme_blend"] = round(blend, 3)
     if spec.get("flip"):
         pose["flip"] = 1
     # per-segment overrides: [{t0, t1, gesture?, expr?}]

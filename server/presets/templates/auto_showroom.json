@@ -1,0 +1,100 @@
+{
+ "id": "auto_showroom",
+ "name": "Automobile — Showroom Opening",
+ "industry": "automobile",
+ "format": "square",
+ "tags": [
+  "automobile",
+  "showroom",
+  "opening",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "address",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "Speed Motors",
+  "offer": "Grand *Opening!*",
+  "address": "MG Road, Indore",
+  "phone": "98765 43210",
+  "cta": "Visit Today"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#F44336",
+  "font": "Oswald",
+  "text": "{{offer}}",
+  "style": "block",
+  "hl": "#F44336",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0D0D0D",
+   "color2": "#1A1A1A",
+   "angle": 180
+  },
+  "vignette": 0.25,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.055,
+    "color": "#F44336",
+    "font": "Oswald"
+   },
+   {
+    "uid": "address",
+    "txt": "{{address}}",
+    "x": 0.5,
+    "y": 0.65,
+    "size": 0.035,
+    "color": "#EF9A9A",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.8,
+    "size": 0.042,
+    "color": "#FFFFFF",
+    "font": "Oswald",
+    "bg": "#F44336"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.035,
+    "color": "#BDBDBD",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.35,
+     "s": 1.2
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:address",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

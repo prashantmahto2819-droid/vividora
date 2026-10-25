@@ -140,6 +140,13 @@ def resolve_style(style: dict, overrides: dict | None) -> dict:
             pass
     if o.get("outline_color"):
         s["outline_color"] = o["outline_color"]
+    # user overrides for chunking: words per line, max lines, max chars per line
+    for key, lo, hi in (("max_words", 1, 12), ("max_lines", 1, 4), ("max_chars", 8, 60)):
+        try:
+            if o.get(key) not in (None, "", 0):
+                s[key] = max(lo, min(hi, int(o[key])))
+        except (TypeError, ValueError):
+            pass
     try:
         sc = float(o.get("size_scale", 1.0) or 1.0)
     except (TypeError, ValueError):

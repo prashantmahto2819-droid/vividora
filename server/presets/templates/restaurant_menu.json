@@ -1,0 +1,124 @@
+{
+ "id": "restaurant_menu",
+ "name": "Restaurant — Menu Highlight",
+ "industry": "restaurant",
+ "format": "square",
+ "tags": [
+  "restaurant",
+  "food",
+  "menu",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "आपका Restaurant",
+  "offer": "आज का Special",
+  "price": "₹ 199 only",
+  "phone": "98765 43210",
+  "cta": "ऑर्डर करें"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#FF6A00",
+  "font": "Montserrat",
+  "text": "{{offer}}",
+  "style": "block",
+  "hl": "#FF6A00",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A0A00",
+   "color2": "#4A1800",
+   "angle": 135
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.07,
+    "size": 0.048,
+    "color": "#FF6A00",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "rect",
+    "x": 0.5,
+    "y": 0.65,
+    "w": 0.4,
+    "h": 0.18,
+    "fill": 1,
+    "color": "accent",
+    "shadow": 1,
+    "stroke": "#FFFFFF",
+    "stroke_w": 0.008
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.65,
+    "size": 0.065,
+    "color": "#111111",
+    "font": "Montserrat",
+    "stroke_w": 0
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.82,
+    "size": 0.04,
+    "color": "#FFFFFF",
+    "font": "Montserrat",
+    "bg": "#FF6A00"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.035,
+    "color": "#FFFFFF",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "product",
+    "role": "product",
+    "x": 0.5,
+    "y": 0.42,
+    "w": 0.35,
+    "id": null
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.25,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:pricebox",
+     "s:price",
+     "s:product",
+     "s:business",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

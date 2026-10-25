@@ -529,7 +529,11 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     extras = fx.extras_filter([x for x in (e.get("extras") or []) if isinstance(x, str)])
     if extras:
         v += "," + extras
-    stack = catalog.stack_filter(e.get("stack"), w, h, fps, new_dur)
+    # separate color_pop from normal stack (it needs the alpha matte, not a simple filter chain)
+    raw_stack = e.get("stack") or []
+    has_color_pop = any(isinstance(s, dict) and s.get("id") == "color_pop" and s.get("enabled", True) for s in raw_stack)
+    normal_stack = [s for s in raw_stack if not (isinstance(s, dict) and s.get("id") == "color_pop")]
+    stack = catalog.stack_filter(normal_stack, w, h, fps, new_dur)
     if stack:
         v += "," + stack
     pro_post = protools.post_grade(e)  # sharpen (cas / unsharp)
@@ -542,8 +546,20 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         inputs += mmask[0]
         v += "," + mmask[1].replace("{IN0}", str(next_in))
         next_in += 1
-    v += "[vbase]"
-    chains.append(v)
+    # Color Pop: person in full color, background B&W — requires alpha matte
+    if has_color_pop and body:
+        v += "[cpvin]"
+        chains.append(v)
+        cp_alpha = f"[{body_alpha_in}:v]"
+        cp_chains = fx.color_pop_filter(cp_alpha, "[cpvin]", "[vbase]")
+        chains.extend(cp_chains)
+    elif has_color_pop and not body:
+        # no matte available — fall back to simple desaturate (still useful, just not person-aware)
+        v += ",eq=saturation=0.15[vbase]"
+        chains.append(v)
+    else:
+        v += "[vbase]"
+        chains.append(v)
     # morph cuts: smooth jump cuts (optical-flow frames across the cut), output timeline
     seg_bounds = [sg["out_start"] for sg in segs[1:]] if use_segments else cuts
     cur = protools.morph_graph(protools.morph_points(e, edl, keep, segs, use_segments, cuts), e, fps, new_dur,
@@ -555,6 +571,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     broll_items, tr_notes = compose.apply_transitions(e.get("broll") or [])
     for n_ in tr_notes:
         logging.getLogger("vividora.render").warning(n_)
+    from .layout import layout_filter as smart_layout_filter
     for i, item in enumerate(broll_items):
         path = item.get("path")
         if not path or float(item.get("end", 0)) <= float(item.get("start", 0)):
@@ -568,7 +585,15 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             if p_audio:
                 pro_audio.append(p_audio)
             continue
+        # Smart Layout: try pip / split / behind / overlay before falling back to fullscreen
         inputs += fx.overlay_input_args(item, Path(path))
+        smart_f = smart_layout_filter(item, next_in, w, h, cur, f"[vo{i}]", i,
+                                      main_alpha_index=body_alpha_in if body else None)
+        if smart_f is not None:
+            chains.append(smart_f)
+            cur = f"[vo{i}]"
+            next_in += 1
+            continue
         a_idx = None
         if item.get("cutout") and item.get("alpha_path") and item.get("type") != "image" and Path(item["alpha_path"]).exists():
             # "सिर्फ़ इंसान": the clip's cached person matte (engine/matting.py, job matte_lib) as its alpha
@@ -591,7 +616,10 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     if wm.get("path"):
         inputs += ["-i", str(wm["path"])]
         chains.append(fx.watermark_filter(next_in, w, h, cur, "[vwm]", float(wm.get("opacity", 0.75)),
-                                          float(wm.get("size", 0.14)), wm.get("pos", "tr")))
+                                          float(wm.get("size", 0.14)), wm.get("pos", "tr"),
+                                          x=float(wm["x"]) if wm.get("x") is not None else None,
+                                          y=float(wm["y"]) if wm.get("y") is not None else None,
+                                          rotate=float(wm.get("rotate", 0))))
         cur = "[vwm]"
         next_in += 1
 
@@ -724,7 +752,33 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     vcfg = preset.get("video", {})
     out = out_dir / f"{name}.{enc['container']}"
     gop = max(1, int(math.ceil(fps * 2)))
-    speed = ["-preset", encoder_preset or vcfg.get("preset", "medium")] if enc["preset_arg_ok"] else []
+    # ── memory-aware preset + x264/x265 thread limits ──────────────────
+    from . import hwaccel
+    _enc_preset = encoder_preset
+    if enc["preset_arg_ok"] and not _enc_preset:
+        _enc_preset = hwaccel.smart_preset(None, enc["codec"])
+    speed: list[str] = []
+    if enc["preset_arg_ok"] and _enc_preset:
+        speed = ["-preset", _enc_preset]
+    # Limit encoder-internal threads to prevent RAM spikes
+    if enc["codec"] == "h264":
+        speed += ["-x264-params", hwaccel.x264_thread_args()]
+    elif enc["codec"] == "h265":
+        # x265-params may already exist in vargs from encode.plan(); append
+        existing = ""
+        for i, a in enumerate(enc["vargs"]):
+            if a == "-x265-params" and i + 1 < len(enc["vargs"]):
+                existing = enc["vargs"][i + 1]
+                break
+        pool_args = hwaccel.x265_pool_args()
+        if existing:
+            # Replace the existing x265-params with the merged version
+            for i, a in enumerate(enc["vargs"]):
+                if a == "-x265-params" and i + 1 < len(enc["vargs"]):
+                    enc["vargs"][i + 1] = f"{existing}:{pool_args}"
+                    break
+        else:
+            speed += ["-x265-params", pool_args]
     ts_args: list[str] = []
     label = f"{preset.get('label', name)} रेंडर"
     if audio_only:
@@ -734,7 +788,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             return {"files": [], "duration": round(new_dur, 2), "warnings": [], "audio": None}
         out = out_dir / f"{name}.{'webm' if enc['export']['audio_codec'] == 'opus' else 'm4a'}"
         ffmpeg.run([*inputs, *ts_args, "-filter_complex_script", str(script), *maps, "-vn", *enc["aargs"], "-t", f"{new_dur:.3f}", str(out)],
-                   duration=new_dur, on_progress=on_progress, label=label + " (आवाज़)")
+                   duration=new_dur, on_progress=on_progress, label=label + " (आवाज़)", is_heavy=True)
         import shutil as _sh
         _sh.rmtree(work, ignore_errors=True)
         return {"files": [], "duration": round(new_dur, 2), "warnings": [], "audio": out}
@@ -743,7 +797,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         # a piece: exact frame count, keyframe first, no audio; the pieces are later joined without re-encoding
         frames = max(1, int(round(new_dur * fps)))
         ffmpeg.run([*base, "-an", "-frames:v", str(frames), "-force_key_frames", "0", *enc["extra"], str(out)],
-                   duration=new_dur, on_progress=on_progress, label=label)
+                   duration=new_dur, on_progress=on_progress, label=label, is_heavy=True)
         import shutil as _sh
         _sh.rmtree(work, ignore_errors=True)
         return {"files": [{"kind": "render", "path": out, "mime": enc["mime"], "label": preset["id"], "meta": {"frames": frames}}],
@@ -752,12 +806,12 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         # target-bitrate mode: a first pass only measures, the second one writes
         passlog = str(work / "pass")
         ffmpeg.run([*base, "-pass", "1", "-passlogfile", passlog, "-an", "-t", f"{new_dur:.3f}", "-f", "null", "/dev/null"],
-                   duration=new_dur, on_progress=(lambda f, m: on_progress(f * 0.5, m + " (pass 1)")) if on_progress else None, label=label)
+                   duration=new_dur, on_progress=(lambda f, m: on_progress(f * 0.5, m + " (pass 1)")) if on_progress else None, label=label, is_heavy=True)
         ffmpeg.run([*base, "-pass", "2", "-passlogfile", passlog, *enc["aargs"], *enc["extra"], "-t", f"{new_dur:.3f}", str(out)],
-                   duration=new_dur, on_progress=(lambda f, m: on_progress(0.5 + f * 0.5, m + " (pass 2)")) if on_progress else None, label=label)
+                   duration=new_dur, on_progress=(lambda f, m: on_progress(0.5 + f * 0.5, m + " (pass 2)")) if on_progress else None, label=label, is_heavy=True)
     else:
         ffmpeg.run([*base, *enc["aargs"], *enc["extra"], "-t", f"{new_dur:.3f}", str(out)],
-                   duration=new_dur, on_progress=on_progress, label=label)
+                   duration=new_dur, on_progress=on_progress, label=label, is_heavy=True)
 
     files = [{"kind": "render", "path": out, "mime": enc["mime"], "label": preset["id"],
               "meta": {"preset": preset["id"], "width": w, "height": h, "duration": round(new_dur, 2),

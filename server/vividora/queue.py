@@ -1,9 +1,21 @@
-"""A small, durable job queue in SQLite.
+"""A small, durable job queue in SQLite — multi-worker, priority-aware.
 
 Workers (the CPU worker in Docker, the GPU worker on Windows) claim jobs over
 HTTP, send heartbeats while working, and report a result or an error. A job
 whose worker disappears (PC asleep, crash) is handed out again after
 JOB_STALE_MINUTES, up to MAX_JOB_ATTEMPTS times.
+
+Priority tiers (highest → lowest):
+  URGENT  — re-transcribe with range: seconds of work, creator is waiting
+  FAST    — pipeline steps that should never wait behind renders
+  HEAVY   — CPU-intensive: render, montage, matte, dub, compress
+
+Concurrency limits (tuned for HP Z440 / 12 cores / 64 GB with 4 users):
+  MAX_CONCURRENT_HEAVY  — caps simultaneous heavy jobs so quick pipeline work flows
+  MAX_CONCURRENT_TOTAL  — absolute cap on all running jobs
+
+Per-user fairness: even in self-hosted mode (no SaaS), the queue round-robins
+between users so one person's batch of renders doesn't starve others.
 """
 
 from __future__ import annotations
@@ -52,24 +64,73 @@ def touch_worker(c, name: str, kinds: list[str], info: dict | None = None) -> No
                                  "last_seen_at": db.now()})
 
 
-HEAVY = ('render', 'montage', 'matte', 'dub', 'compress')
+# ── Priority tiers ──────────────────────────────────────────────────────────
 
+HEAVY = ('render', 'montage', 'matte', 'dub', 'compress')
+FAST  = ('prepare', 'autocut', 'shorts_plan', 'publish', 'thumbnail', 'beat_plan',
+         'trendtpl', 'retention')
+
+
+def _priority(kind: str, payload: dict | None = None) -> int:
+    """0 = urgent (run first), 1 = fast pipeline, 2 = heavy."""
+    # A re-transcribe with a range is seconds of work and the creator is waiting in the editor
+    if kind == 'transcribe' and payload and payload.get('range'):
+        return 0
+    if kind in HEAVY:
+        return 2
+    return 1  # everything else is fast pipeline
+
+
+# ── Concurrency helpers ─────────────────────────────────────────────────────
+
+def _running_counts(c) -> dict:
+    """Returns {'total': N, 'heavy': N, 'by_user': {user_id: N}}."""
+    rows = c.execute(
+        "SELECT j.kind, p.user_id FROM jobs j "
+        "JOIN projects p ON p.id = j.project_id "
+        "WHERE j.status = 'running'").fetchall()
+    total = len(rows)
+    heavy = sum(1 for kind, _ in rows if kind in HEAVY)
+    by_user: dict[str, int] = {}
+    for _, uid in rows:
+        by_user[uid] = by_user.get(uid, 0) + 1
+    return {"total": total, "heavy": heavy, "by_user": by_user}
+
+
+# ── Claim ───────────────────────────────────────────────────────────────────
 
 def claim(c, kinds: list[str], worker: str) -> dict | None:
     requeue_stale(c)
+
+    counts = _running_counts(c)
+
+    # Hard cap: don't overload the machine
+    if counts["total"] >= settings.max_concurrent_total:
+        return None
+
     marks = ", ".join("?" for _ in kinds)
-    # quick pipeline steps (prepare, autocut, Shorts plan, publish…) first: a new upload should not
-    # wait behind a queue of long renders before its transcript / cuts / plan are made
+    now = db.now()
+
+    # Fetch candidates ordered by priority tier, then creation time
     cands = db.rows(c.execute(
-        f"SELECT j.*, p.workspace_id AS ws FROM jobs j JOIN projects p ON p.id = j.project_id "
+        f"SELECT j.*, p.workspace_id AS ws, p.user_id AS uid FROM jobs j "
+        f"JOIN projects p ON p.id = j.project_id "
         f"WHERE j.status = 'queued' AND j.kind IN ({marks}) "
         "AND (j.run_after IS NULL OR j.run_after <= ?) "
-        # a one-line re-transcribe is seconds of work the creator waits for in the editor: first;
-        # then quick pipeline steps before long renders
-        "ORDER BY (j.kind = 'transcribe' AND json_extract(j.payload, '$.range') IS NOT NULL) DESC, "
-        "CASE WHEN j.kind IN ('render','montage','matte','dub','compress') THEN 1 ELSE 0 END, j.created_at LIMIT 200",
-        [*kinds, db.now()]))
-    job = _pick_fair(c, cands)
+        "ORDER BY "
+        # tier 0: urgent (re-transcribe with range)
+        "(j.kind = 'transcribe' AND json_extract(j.payload, '$.range') IS NOT NULL) DESC, "
+        # tier 1: fast pipeline steps before heavy
+        "CASE WHEN j.kind IN ('render','montage','matte','dub','compress') THEN 2 ELSE 1 END, "
+        "j.created_at "
+        "LIMIT 200",
+        [*kinds, now]))
+
+    # If heavy jobs are at capacity, filter them out
+    if counts["heavy"] >= settings.max_concurrent_heavy:
+        cands = [j for j in cands if j["kind"] not in HEAVY]
+
+    job = _pick_fair(c, cands, counts)
     if job is None:
         return None
     # ---- sysguard: skip heavy jobs when resources are low ----
@@ -84,57 +145,56 @@ def claim(c, kinds: list[str], worker: str) -> dict | None:
             job = quick[0]
         else:
             return None  # all candidates are heavy and resources are low
+
     n = c.execute(
         "UPDATE jobs SET status='running', worker=?, attempts=attempts+1, started_at=?, "
         "heartbeat_at=?, progress=0, message='शुरू', error=NULL WHERE id=? AND status='queued'",
-        (worker, db.now(), db.now(), job["id"])).rowcount
+        (worker, now, now, job["id"])).rowcount
     if n != 1:
         return None
     return db.row(c.execute("SELECT * FROM jobs WHERE id = ?", (job["id"],)).fetchone())
 
 
-def _pick_fair(c, cands: list[dict]) -> dict | None:
-    """SAAS_MODE: one workspace must not hold the whole queue. Skip workspaces at their plan's
-    concurrent-job limit, then round-robin by "least recently served" workspace.
-    Self-hosted: still fair — limit each workspace to 2 concurrent heavy jobs so one user
-    doesn't block the others."""
+def _pick_fair(c, cands: list[dict], counts: dict) -> dict | None:
+    """Fair scheduling across users AND workspaces.
+
+    SaaS mode: workspace concurrent-job limits + workspace round-robin.
+    Self-hosted: per-user round-robin + per-workspace heavy limits so one
+    person's batch of renders doesn't starve the other 3 users on the Z440.
+    """
     from . import saas
     if not cands:
         return None
-    if not saas.enabled():
-        # self-hosted fairness: limit per-workspace concurrent heavy to 2
-        max_per_ws = int(os.getenv("SYSGUARD_MAX_HEAVY_PER_WS", "2"))
-        running_ws: dict[str, int] = {}
-        for r in c.execute(
-            "SELECT p.workspace_id, COUNT(*) FROM jobs j JOIN projects p ON p.id = j.project_id "
-            "WHERE j.status = 'running' AND j.kind IN ('render','montage','matte','dub','transcribe','compress') "
-            "GROUP BY p.workspace_id"
-        ).fetchall():
-            running_ws[r[0]] = r[1]
-        # prefer quick jobs; for heavy jobs, skip workspaces at their limit
-        for j in cands:
-            if j["kind"] not in HEAVY:
-                return j  # quick jobs always pass
-            if running_ws.get(j["ws"], 0) < max_per_ws:
-                return j
-        # all heavy cands are at their per-ws limit; if there are multiple workspaces
-        # waiting, pick the one with fewest running
-        return min(cands, key=lambda j: running_ws.get(j["ws"], 0)) if cands else None
-    running = {r[0]: r[1] for r in c.execute(
-        "SELECT p.workspace_id, COUNT(*) FROM jobs j JOIN projects p ON p.id = j.project_id "
-        "WHERE j.status = 'running' GROUP BY p.workspace_id").fetchall()}
-    last = {r[0]: r[1] or "" for r in c.execute(
-        "SELECT p.workspace_id, MAX(j.started_at) FROM jobs j JOIN projects p ON p.id = j.project_id "
-        "WHERE j.started_at IS NOT NULL GROUP BY p.workspace_id").fetchall()}
-    ok = [j for j in cands if running.get(j["ws"], 0) < saas.concurrent_limit(c, j["ws"])]
-    if not ok:
-        return None
-    # keep the priority classes (quick before heavy) and, within the first class, serve the workspace that
-    # waited longest since its last job started
-    first_heavy = ok[0]["kind"] in HEAVY
-    cls = [j for j in ok if (j["kind"] in HEAVY) == first_heavy]
-    return min(cls, key=lambda j: (last.get(j["ws"], ""), j["created_at"]))
 
+    # ── SaaS mode: workspace-level limits + round-robin ─────────────────
+    if saas.enabled():
+        running_ws = {r[0]: r[1] for r in c.execute(
+            "SELECT p.workspace_id, COUNT(*) FROM jobs j JOIN projects p ON p.id = j.project_id "
+            "WHERE j.status = 'running' GROUP BY p.workspace_id").fetchall()}
+        last_ws = {r[0]: r[1] or "" for r in c.execute(
+            "SELECT p.workspace_id, MAX(j.started_at) FROM jobs j JOIN projects p ON p.id = j.project_id "
+            "WHERE j.started_at IS NOT NULL GROUP BY p.workspace_id").fetchall()}
+        ok = [j for j in cands if running_ws.get(j["ws"], 0) < saas.concurrent_limit(c, j["ws"])]
+        if not ok:
+            return None
+        first_pri = _priority(ok[0]["kind"], ok[0].get("payload"))
+        cls = [j for j in ok if _priority(j["kind"], j.get("payload")) == first_pri]
+        return min(cls, key=lambda j: (last_ws.get(j["ws"], ""), j["created_at"]))
+
+    # ── Self-hosted: per-user round-robin ───────────────────────────────
+    # Within the highest available priority tier, pick the user who waited longest
+    last_user = {r[0]: r[1] or "" for r in c.execute(
+        "SELECT p.user_id, MAX(j.started_at) FROM jobs j JOIN projects p ON p.id = j.project_id "
+        "WHERE j.started_at IS NOT NULL GROUP BY p.user_id").fetchall()}
+
+    first_pri = _priority(cands[0]["kind"], cands[0].get("payload"))
+    cls = [j for j in cands if _priority(j["kind"], j.get("payload")) == first_pri]
+
+    # Serve the user whose last job started the earliest (round-robin fairness)
+    return min(cls, key=lambda j: (last_user.get(j.get("uid", ""), ""), j["created_at"]))
+
+
+# ── Heartbeat ───────────────────────────────────────────────────────────────
 
 def heartbeat(c, job_id: str, progress: int | None, message: str | None) -> None:
     data: dict = {"heartbeat_at": db.now()}
@@ -147,3 +207,29 @@ def heartbeat(c, job_id: str, progress: int | None, message: str | None) -> None
     row = c.execute("SELECT worker FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if row and row[0]:
         c.execute("UPDATE workers SET last_seen_at = ? WHERE name = ?", (db.now(), row[0]))
+
+
+# ── Queue status (for dashboard) ────────────────────────────────────────────
+
+def queue_status(c) -> dict:
+    """Snapshot of queue health: queued/running counts by kind and user."""
+    queued = c.execute(
+        "SELECT j.kind, COUNT(*) FROM jobs j WHERE j.status = 'queued' "
+        "AND (j.run_after IS NULL OR j.run_after <= ?) GROUP BY j.kind", (db.now(),)).fetchall()
+    running = c.execute(
+        "SELECT j.kind, j.worker, p.user_id, j.progress, j.message "
+        "FROM jobs j JOIN projects p ON p.id = j.project_id "
+        "WHERE j.status = 'running' ORDER BY j.started_at").fetchall()
+
+    return {
+        "queued": {r[0]: r[1] for r in queued},
+        "queued_total": sum(r[1] for r in queued),
+        "running": [{"kind": r[0], "worker": r[1], "user_id": r[2],
+                     "progress": r[3], "message": r[4]} for r in running],
+        "running_total": len(running),
+        "running_heavy": sum(1 for r in running if r[0] in HEAVY),
+        "limits": {
+            "max_heavy": settings.max_concurrent_heavy,
+            "max_total": settings.max_concurrent_total,
+        },
+    }

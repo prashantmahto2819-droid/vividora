@@ -1,0 +1,100 @@
+{
+ "id": "fitness_yoga",
+ "name": "Fitness — Yoga Class",
+ "industry": "fitness",
+ "format": "story",
+ "tags": [
+  "fitness",
+  "yoga",
+  "class",
+  "story"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "Yoga Shala",
+  "offer": "Morning *Yoga* Classes",
+  "tagline": "6 AM - 8 AM · Mon to Sat",
+  "phone": "98765 43210",
+  "cta": "Free Trial Class"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "story",
+  "no_person": true,
+  "accent": "#80CBC4",
+  "font": "Lora",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#80CBC4",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#004D40",
+   "color2": "#00695C",
+   "angle": 180
+  },
+  "vignette": 0.25,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.06,
+    "size": 0.042,
+    "color": "#80CBC4",
+    "font": "Lora"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.58,
+    "size": 0.032,
+    "color": "#B2DFDB",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.85,
+    "size": 0.038,
+    "color": "#004D40",
+    "font": "Lora",
+    "bg": "#80CBC4"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.03,
+    "color": "#B2DFDB",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "story": {
+    "text": {
+     "x": 0.5,
+     "y": 0.35,
+     "s": 1.2
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

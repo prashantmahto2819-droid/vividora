@@ -1,0 +1,16 @@
+{
+  "id": "fb-post",
+  "label": "Facebook Post (4:5)",
+  "platform": "facebook",
+  "width": 1080,
+  "height": 1350,
+  "fit": "crop",
+  "max_seconds": 120,
+  "burn_captions": true,
+  "sidecar_srt": false,
+  "caption_margin_v": 0.14,
+  "caption_scale": 0.95,
+  "video": {"crf": 22, "preset": "medium", "fps_max": 30},
+  "audio": {"loudness": -14, "true_peak": -1.5},
+  "notes": "Facebook feed optimised 4:5 portrait — takes more screen real estate than 1:1."
+}

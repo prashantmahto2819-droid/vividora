@@ -65,7 +65,7 @@ export function mount(root, project, ctx) {
     body: { enabled: false, bg: "blur", bg_blur: 18, bg_color: "#111111", bg_color2: "#F2B33D", bg_image: "", bg_video: "", stroke: false, stroke_color: "#FFFFFF", stroke_width: 8, glow: false, glow_color: "#F2B33D", glow_size: 24, glow_strength: 1.6, afterimage: false, after_decay: 0.9, clones: 0, anim: "none", anim_seconds: 0.9, blink_period: 0.4 }, music: { id: "", volume: 0.18, duck: true },
     broll: [], titles: [], watermark: { id: "", opacity: 0.75, size: 0.14, pos: "tr" }, sfx: [], ...(rs.effects || {}) };
   if (rs.effects.flash && (!rs.effects.transition || rs.effects.transition === "none")) rs.effects.transition = "flash";
-  rs.captions = { size_scale: 1, position: "", primary: "", highlight: "", font: "", italic: "", uppercase: "", letter_spacing: "", outline_scale: "", shadow_scale: "", outline_color: "", ...(rs.captions || {}) };
+  rs.captions = { size_scale: 1, position: "", primary: "", highlight: "", font: "", italic: "", uppercase: "", letter_spacing: "", outline_scale: "", shadow_scale: "", outline_color: "", max_words: "", max_lines: "", max_chars: "", ...(rs.captions || {}) };
   rs.hook = { text: "", seconds: 3, ...(rs.hook || {}) };
   rs.effects.voice = { preset: "studio", ...(rs.effects.voice || {}) };
   rs.effects.music = { id: "", volume: 0.18, duck: true, duck_amount: 0.6, fade: 1.5, ...(rs.effects.music || {}) };
@@ -530,8 +530,12 @@ function onKey(e) {
   else if (e.key === "Home") seek(0);
   else if (e.key === "f" || e.key === "F") toggleFull();
   else if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey) tool("split");
+  else if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey) tool("split");
   else if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { e.preventDefault(); tool("dup"); }
   else if (e.key === "End") seek(E.dur);
+  else if (e.key === "j" || e.key === "J") { e.preventDefault(); const v = $("#pv", E.root); if (v) { E.shuttle = Math.max(-4, (E.shuttle || 0) - 1); if (E.shuttle === 0) v.pause(); else { v.playbackRate = Math.abs(E.shuttle); if (E.shuttle < 0) seek(Math.max(0, E.t - 1 / (E.p.meta?.fps || 30))); else v.play(); } } }
+  else if (e.key === "l" || e.key === "L") { e.preventDefault(); const v = $("#pv", E.root); if (v) { E.shuttle = Math.min(4, (E.shuttle || 0) + 1); if (E.shuttle === 0) v.pause(); else { v.playbackRate = Math.abs(E.shuttle); v.play(); } } }
+  else if (e.key === "g" || e.key === "G") { E.snap = !E.snap; E.ctx.toast(E.snap ? "Snap on ✓" : "Snap off"); }
 }
 function togglePlay() { const v = $("#pv", E.root); if (!v.src) return; if (v.paused) { if (E.skipCuts) { const c = cutAt(v.currentTime); if (c) v.currentTime = c.end; } v.play(); } else v.pause(); }
 function seek(t) { const v = $("#pv", E.root); E.t = clamp(t, 0, E.dur); if (v) v.currentTime = E.t; MIX.tick(E.t); renderOverlay(); renderPlayhead(); }
@@ -623,6 +627,13 @@ function canvasBox() {
   const s = E.sel; const fb = E.frameBox; if (!s || !fb) return null; const fr = $("#frame", E.root); if (!fr) return null;
   if (cropView()) { const c = (E.rs.effects.transform || {}).crop || { x: 0, y: 0, w: 1, h: 1 }; return { kind: "crop", cx: (c.x + c.w / 2) * fb.w, cy: (c.y + c.h / 2) * fb.h, w: c.w * fb.w, h: c.h * fb.h, rot: 0 }; }
   if (s.type === "video" || s.type === "seg") { const t = PRO.mainTf(); const sc = +t.scale || 1; return { kind: "video", cx: fb.w / 2 + (+t.x || 0) * fb.w, cy: fb.h / 2 + (+t.y || 0) * fb.h, w: fb.w * sc, h: fb.h * sc, rot: +t.angle || 0 }; }
+  // watermark: when selected, use its on-canvas element for the box
+  if (s.type === "global" && s.id === "watermark") {
+    const el = $(`#ovl-media .ov-wm`, E.root); const it = selItem();
+    if (!el || !it || !it.id) return null;
+    const fr0 = fr.getBoundingClientRect(), r = el.getBoundingClientRect();
+    return { kind: "watermark", cx: r.left + r.width / 2 - fr0.left, cy: r.top + r.height / 2 - fr0.top, w: el.offsetWidth, h: el.offsetHeight, rot: -(+it.rotate || 0) };
+  }
   const el = s.type === "broll" ? $(`#ovl-media .ov-broll[data-bid="${s.id}"]`, E.root) : s.type === "title" ? $(`#ovl-text .ov-title[data-id="${s.id}"]`, E.root) : null;
   if (!el) return null; const fr0 = fr.getBoundingClientRect(), r = el.getBoundingClientRect(); const it = selItem(); if (!it) return null;
   return { kind: s.type, cx: r.left + r.width / 2 - fr0.left, cy: r.top + r.height / 2 - fr0.top, w: el.offsetWidth, h: el.offsetHeight, rot: s.type === "title" ? -(+it.rotate || 0) : PRO.clipGeom(it, outOf(E.t), fb).rot };
@@ -636,10 +647,12 @@ function renderHandles() {
   if (key === L._key) return; L._key = key;
   if (!b) { L.innerHTML = ""; return; }
   const crop = b.kind === "crop";
-  const hs = crop ? ["nw", "n", "ne", "e", "se", "s", "sw", "w"] : ["nw", "ne", "se", "sw"];
+  const hs = crop ? ["nw", "n", "ne", "e", "se", "s", "sw", "w"] : ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
   L.innerHTML = `<div class="hbox ${b.kind}" style="left:${(b.cx - b.w / 2).toFixed(1)}px;top:${(b.cy - b.h / 2).toFixed(1)}px;width:${b.w.toFixed(1)}px;height:${b.h.toFixed(1)}px;transform:rotate(${b.rot}deg)">`
     + hs.map((h) => `<i class="hh h-${h}" data-h="${h}"></i>`).join("") + (crop ? "" : `<i class="hrot" data-h="rot" title="घुमाएँ"></i>`) + `</div>`
     + (E.guides?.includes("v") ? `<div class="guide gv"></div>` : "") + (E.guides?.includes("h") ? `<div class="guide gh"></div>` : "")
+    + (E.guides?.includes("v3l") ? `<div class="guide gv3l"></div>` : "") + (E.guides?.includes("v3r") ? `<div class="guide gv3r"></div>` : "")
+    + (E.guides?.includes("h3t") ? `<div class="guide gh3t"></div>` : "") + (E.guides?.includes("h3b") ? `<div class="guide gh3b"></div>` : "")
     + (crop ? `<button class="btn small primary cropdone" id="crop-done">✓ Crop पूरा</button>` : "");
   const hb = $(".hbox", L);
   hb.onpointerdown = (e) => { if (e.button > 0) return; e.preventDefault(); e.stopPropagation(); canvasDrag(e, e.target.dataset.h || "move"); };
@@ -676,17 +689,34 @@ function canvasDrag(e, mode, opts = {}) {
         if (Math.abs(x * fb.w) < SNAP) { x = 0; guides += "v"; } if (Math.abs(y * fb.h) < SNAP) { y = 0; guides += "h"; }
         PRO.setVal(ko, "x", +x.toFixed(4)); PRO.setVal(ko, "y", +y.toFixed(4)); }
       else { let x = (b.cx + dx) / fb.w, y = (b.cy + dy) / fb.h;
-        if (Math.abs(x - 0.5) * fb.w < SNAP) { x = 0.5; guides += "v"; } if (Math.abs(y - 0.5) * fb.h < SNAP) { y = 0.5; guides += "h"; }
+        // snap: center
+        if (Math.abs(x - 0.5) * fb.w < SNAP) { x = 0.5; guides += "v"; }
+        if (Math.abs(y - 0.5) * fb.h < SNAP) { y = 0.5; guides += "h"; }
+        // snap: rule of thirds (1/3, 2/3)
+        if (Math.abs(x - 1/3) * fb.w < SNAP) { x = 1/3; guides += "v3l"; }
+        if (Math.abs(x - 2/3) * fb.w < SNAP) { x = 2/3; guides += "v3r"; }
+        if (Math.abs(y - 1/3) * fb.h < SNAP) { y = 1/3; guides += "h3t"; }
+        if (Math.abs(y - 2/3) * fb.h < SNAP) { y = 2/3; guides += "h3b"; }
         if (b.kind === "title") { it.pos = "free"; it.x = +clamp(x, 0.02, 0.98).toFixed(3); it.y = +clamp(y, 0.02, 0.98).toFixed(3); }
+        else if (b.kind === "watermark") { it.pos = "free"; it.x = +clamp(x, 0.02, 0.98).toFixed(3); it.y = +clamp(y, 0.02, 0.98).toFixed(3); }
         else { const to = it.to; const kx = PRO.setVal(ko, "x", +clamp(x, -0.5, 1.5).toFixed(3)); PRO.setVal(ko, "y", +clamp(y, -0.5, 1.5).toFixed(3)); if (!kx && to && st.to) { to.x = +(st.to.x + (it.x - (st.x ?? 0.5))).toFixed(3); to.y = +(st.to.y + (it.y - (st.y ?? 0.5))).toFixed(3); } } }
     } else if (mode === "rot") {
-      let a = (b.kind === "title" ? -(+st.rotate || 0) : b.kind === "video" ? (+st.angle || 0) : rot0) + (ang(px, py) - a0);
+      let a = (b.kind === "title" || b.kind === "watermark" ? -(+st.rotate || 0) : b.kind === "video" ? (+st.angle || 0) : rot0) + (ang(px, py) - a0);
       a = ((a + 540) % 360) - 180; for (const q of [-180, -90, 0, 90, 180]) if (Math.abs(a - q) < 3) a = q;
-      if (b.kind === "video") PRO.setVal(ko, "rotation", +clamp(a, -45, 45).toFixed(1)); else if (b.kind === "title") it.rotate = +(-a).toFixed(1); else PRO.setVal(ko, "rotation", +a.toFixed(1));
+      if (b.kind === "video") PRO.setVal(ko, "rotation", +clamp(a, -45, 45).toFixed(1)); else if (b.kind === "title" || b.kind === "watermark") it.rotate = +(-a).toFixed(1); else PRO.setVal(ko, "rotation", +a.toFixed(1));
+    } else if (["n", "s", "e", "w"].includes(mode) && b.kind !== "crop") {
+      // edge handles: free resize (non-proportional not supported for overlays — use as proportional scale)
+      const k = dist(px, py) / d0;
+      if (b.kind === "video") PRO.setVal(ko, "scale", +clamp((+st.scale || 1) * k, 0.2, 4).toFixed(3));
+      else if (b.kind === "title") it.size = +clamp((+st.size || 0.075) * k, 0.015, 0.4).toFixed(4);
+      else if (b.kind === "watermark") it.size = +clamp((+st.size || 0.14) * k, 0.03, 0.5).toFixed(4);
+      else if (it.kf?.scale?.length || (it.fit || "cover") !== "free") PRO.setVal(ko, "scale", +clamp(sc0 * k, 0.05, 8).toFixed(3));
+      else { it.scale = +clamp((+st.scale || 0.4) * k, 0.03, 2.5).toFixed(3); if (it.to && st.to) it.to.scale = +clamp((+st.to.scale || 0.4) * k, 0.03, 2.5).toFixed(3); }
     } else { // corner: uniform scale around the centre
       const k = dist(px, py) / d0;
       if (b.kind === "video") PRO.setVal(ko, "scale", +clamp((+st.scale || 1) * k, 0.2, 4).toFixed(3));
       else if (b.kind === "title") it.size = +clamp((+st.size || 0.075) * k, 0.015, 0.4).toFixed(4);
+      else if (b.kind === "watermark") it.size = +clamp((+st.size || 0.14) * k, 0.03, 0.5).toFixed(4);
       else if (it.kf?.scale?.length || (it.fit || "cover") !== "free") PRO.setVal(ko, "scale", +clamp(sc0 * k, 0.05, 8).toFixed(3));
       else { it.scale = +clamp((+st.scale || 0.4) * k, 0.03, 2.5).toFixed(3); if (it.to && st.to) it.to.scale = +clamp((+st.to.scale || 0.4) * k, 0.03, 2.5).toFixed(3); }
     }
@@ -700,8 +730,11 @@ function bindCanvas() {
   const fr = $("#frame", E.root); if (!fr || fr._bound) return; fr._bound = 1;
   fr.addEventListener("pointerdown", (e) => {
     if (e.button > 0 || E.montage || e.target.closest(".hbox,#crop-done,.ed-frameprev")) return;
-    const tEl = e.target.closest(".ov-title"), bEl = e.target.closest(".ov-broll"), hk = e.target.closest(".ov-hook");
+    const tEl = e.target.closest(".ov-title"), bEl = e.target.closest(".ov-broll"), hk = e.target.closest(".ov-hook"), wmEl = e.target.closest(".ov-wm");
     if (hk) { e.preventDefault(); select({ type: "hook", id: "h" }); setTimeout(() => $('#inspector [data-k="text"]', E.root)?.focus(), 30); return; }
+    // watermark: click selects, drag moves it freely
+    if (wmEl) { e.preventDefault(); if (E.sel?.type !== "global" || E.sel.id !== "watermark") select({ type: "global", id: "watermark" });
+      if (E.canEdit) { const wm = E.rs.effects.watermark; if (wm.pos !== "free") { const fr0 = fr.getBoundingClientRect(), r = wmEl.getBoundingClientRect(); wm.pos = "free"; wm.x = +((r.left + r.width / 2 - fr0.left) / E.frameBox.w).toFixed(3); wm.y = +((r.top + r.height / 2 - fr0.top) / E.frameBox.h).toFixed(3); wm.rotate = 0; renderOverlay(); } canvasDrag(e, "move"); } return; }
     if (tEl) { e.preventDefault(); const id = tEl.dataset.id; if (E.sel?.type !== "title" || E.sel.id !== id) select({ type: "title", id }); if (E.canEdit) canvasDrag(e, "move"); return; }
     if (bEl) { e.preventDefault(); const id = bEl.dataset.bid; if (E.sel?.type !== "broll" || E.sel.id !== id) select({ type: "broll", id }); const b = selItem();
       if (b && E.canEdit && b.fit !== "free") { // full-frame / PiP overlay → becomes freely movable the moment you drag it
@@ -766,7 +799,8 @@ function stackCss(stack) {
 }
 function captionChunks() {
   const cs = styleOf(); if (!cs || !E.words.length) return [];
-  const maxW = cs.max_words || 5, maxC = (cs.max_chars || 24) * (cs.max_lines || 2);
+  const ov = E.rs.captions || {};
+  const maxW = +ov.max_words || cs.max_words || 5, maxL = +ov.max_lines || cs.max_lines || 2, maxC = (cs.max_chars || 24) * maxL;
   const out = []; let cur = [], n = 0;
   E.words.forEach((w, i) => {
     const prev = E.words[i - 1];
@@ -786,7 +820,7 @@ function renderOverlay() {
   const active = E.rs.effects.broll.filter((b) => ot >= b.start && ot < b.end && (!b.platforms?.length || b.platforms.includes(E.pvPlat || "youtube")) && !(E.rs.effects.hidden_tracks || []).includes(`broll:${b.track || 0}`)).sort((a, b) => (a.track || 0) - (b.track || 0));
   const wm = E.rs.effects.watermark; const wmi = wm.id && libItem(wm.id);
   // the DOM is rebuilt only when the visible set changes; position / keyframes / mask / blend / speed are applied every frame (PRO.overlayFrame)
-  const mkey = active.map((b) => `${b._id}:${b.id}:${b.fit}:${cutOn(b, libItem(b.id)) ? "c" : ""}:${b.cutout ? 1 : 0}`).join("|") + `#${wm.id}:${wm.opacity}:${wm.size}:${wm.pos}#${E.rs.effects.frame?.id}:${E.rs.effects.frame?.opacity}#${(E.lib || []).length}#${E.pvPlat || ""}` + (E.sel?.type === "broll" ? E.sel.id : "");
+  const mkey = active.map((b) => `${b._id}:${b.id}:${b.fit}:${cutOn(b, libItem(b.id)) ? "c" : ""}:${b.cutout ? 1 : 0}`).join("|") + `#${wm.id}:${wm.opacity}:${wm.size}:${wm.pos}:${wm.x || ""}:${wm.y || ""}:${wm.rotate || ""}#${E.rs.effects.frame?.id}:${E.rs.effects.frame?.opacity}#${(E.lib || []).length}#${E.pvPlat || ""}` + (E.sel?.type === "broll" ? E.sel.id : "") + (E.sel?.type === "global" && E.sel.id === "watermark" ? "wm" : "");
   if (mkey !== E.mkey) {
     E.mkey = mkey; let mh = "";
     for (const b of active) {
@@ -798,7 +832,18 @@ function renderOverlay() {
     }
     const frm = E.rs.effects.frame || {}; const frmi = frm.id && libItem(frm.id);
     if (frmi) mh += `<img src="${frmi.url}" style="position:absolute;inset:0;width:100%;height:100%;opacity:${frm.opacity ?? 1};pointer-events:none">`;
-    if (wmi) mh += `<img src="${wmi.url}" style="position:absolute;width:${(wm.size * 100).toFixed(0)}%;opacity:${wm.opacity};${{ tl: "left:3.5%;top:3.5%", tr: "right:3.5%;top:3.5%", bl: "left:3.5%;bottom:3.5%", br: "right:3.5%;bottom:3.5%" }[wm.pos]}">`;
+    if (wmi) {
+      const wmW = (wm.size * 100).toFixed(0);
+      let wmStyle;
+      if (wm.pos === "free") {
+        // free position: x,y = center (0-1), with rotation support
+        const px = ((wm.x || 0.5) * 100).toFixed(1), py = ((wm.y || 0.5) * 100).toFixed(1);
+        wmStyle = `position:absolute;width:${wmW}%;opacity:${wm.opacity};left:${px}%;top:${py}%;transform:translate(-50%,-50%) rotate(${+(wm.rotate || 0)}deg)`;
+      } else {
+        wmStyle = `position:absolute;width:${wmW}%;opacity:${wm.opacity};${{ tl: "left:3.5%;top:3.5%", tr: "right:3.5%;top:3.5%", bl: "left:3.5%;bottom:3.5%", br: "right:3.5%;bottom:3.5%" }[wm.pos] || "right:3.5%;top:3.5%"}`;
+      }
+      mh += `<div class="ov-wm ${E.sel?.type === "global" && E.sel.id === "watermark" ? "sel" : ""}" style="${wmStyle}"><img src="${wmi.url}" draggable="false" style="width:100%;display:block"></div>`;
+    }
     $("#ovl-media", ovl).innerHTML = mh;
   }
   PRO.overlayFrame(ot);
@@ -1180,9 +1225,11 @@ function _renderInspector() {
       <div class="irow"><button class="btn small" data-act="audiotab">🎙 आवाज़ settings</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "global") {
     const id = E.sel.id;
-    if (id === "watermark") h = `<h3>Logo / Watermark</h3><p class="small muted">${esc(libItem(it.id)?.name || "")} · पूरे वीडियो पर</p>
-      <div class="irow">${field("पारदर्शिता", `<input type="range" data-k="opacity" min="0.1" max="1" step="0.05" value="${it.opacity ?? 0.7}" ${dis}>`)}${field("आकार", `<input type="range" data-k="size" min="0.05" max="0.35" step="0.01" value="${it.size ?? 0.12}" ${dis}>`)}</div>
-      ${field("कोना", `<select data-k="pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${it.pos === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`)}`;
+    if (id === "watermark") h = `<h3>Logo / Watermark</h3><p class="small muted">${esc(libItem(it.id)?.name || "")} · पूरे वीडियो पर${it.pos === "free" ? " · खींचकर रखें" : ""}</p>
+      <div class="irow">${field("पारदर्शिता", `<input type="range" data-k="opacity" min="0.1" max="1" step="0.05" value="${it.opacity ?? 0.7}" ${dis}>`)}${field("आकार", `<input type="range" data-k="size" min="0.03" max="0.5" step="0.01" value="${it.size ?? 0.12}" ${dis}>`)}</div>
+      ${field("जगह", `<select data-k="pos" ${dis}>${["tr", "tl", "br", "bl", "free"].map((p) => `<option value="${p}" ${it.pos === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ", free: "🖱 Free (drag)" }[p]}</option>`).join("")}</select>`)}
+      ${it.pos === "free" ? `<div class="irow">${field("X", `<input type="number" data-k="x" min="0" max="1" step="0.01" value="${(it.x ?? 0.5).toFixed(2)}" ${dis}>`)}${field("Y", `<input type="number" data-k="y" min="0" max="1" step="0.01" value="${(it.y ?? 0.5).toFixed(2)}" ${dis}>`)}${field("घुमाव °", `<input type="number" data-k="rotate" min="-180" max="180" step="1" value="${+(it.rotate || 0)}" ${dis}>`)}</div>` : ""}
+      <p class="small muted">💡 preview पर logo को खींचकर कहीं भी रख सकते हैं</p>`;
     else if (id === "frame") h = `<h3>Frame / Border</h3><p class="small muted">${esc(libItem(it.id)?.name || "")} · पूरे वीडियो पर</p>${field("opacity", `<input type="range" data-k="opacity" min="0.2" max="1" step="0.05" value="${it.opacity ?? 1}" ${dis}>`)}`;
     else h = `<h3>Color look</h3><p class="small muted">${esc(it.look?.startsWith("lut:") ? libItem(it.look.slice(4))?.name || "LUT" : it.look)} · पूरे वीडियो पर। Color tab में और settings।</p>`;
     h += `<div class="irow"><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
@@ -1234,9 +1281,10 @@ function _renderInspector() {
     else if (el.type === "checkbox") it[k] = el.checked;
     else if (el.type === "number" || el.type === "range") it[k] = +el.value;
     else it[k] = el.value;
-    if (k === "fit" || k === "blend") { touch(); renderInspector(); return; }
+    if (k === "fit" || k === "blend" || k === "layout") { touch(); renderInspector(); return; }
     if (k === "cutout") { touch(); if (it.cutout) ensureLibMatte(it.id); renderInspector(); return; }
     if (type === "title" && ["pos", "box", "_outline", "_shadow"].includes(k)) { touch(); renderInspector(); return; }
+    if (type === "global" && k === "pos") { if (el.value === "free" && it.x == null) { it.x = 0.5; it.y = 0.5; it.rotate = 0; } touch(); renderInspector(); renderOverlay(); return; }
     if (el.type === "range") { const lb = el.closest(".ifield")?.querySelector("label b"); if (lb) lb.textContent = (+el.value).toFixed(+el.step < 0.01 ? 3 : +el.step < 1 ? 2 : 0); }
     if (k === "bg" && type !== "hook" && !$('[data-k="_bgon"]', ins).checked) it.bg = "";
     if (type === "cut" || type === "short" || type === "speed") { it.start = clamp(it.start, 0, E.dur); it.end = clamp(it.end, it.start + 0.05, E.dur); }
@@ -1341,6 +1389,7 @@ function renderPanel() {
       <div class="styles">${(S.presets?.caption_styles || []).map((cs) => stylePreview(cs, E.rs.caption_style === cs.id)).join("")}</div>
       <h4>अपने हिसाब से</h4>
       <div class="irow">${field("आकार", `<input type="range" id="cap-size" min="0.6" max="1.8" step="0.05" value="${ov.size_scale ?? 1}" ${dis}>`)}${field("जगह", `<select id="cap-pos" ${dis}><option value="">style जैसी</option>${["bottom", "center", "top"].map((p) => `<option value="${p}" ${ov.position === p ? "selected" : ""}>${{ bottom: "नीचे", center: "बीच", top: "ऊपर" }[p]}</option>`).join("")}</select>`)}</div>
+      <div class="irow">${field("शब्द / line", `<input type="number" id="cap-maxw" min="1" max="12" placeholder="${styleOf()?.max_words || 5}" value="${ov.max_words || ""}" ${dis} title="एक line में कितने शब्द (style default: ${styleOf()?.max_words || 5})">`)}${field("lines", `<select id="cap-maxl" ${dis} title="कितनी lines एक साथ दिखें"><option value="" ${!ov.max_lines ? "selected" : ""}>style (${styleOf()?.max_lines || 2})</option>${[1, 2, 3, 4].map((n) => `<option value="${n}" ${+ov.max_lines === n ? "selected" : ""}>${n} line${n > 1 ? "s" : ""}</option>`).join("")}</select>`)}</div>
       <div class="irow">${field("font", `<select id="cap-font" ${dis}><option value="">style जैसा</option>${fontList().map((f) => `<option ${ov.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}</div>
       <div class="irow">${field("अक्षर", `<input type="color" id="cap-primary" value="${ov.primary || "#ffffff"}" ${dis}>`)}${field("highlight", `<input type="color" id="cap-highlight" value="${ov.highlight || "#ffd400"}" ${dis}>`)}${field("outline", `<input type="color" id="cap-outline-color" value="${ov.outline_color || "#000000"}" ${dis}>`)}${field("", `<label class="chk small"><input type="checkbox" id="cap-usecolors" ${ov.primary ? "checked" : ""} ${dis}> रंग लागू</label>`)}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" id="cap-italic" ${ov.italic === true ? "checked" : ""} ${dis}> <i>तिरछा (italic)</i></label><label class="chk small"><input type="checkbox" id="cap-upper" ${ov.uppercase === true ? "checked" : ""} ${dis}> ABC uppercase</label><label class="chk small"><input type="checkbox" id="cap-bold" ${ov.bold === false ? "" : "checked"} ${dis}> <b>bold</b></label></div>
@@ -1408,13 +1457,14 @@ function renderPanel() {
       <div class="seg">${kinds.map((k) => `<button data-kind="${k}" class="${E.libKind === k ? "on" : ""}">${LIB_KINDS.find((x) => x[0] === k)[1]}</button>`).join("")}</div>
       <label class="drop small ${dis ? "off" : ""}"><input type="file" id="lib-file" multiple hidden ${dis}>${ICON.plus} ${E.libKind} upload करें <span class="muted">(${{ music: "mp3/wav", sfx: "mp3/wav", broll: "mp4/mov", image: "png/jpg", sticker: "png (transparent)", logo: "png", frame: "png 1080×1920/1920×1080 transparent", lut: ".cube" }[E.libKind]})</span></label>
       <div id="lib-progress"></div>
-      <div class="irow"><input id="lib-q" placeholder="खोजें…" value="${esc(E.libQ || "")}" style="flex:1"><a class="btn small quiet" href="#/library" title="पूरी library">⤢</a></div>
+      <div class="irow"><input id="lib-q" placeholder="खोजें…" value="${esc(E.libQ || "")}" style="flex:1">${t === "stickers" ? `<button class="btn small primary" id="stk-search" title="Tenor पर खोजें">🔍 Tenor</button>` : ""}<a class="btn small quiet" href="#/library" title="पूरी library">⤢</a></div>
+      ${t === "stickers" && (E.stkWeb || []).length ? `<div class="box" style="margin:.3rem 0"><b class="small">Tenor results</b> <button class="btn small quiet" id="stk-clear">✕ बंद</button><div class="lib grid" style="margin-top:.3rem">${(E.stkWeb || []).map((x, i) => `<div class="stk-web" data-stki="${i}" style="cursor:pointer" title="${esc(x.title)}"><img src="${esc(x.preview)}" alt="" loading="lazy" style="object-fit:contain;width:72px;height:72px;background:repeating-conic-gradient(#1a2130 0 25%,#222b3b 0 50%) 50%/8px 8px;border-radius:6px"></div>`).join("")}</div></div>` : ""}
       ${subTags.length ? `<div class="seg wrap" style="flex-wrap:wrap;margin:.3rem 0">${subTags.map((tg) => `<button data-ltag="${tg}" class="${(E.libTag || "") === tg ? "on" : ""}">${tg || "सब"}</button>`).join("")}</div>` : ""}
       ${E.libKind === "music" ? musicFilterHtml(MF, fx) : ""}
       ${t === "audio" ? audioControls(dis) + PRO.musicFitHtml(dis) + dubBox(dis) : ""}
       ${t === "overlay" && E.libKind === "logo" ? `<div class="box"><b>Watermark</b>${wm.id ? `<p class="small">${esc(libItem(wm.id)?.name || "")}</p>` : `<p class="small muted">logo चुनकर “लगाएँ”</p>`}
         <div class="irow">${field("पारदर्शिता", `<input type="range" id="wm-op" min="0.1" max="1" step="0.05" value="${wm.opacity}" ${dis}>`)}${field("आकार", `<input type="range" id="wm-size" min="0.06" max="0.3" step="0.01" value="${wm.size}" ${dis}>`)}</div>
-        ${field("कोना", `<select id="wm-pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${wm.pos === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`)}
+        ${field("जगह", `<select id="wm-pos" ${dis}>${["tr", "tl", "br", "bl", "free"].map((p) => `<option value="${p}" ${wm.pos === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ", free: "🖱 Free" }[p]}</option>`).join("")}</select>`)}
         ${wm.id ? `<button class="btn small quiet" id="wm-clear">हटाएँ</button>` : ""}</div>` : ""}
       ${t === "overlay" && E.libKind === "frame" ? `<div class="box"><b>Frame / border</b>${fx.frame?.id ? `<p class="small">${esc(libItem(fx.frame.id)?.name || "")}</p>` : `<p class="small muted">frame PNG चुनकर “लगाएँ”</p>`}
         ${field("opacity", `<input type="range" id="frm-op" min="0.2" max="1" step="0.05" value="${fx.frame?.opacity ?? 1}" ${dis}>`)}${fx.frame?.id ? `<button class="btn small quiet" id="frm-clear">हटाएँ</button>` : ""}</div>` : ""}
@@ -1595,8 +1645,9 @@ function bindPanel() {
   const capSync = () => { const c = E.rs.captions; c.size_scale = +$("#cap-size", panel).value; c.position = $("#cap-pos", panel).value; c.font = $("#cap-font", panel).value;
     const use = $("#cap-usecolors", panel).checked; c.primary = use ? $("#cap-primary", panel).value : ""; c.highlight = use ? $("#cap-highlight", panel).value : ""; c.outline_color = use ? $("#cap-outline-color", panel).value : "";
     c.italic = $("#cap-italic", panel).checked ? true : ""; c.uppercase = $("#cap-upper", panel).checked ? true : ""; c.bold = $("#cap-bold", panel).checked ? "" : false;
-    c.letter_spacing = +$("#cap-spacing", panel).value || ""; c.outline_scale = +$("#cap-outline", panel).value === 1 ? "" : +$("#cap-outline", panel).value; c.shadow_scale = +$("#cap-shadow", panel).value === 1 ? "" : +$("#cap-shadow", panel).value; touch(); };
-  ["#cap-size", "#cap-pos", "#cap-font", "#cap-primary", "#cap-highlight", "#cap-outline-color", "#cap-usecolors", "#cap-italic", "#cap-upper", "#cap-bold", "#cap-spacing", "#cap-outline", "#cap-shadow"].forEach((s) => on(s, "oninput", capSync));
+    c.letter_spacing = +$("#cap-spacing", panel).value || ""; c.outline_scale = +$("#cap-outline", panel).value === 1 ? "" : +$("#cap-outline", panel).value; c.shadow_scale = +$("#cap-shadow", panel).value === 1 ? "" : +$("#cap-shadow", panel).value;
+    c.max_words = +$("#cap-maxw", panel).value || ""; c.max_lines = +$("#cap-maxl", panel).value || ""; touch(); };
+  ["#cap-size", "#cap-pos", "#cap-font", "#cap-primary", "#cap-highlight", "#cap-outline-color", "#cap-usecolors", "#cap-italic", "#cap-upper", "#cap-bold", "#cap-spacing", "#cap-outline", "#cap-shadow", "#cap-maxw", "#cap-maxl"].forEach((s) => on(s, "oninput", capSync));
   // caption lines: typing updates preview + timeline right away (the input keeps pointing at the same words)
   $$(".capedit", panel).forEach((inp) => { inp._ws = captionAt(+inp.dataset.capst)?.words;
     const apply = () => { clearTimeout(E.capT); if (!inp._ws) return; const nw = applyCaptionText({ words: inp._ws }, inp.value, true); inp._ws = nw; if (nw.length) { E.sel = { type: "caption", id: nw[0].start }; renderInspector(); } };
@@ -1656,6 +1707,10 @@ function bindPanel() {
   $$("[data-ltag]", panel).forEach((b) => (b.onclick = () => { E.libTag = b.dataset.ltag; renderPanel(); }));
   on("#lib-q", "oninput", (e) => { E.libQ = e.target.value; const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; const i = $("#lib-q", panel); i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
   on("#lib-file", "onchange", async (e) => { for (const f of e.target.files) await libUpload(E.libKind, f); renderPanel(); });
+  // Tenor sticker search
+  on("#stk-search", "onclick", async () => { const q = (E.libQ || "").trim(); if (!q) { toast("खोजने के लिए कुछ लिखें"); return; } const btn = $("#stk-search", panel); if (btn) { btn.disabled = true; btn.textContent = "…"; } try { E.stkWeb = await api("GET", `/library/search?source=tenor&q=${encodeURIComponent(q)}`); } catch (e) { toast(e.message); E.stkWeb = []; } renderPanel(); });
+  on("#stk-clear", "onclick", () => { E.stkWeb = []; renderPanel(); });
+  $$("[data-stki]", panel).forEach((el) => (el.onclick = async () => { const x = (E.stkWeb || [])[+el.dataset.stki]; if (!x) return; el.style.opacity = "0.4"; try { await api("POST", "/library/import", { ...x, kind: "sticker" }); toast("✓ sticker library में जुड़ा"); E.lib = await api("GET", "/library"); renderPanel(); } catch (e) { toast(e.message); el.style.opacity = "1"; } }));
   musicFilterBind(panel);
   $$("[data-fav]", panel).forEach((b) => (b.onclick = async () => { const x = libItem(b.dataset.fav); if (!x) return; const fav = !x.meta?.fav; x.meta = { ...(x.meta || {}), fav };
     b.textContent = fav ? "★" : "☆"; try { await api("PATCH", `/library/${x.id}`, { meta: { fav } }); } catch (e) { toast(e.message); } }));
@@ -1679,7 +1734,7 @@ function bindPanel() {
   if (E.tab === "audio") dubBox(null, panel);
   on("#wm-op", "oninput", (e) => { fx.watermark.opacity = +e.target.value; touch(); });
   on("#wm-size", "oninput", (e) => { fx.watermark.size = +e.target.value; touch(); });
-  on("#wm-pos", "onchange", (e) => { fx.watermark.pos = e.target.value; touch(); });
+  on("#wm-pos", "onchange", (e) => { const v = e.target.value; fx.watermark.pos = v; if (v === "free" && fx.watermark.x == null) { fx.watermark.x = 0.5; fx.watermark.y = 0.5; fx.watermark.rotate = 0; } touch(); renderPanel(); });
   on("#wm-clear", "onclick", () => { fx.watermark.id = ""; touch(); renderPanel(); });
   on("#frm-op", "oninput", (e) => { fx.frame = fx.frame || {}; fx.frame.opacity = +e.target.value; touch(); });
   on("#frm-clear", "onclick", () => { fx.frame.id = ""; touch(); renderPanel(); });
@@ -1754,7 +1809,7 @@ function bindPanel() {
   on("#fx-theme", "onclick", () => showThemes());
   $$("[data-fxmode]", panel).forEach((b) => (b.onclick = () => { E.fxMode = b.dataset.fxmode; const sc = panel.scrollTop; renderPanel(); $("#ed-panel", E.root).scrollTop = sc; }));
   $$("[data-fxclip]", panel).forEach((li) => (li.onclick = () => { const c = fx.fxclips.find((x) => x._id === li.dataset.fxclip); if (!c) return; seek(srcOf(c.start)); select({ type: "fxclip", id: c._id }); }));
-  $$("[data-fxadd]", panel).forEach((b) => (b.onclick = () => { PRO.markTrendSeen(b.dataset.fxadd); if (E.fxMode !== "global") return addFxClip("effect", b.dataset.fxadd); fx.stack = fx.stack || []; if (fx.stack.length >= 8) return toast("एक साथ 8 effects तक"); fx.stack.push({ id: b.dataset.fxadd, params: {}, enabled: true }); touch(); layoutFrame(); renderPanel(); panel.scrollTop = 0; }));
+  $$("[data-fxadd]", panel).forEach((b) => (b.onclick = () => { PRO.markTrendSeen(b.dataset.fxadd); if (E.fxMode !== "global") return addFxClip("effect", b.dataset.fxadd); fx.stack = fx.stack || []; if (fx.stack.length >= 8) return toast("एक साथ 8 effects तक"); const def = fxDef(b.dataset.fxadd); if (def?.needs_matte && !fx.body?.enabled) toast("💡 Color Pop: पहले Cutout tab में person cutout बनाएँ, तो ज़्यादा अच्छा दिखेगा"); fx.stack.push({ id: b.dataset.fxadd, params: {}, enabled: true }); touch(); layoutFrame(); renderPanel(); panel.scrollTop = 0; }));
   $$("[data-fxon]", panel).forEach((cb) => (cb.onchange = () => { fx.stack[+cb.dataset.fxon].enabled = cb.checked; touch(); layoutFrame(); renderPanel(); }));
   $$("[data-fxdel]", panel).forEach((b) => (b.onclick = () => { fx.stack.splice(+b.dataset.fxdel, 1); touch(); layoutFrame(); renderPanel(); }));
   $$("[data-fxup]", panel).forEach((b) => (b.onclick = () => { const i = +b.dataset.fxup; if (i > 0) { [fx.stack[i - 1], fx.stack[i]] = [fx.stack[i], fx.stack[i - 1]]; touch(); renderPanel(); } }));
@@ -1976,7 +2031,8 @@ function dubBox(dis, panel) {
   if (panel) {
     const box = $("#dub-box", panel); if (!box) return;
     const q = (s) => $(s, box);
-    const keep = () => { st.mode = q("#dub-mode")?.value || st.mode; st.lang = q("#dub-lang")?.value || st.lang; st.voice = q("#dub-voice")?.value ?? st.voice; st.speed = +(q("#dub-speed")?.value || st.speed); st.script = q("#dub-script")?.value ?? st.script; st.desc = q("#dub-desc")?.value ?? st.desc; st.pitch = +(q("#dub-pitch")?.value ?? st.pitch); };
+    const keep = () => { st.mode = q("#dub-mode")?.value || st.mode; st.lang = q("#dub-lang")?.value || st.lang; st.voice = q("#dub-voice")?.value ?? st.voice; st.speed = +(q("#dub-speed")?.value || st.speed); st.script = q("#dub-script")?.value ?? st.script; st.desc = q("#dub-desc")?.value ?? st.desc; st.pitch = +(q("#dub-pitch")?.value ?? st.pitch);
+      if (q("#el-stability")) st.el_settings = { stability: +q("#el-stability").value, similarity_boost: +q("#el-similarity").value, style: +q("#el-style").value, use_speaker_boost: q("#el-boost")?.checked !== false }; };
     const pt = q("#dub-pitch"); if (pt) pt.oninput = () => { keep(); q("#dub-pitch-v").textContent = (st.pitch > 0 ? "+" : "") + st.pitch; };
     const fxs = q("#dub-fixes"); if (fxs) fxs.onchange = () => { E.rs.tts_fixes = fxs.value; touch(); };
     const scr = q("#dub-script"); if (scr) scr.oninput = () => { keep(); const names = dubSpeakers(st.script); const box2 = q("#dub-cast"); if (box2 && names.join("|") !== (box2.dataset.names || "")) renderPanel(); };
@@ -1984,13 +2040,58 @@ function dubBox(dis, panel) {
     $$("[data-castp]", box).forEach((el) => (el.onchange = () => { const n = el.dataset.castp; E.rs.voice_cast = E.rs.voice_cast || {}; E.rs.voice_cast[n] = { ...(E.rs.voice_cast[n] || {}), pitch: +el.value }; touch(); }));
     dubLinesBind(box, tracks);
     ["#dub-mode", "#dub-lang"].forEach((s) => { const el = q(s); if (el) el.onchange = () => { keep(); st.voice = ""; renderPanel(); }; });
-    ["#dub-voice", "#dub-script", "#dub-desc"].forEach((s) => { const el = q(s); if (el) el.oninput = el.onchange = keep; });
+    const voiceEl = q("#dub-voice"); if (voiceEl) voiceEl.onchange = () => { keep(); st.el_settings = null; renderPanel(); };
+    ["#dub-script", "#dub-desc"].forEach((s) => { const el = q(s); if (el) el.oninput = el.onchange = keep; });
+    ["#el-stability", "#el-similarity", "#el-style"].forEach((s) => { const el = q(s); if (el) el.oninput = () => { keep(); const ids = { "#el-stability": "el-stab-v", "#el-similarity": "el-sim-v", "#el-style": "el-style-v" }; const lbl = q("#" + ids[s]); if (lbl) lbl.textContent = (+el.value).toFixed(2); }; });
+    const elBoost = q("#el-boost"); if (elBoost) elBoost.onchange = keep;
+    const moodPresets = { "el-mood-neutral": { stability: 0.5, similarity_boost: 0.75, style: 0, use_speaker_boost: true },
+      "el-mood-happy": { stability: 0.4, similarity_boost: 0.7, style: 0.5, use_speaker_boost: true },
+      "el-mood-excited": { stability: 0.3, similarity_boost: 0.65, style: 0.8, use_speaker_boost: true },
+      "el-mood-calm": { stability: 0.75, similarity_boost: 0.8, style: 0.1, use_speaker_boost: true },
+      "el-mood-sad": { stability: 0.6, similarity_boost: 0.8, style: 0.4, use_speaker_boost: false },
+      "el-mood-angry": { stability: 0.3, similarity_boost: 0.6, style: 0.9, use_speaker_boost: true },
+      "el-mood-serious": { stability: 0.7, similarity_boost: 0.85, style: 0.15, use_speaker_boost: true },
+      "el-mood-whisper": { stability: 0.8, similarity_boost: 0.9, style: 0.2, use_speaker_boost: false } };
+    $$(".el-mood", box).forEach((b) => (b.onclick = () => { const p = moodPresets[b.id]; if (!p) return; st.el_settings = { ...p };
+      const s = q("#el-stability"); if (s) { s.value = p.stability; q("#el-stab-v").textContent = p.stability.toFixed(2); }
+      const sim = q("#el-similarity"); if (sim) { sim.value = p.similarity_boost; q("#el-sim-v").textContent = p.similarity_boost.toFixed(2); }
+      const sty = q("#el-style"); if (sty) { sty.value = p.style; q("#el-style-v").textContent = p.style.toFixed(2); }
+      const bst = q("#el-boost"); if (bst) bst.checked = p.use_speaker_boost;
+      $$(".el-mood", box).forEach((x) => x.classList.toggle("primary", x === b)); }));
+    // AI Script Generator: toggle forms
+    const aiGen = q("#dub-ai-gen"); if (aiGen) aiGen.onclick = () => { const f = q("#dub-ai-form"); const fi = q("#dub-ai-improve-form"); if (f) { f.style.display = f.style.display === "none" ? "" : "none"; if (fi) fi.style.display = "none"; } };
+    const aiImp = q("#dub-ai-improve"); if (aiImp) aiImp.onclick = () => { const f = q("#dub-ai-improve-form"); const fg = q("#dub-ai-form"); if (f) { f.style.display = f.style.display === "none" ? "" : "none"; if (fg) fg.style.display = "none"; } };
+    const sgCancel = q("#sg-cancel"); if (sgCancel) sgCancel.onclick = () => { const f = q("#dub-ai-form"); if (f) f.style.display = "none"; };
+    const simpCancel = q("#simp-cancel"); if (simpCancel) simpCancel.onclick = () => { const f = q("#dub-ai-improve-form"); if (f) f.style.display = "none"; };
+    // Generate new script
+    const sgGo = q("#sg-go"); if (sgGo) sgGo.onclick = async () => {
+      const topic = q("#sg-topic")?.value?.trim(); if (!topic) return toast("पहले विषय लिखें");
+      sgGo.disabled = true; sgGo.textContent = "✨ AI लिख रहा…"; const statusEl = q("#sg-status"); if (statusEl) statusEl.textContent = "AI script लिख रहा है…";
+      try { const r = await api("POST", "/scriptgen/generate",
+        { topic, style: q("#sg-style")?.value || "motivational", tone: q("#sg-tone")?.value || "conversational", format: q("#sg-dur")?.value || "short", seconds: q("#sg-secs")?.value ? +q("#sg-secs").value : null, audience: q("#sg-audience")?.value || "", language: st.lang || "hi" });
+        const scr = r.script || r.narration || ""; if (scr) { st.script = scr; const ta = q("#dub-script"); if (ta) { ta.value = scr; ta.dispatchEvent(new Event("input")); } }
+        if (r.title_options?.length) toast(`📝 titles: ${r.title_options.join(" · ")}`);
+        const f = q("#dub-ai-form"); if (f) f.style.display = "none";
+        if (statusEl) statusEl.textContent = "";
+        toast(`✨ ${r.words || "?"} words · ${r.seconds || "?"}s · ${r.source === "llm" ? "AI" : "template"}`);
+      } catch (er) { toast(er.message); if (statusEl) statusEl.textContent = ""; }
+      sgGo.disabled = false; sgGo.textContent = "✨ लिखो"; };
+    // Improve existing script
+    const simpGo = q("#simp-go"); if (simpGo) simpGo.onclick = async () => {
+      const scr = q("#dub-script")?.value || ""; if (scr.trim().length < 10) return toast("पहले script लिखें (कम से कम 10 अक्षर)");
+      simpGo.disabled = true; simpGo.textContent = "सुधार रहा…";
+      try { const r = await api("POST", "/scriptgen/improve", { script: scr, mode: q("#simp-mode")?.value || "improve", language: st.lang || "hi" });
+        if (r.script) { const ta = q("#dub-script"); if (ta) { ta.value = r.script; ta.dispatchEvent(new Event("input")); st.script = r.script; } }
+        if (r.error) toast(`⚠ ${r.error}`); else toast(`🔄 script ${q("#simp-mode")?.value || "improve"} हो गई`);
+        const f = q("#dub-ai-improve-form"); if (f) f.style.display = "none";
+      } catch (er) { toast(er.message); }
+      simpGo.disabled = false; simpGo.textContent = "🔄 सुधारो"; };
     const sp = q("#dub-speed"); if (sp) sp.oninput = () => { keep(); q("#dub-speed-v").textContent = st.speed.toFixed(2) + "×"; };
     const go = q("#dub-go"); if (go) go.onclick = async () => {
       keep(); if (st.mode === "script" && st.script.trim().length < 3) return toast("पहले script लिखें");
       go.disabled = true; go.textContent = st.mode === "dub" ? "translate हो रहा…" : "भेज रहे…";
       try { await flush();
-        const r = await api("POST", `/projects/${E.pid}/dub`, { mode: st.mode, language: st.mode === "revoice" ? null : st.lang, voice: st.voice || null, description: st.desc || null, speed: st.speed, pitch: st.pitch || 0, script: st.mode === "script" ? st.script : "" });
+        const r = await api("POST", `/projects/${E.pid}/dub`, { mode: st.mode, language: st.mode === "revoice" ? null : st.lang, voice: st.voice || null, description: st.desc || null, speed: st.speed, pitch: st.pitch || 0, script: st.mode === "script" ? st.script : "", ...(st.el_settings ? { elevenlabs_settings: st.el_settings } : {}) });
         if (r.missing_cast?.length) toast(`${r.missing_cast.join(", ")} के लिए आवाज़ नहीं चुनी — default आवाज़ लगेगी`);
         E.p.jobs = [{ ...r.job, status: "queued", created_at: new Date().toISOString() }, ...(E.p.jobs || [])];
         toast(`AI voice-over शुरू · ${r.lines} lines${r.translated?.length ? ` · “${r.translated[0].slice(0, 40)}…”` : ""}`); E.ctx.load().catch(() => {});
@@ -2019,14 +2120,33 @@ function dubBox(dis, panel) {
     <p class="small muted">अपनी बात साफ़ AI आवाज़ में, हिन्दी↔English dub, या लिखी script से voice-over (faceless/montage)। Models commercial इस्तेमाल के लिए safe हैं (Indic Parler-TTS, Kokoro)।</p>
     <div class="irow">${field("क्या बनाना है", `<select id="dub-mode" ${dis}>${(E.montage ? ["script"] : ["revoice", "dub", "script"]).map((m) => `<option value="${m}" ${st.mode === m ? "selected" : ""}>${esc(D.modes[m] || m)}</option>`).join("")}</select>`)}
       ${field("भाषा", st.mode === "revoice" ? `<select disabled><option>${esc(D.langs[lang] || lang)} (transcript जैसी)</option></select>` : `<select id="dub-lang" ${dis}>${Object.entries(D.langs).map(([k, l]) => `<option value="${k}" ${st.lang === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}</div>
-    ${field("आवाज़", `<select id="dub-voice" ${dis}>${voices.map((v) => `<option value="${v.id}" ${st.voice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>`)}
+    ${field("आवाज़", `<select id="dub-voice" ${dis}>${voices.map((v) => `<option value="${v.id}" ${st.voice === v.id ? "selected" : ""}>${esc(v.label)}${v.cloud ? " ☁️" : ""}</option>`).join("")}</select>`)}
+    ${(() => { const sv = voices.find((v) => v.id === st.voice) || voices[0] || {}; if (sv.engine !== "elevenlabs") return ""; const es = st.el_settings || sv.elevenlabs_settings || {}; return `<div class="box" id="dub-el-controls" style="margin:6px 0;padding:8px 10px;border-left:3px solid var(--accent,#7c3aed)"><b class="small">⚡ ElevenLabs voice controls</b>
+      <div class="irow">${field(`Stability <b id="el-stab-v">${(+(es.stability ?? 0.5)).toFixed(2)}</b>`, `<input type="range" id="el-stability" min="0" max="1" step="0.05" value="${es.stability ?? 0.5}" ${dis}>`)}</div>
+      <div class="irow">${field(`Clarity + Similarity <b id="el-sim-v">${(+(es.similarity_boost ?? 0.75)).toFixed(2)}</b>`, `<input type="range" id="el-similarity" min="0" max="1" step="0.05" value="${es.similarity_boost ?? 0.75}" ${dis}>`)}</div>
+      <div class="irow">${field(`Style exaggeration <b id="el-style-v">${(+(es.style ?? 0)).toFixed(2)}</b>`, `<input type="range" id="el-style" min="0" max="1" step="0.05" value="${es.style ?? 0}" ${dis}>`)}</div>
+      <div class="irow">${field("Speaker boost", `<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="el-boost" ${es.use_speaker_boost !== false ? "checked" : ""} ${dis}> On</label>`)}</div>
+      <p class="small muted">Stability ↑ = consistent · Clarity ↑ = original voice जैसी · Style ↑ = expressive/emotional</p>
+      <div style="margin-top:6px"><b class="small">🎭 Mood presets</b>
+      <div class="irow" style="flex-wrap:wrap;gap:4px;margin-top:4px">${[["el-mood-neutral","😐 Neutral"],["el-mood-happy","😊 Happy"],["el-mood-excited","🤩 Excited"],["el-mood-calm","🧘 Calm"],["el-mood-sad","😢 Sad"],["el-mood-angry","😠 Angry"],["el-mood-serious","🎙 Serious"],["el-mood-whisper","🤫 Soft"]].map(([id,lb])=>`<button class="btn small quiet el-mood" id="${id}" ${dis}>${lb}</button>`).join("")}</div></div></div>`; })()}
     <div class="irow">${field(`speed <b id="dub-speed-v">${(+st.speed).toFixed(2)}×</b>`, `<input type="range" id="dub-speed" min="0.8" max="1.25" step="0.05" value="${st.speed}" ${dis}>`)}
       ${field(`pitch <b id="dub-pitch-v">${st.pitch > 0 ? "+" : ""}${st.pitch || 0}</b> semitone`, `<input type="range" id="dub-pitch" min="-6" max="6" step="1" value="${st.pitch || 0}" ${dis}>`)}</div>
     <p class="small muted">line में <code>*शब्द*</code> = ज़ोर (धीरे, ऊँचा) · <code>[pause 0.8]</code> = रुकना · script में <code>रोहित: …</code> = उस किरदार की आवाज़</p>
     ${dubCastHtml(st, voices, dis)}
     <details><summary class="small">उच्चारण सुधार (शब्द = कैसे बोले)</summary><textarea id="dub-fixes" rows="3" placeholder="Vividora = विविडोरा&#10;SEO = एस ई ओ" ${dis}>${esc(E.rs.tts_fixes || "")}</textarea></details>
     <details><summary class="small">अपनी आवाज़ का description (English में, Parler)</summary><input id="dub-desc" value="${esc(st.desc)}" placeholder="Rohit speaks with a deep, confident, warm tone at a moderate pace, very clear audio" ${dis}></details>
-    ${st.mode === "script" ? field("Script", `<textarea id="dub-script" rows="6" placeholder="यहाँ script लिखें या paste करें… (खाली line = नया paragraph, थोड़ा लंबा रुकना)" ${dis}>${esc(st.script)}</textarea>`) : ""}
+    ${st.mode === "script" ? `<div class="box" style="margin:6px 0;padding:8px 10px;border-left:3px solid var(--success,#22c55e)"><div class="row between"><b class="small">✨ AI Script Generator</b><div class="irow" style="gap:4px"><button class="btn small" id="dub-ai-gen" ${dis} title="AI से नई script लिखवाएँ">✨ AI Script लिखो</button><button class="btn small quiet" id="dub-ai-improve" ${dis} title="मौजूदा script सुधारें">🔄 सुधारो</button></div></div>
+      <div id="dub-ai-form" style="display:none"><div class="irow" style="margin-top:4px"><input id="sg-topic" placeholder="विषय लिखें — जैसे: कम्प्यूटर कैसे काम करता है" style="flex:1" ${dis}></div>
+      <div class="irow" style="gap:4px;margin-top:4px"><select id="sg-style" ${dis}><option value="motivational">मोटिवेशन</option><option value="educational">शिक्षा</option><option value="story">कहानी</option><option value="tutorial">ट्यूटोरियल</option><option value="explainer">Explainer</option><option value="listicle">Listicle</option><option value="product_review">रिव्यू</option><option value="podcast_intro">Podcast Intro</option><option value="news">समाचार</option><option value="comparison">Comparison</option></select>
+      <select id="sg-tone" ${dis}><option value="conversational">बातचीत</option><option value="inspirational">प्रेरक</option><option value="professional">प्रोफ़ेशनल</option><option value="casual">कैज़ुअल</option><option value="dramatic">नाटकीय</option><option value="humorous">हँसमुख</option></select></div>
+      <div class="irow" style="gap:4px;margin-top:4px"><select id="sg-dur" ${dis}><option value="short">Short (30-60s)</option><option value="long">Long (6-12 min)</option><option value="montage">Montage (20-40s)</option></select>
+      <input id="sg-secs" type="number" min="15" max="900" placeholder="seconds" style="width:80px" title="कितने seconds का" ${dis}>
+      <input id="sg-audience" placeholder="audience (optional)" style="flex:1" ${dis}>
+      <button class="btn small primary" id="sg-go" ${dis}>✨ लिखो</button><button class="btn small quiet" id="sg-cancel" ${dis}>✕</button></div></div>
+      <div id="dub-ai-improve-form" style="display:none"><div class="irow" style="gap:4px;margin-top:4px"><select id="simp-mode" ${dis}><option value="improve">✨ बेहतर बनाओ</option><option value="rewrite">🔄 पूरी तरह बदलो</option><option value="shorten">✂ छोटा करो</option><option value="expand">📝 बड़ा करो</option></select>
+      <button class="btn small primary" id="simp-go" ${dis}>🔄 सुधारो</button><button class="btn small quiet" id="simp-cancel" ${dis}>✕</button></div></div>
+      <p class="small muted" id="sg-status"></p></div>
+    ${field("Script", `<textarea id="dub-script" rows="6" placeholder="यहाँ script लिखें या paste करें… (खाली line = नया paragraph, थोड़ा लंबा रुकना)" ${dis}>${esc(st.script)}</textarea>`)}` : ""}
     ${st.mode === "dub" ? `<p class="small muted">transcript एक ही AI call में translate होता है (server में GEMINI_API_KEY चाहिए), फिर हर line अपनी जगह fit होती है।</p>` : ""}
     <div class="irow"><button class="btn small primary" id="dub-go" ${dis || (active ? "disabled" : "")}>🎙 बनाएँ</button><span class="small muted grow" id="dub-prog">${esc(progText(job))}</span></div>
     ${tracks.length ? `<ul class="plist">${tracks.map((a) => `<li><button class="ibtn" data-dubplay="${a.id}" title="सुनें">${ICON.play}</button><span class="grow small">${esc(vlabel(a))}${a.meta?.mode ? ` <span class="muted">· ${esc(D.modes[a.meta.mode] || a.meta.mode)}</span>` : ""}</span>${E.canEdit ? `<button class="btn small quiet" data-dublines="${a.id}" title="हर line देखें, बदलें, फिर बोलें">✏ lines</button><button class="ibtn" data-dubdel="${a.id}" title="हटाएँ">${ICON.trash}</button>` : ""}</li>`).join("")}</ul>${dubLinesHtml(st, tracks, voices, active)}` : ""}
@@ -2582,8 +2702,9 @@ function renderExport() {
   m.innerHTML = `<div class="modal"><div class="row between"><h2>Export</h2><button class="ibtn" id="mx">✕</button></div>
     <p class="small muted">${esc(summary)} · output ${fmt(outDur())}</p>
     ${E.montage ? "" : `<div class="box pfbox"><div class="row between"><b>✈ Platform check</b><button class="btn small quiet" id="pf-run">जाँचें</button></div><div id="pf-list" class="small">${pfHtml()}</div></div>`}
-    ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए</label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
-    <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option></select>`)}</div>
+    ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए <button class="btn small quiet" id="prs-all" style="margin-left:.5rem;padding:2px 8px;font-size:.75rem">सब चुनें</button><button class="btn small quiet" id="prs-none" style="padding:2px 8px;font-size:.75rem">कोई नहीं</button></label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
+    <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option><option value="auto" ${E.rs.focus_x === "auto" ? "selected" : ""}>🎯 Auto (smart)</option></select>`)}<button class="btn small quiet" id="mf-analyze" title="AI-powered per-format smart reframing analysis">🎯 Analyze</button></div>
+    <div id="mf-info" class="small muted" style="margin:-0.3rem 0 0.5rem 0">${E.mfAnalysis ? mfInfoHtml() : "Auto: हर format के लिए face-tracking से best crop लगेगा"}</div>
     ${exportAdvHtml()}`}
     ${job ? `<div class="box" style="background:var(--blue-bg,#e8f0fe);color:var(--blue-fg,#1a73e8);padding:0.5rem 1rem;border-radius:8px;margin:0.5rem 0"><div class="row between"><span>⏳ Render चल रहा है — editing जारी रखें</span>${E.canEdit ? `<button class="btn small quiet" data-jcancel="${job.id}">✕ रद्द</button>` : ""}</div><div class="progress" style="margin-top:0.3rem"><i style="width:${job.progress || 0}%"></i></div><p class="small muted">${esc(jobSub(job))}</p></div>` : ""}
     ${outs.length ? `<h3>तैयार वीडियो</h3><div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
@@ -2607,9 +2728,20 @@ function renderExport() {
     try { const r = await api("POST", `/projects/${E.pid}/publish-plan`, { items }); toast(`${r.queued.length} uploads queue में`); await loadPublishData(); } catch (e) { toast(e.message); } };
   m.onclick = (e) => { if (e.target === m) { E.exportOpen = false; renderExport(); } };
   $$(".chip input", m).forEach((i) => (i.onchange = () => { i.closest(".chip").classList.toggle("on", i.checked); exportEstimate(m); }));
+  const prsAll = $("#prs-all", m); if (prsAll) prsAll.onclick = () => { $$(".chip input[name=preset]", m).forEach((i) => { i.checked = true; i.closest(".chip").classList.add("on"); }); exportEstimate(m); };
+  const prsNone = $("#prs-none", m); if (prsNone) prsNone.onclick = () => { $$(".chip input[name=preset]", m).forEach((i) => { i.checked = false; i.closest(".chip").classList.remove("on"); }); exportEstimate(m); };
   bindExportAdv(m);
+  const mfBtn = $("#mf-analyze", m); if (mfBtn) mfBtn.onclick = async () => {
+    mfBtn.disabled = true; mfBtn.textContent = "analyzing…";
+    try { const presets = $$("input[name=preset]:checked", m).map((i) => i.value);
+      E.mfAnalysis = await api("POST", `/projects/${E.pid}/multiformat`, { presets: presets.length ? presets : undefined });
+      const info = $("#mf-info", m); if (info) info.innerHTML = mfInfoHtml();
+      toast("Smart reframing analysis done");
+    } catch (e) { toast(e.message); } finally { mfBtn.disabled = false; mfBtn.textContent = "🎯 Analyze"; }
+  };
   const gr = $("#go-render", m); if (gr) gr.onclick = async () => {
-    E.rs.presets = $$("input[name=preset]:checked", m).map((i) => i.value); E.rs.focus_x = +$("#focus", m).value;
+    E.rs.presets = $$("input[name=preset]:checked", m).map((i) => i.value);
+    const focusVal = $("#focus", m).value; E.rs.focus_x = focusVal === "auto" ? "auto" : +focusVal;
     if (!E.rs.presets.length) return toast("कम से कम एक platform चुनें");
     gr.disabled = true; gr.textContent = "सेव हो रहा…";
     // every edit must be on the server before the job is queued: the worker reads cuts/transcript from the project
@@ -2620,6 +2752,20 @@ function renderExport() {
   const ar = $("#archive", m); if (ar) ar.onclick = async () => { ar.disabled = true; ar.textContent = "भेज रहा है…"; try { const r = await api("POST", `/projects/${E.pid}/archive`); toast(`${r.moved} files archive, ${r.backed_up} renders backup`); await load(); } catch (e) { toast(e.message); ar.disabled = false; ar.textContent = "☁ archive"; } };
   const rs0 = $("#restore", m); if (rs0) rs0.onclick = async () => { rs0.disabled = true; try { const r = await api("POST", `/projects/${E.pid}/restore`); toast(`${r.restored} files वापस`); await load(); } catch (e) { toast(e.message); rs0.disabled = false; } };
   const ap = $("#approve", m); if (ap) ap.onclick = async () => { if (confirm("यह वीडियो मंज़ूर करें?")) { await api("POST", `/projects/${E.pid}/approve`); toast("मंज़ूर"); await load(); } };
+}
+
+// ---- multi-format smart reframing info ----
+function mfInfoHtml() {
+  if (!E.mfAnalysis) return "";
+  const a = E.mfAnalysis.analysis || {};
+  const presets = Object.keys(a);
+  if (!presets.length) return "कोई format select नहीं है";
+  const icons = { "crop": "✂", "blur": "🔲", "pad": "⬛" };
+  return presets.map((pid) => {
+    const info = a[pid]; const conf = Math.round((info.confidence || 0) * 100);
+    const confColor = conf >= 70 ? "var(--green,#34a853)" : conf >= 40 ? "var(--amber,#f9ab00)" : "var(--red,#ea4335)";
+    return `<span style="display:inline-block;margin:2px 6px 2px 0;padding:1px 6px;border-radius:4px;background:var(--bg2,#f0f0f0)">${icons[info.fit] || "✂"} <b>${pid}</b> focus ${(info.focus_x * 100).toFixed(0)}% ${info.needs_tracking ? "🎬track" : ""} <span style="color:${confColor}">${conf}%</span></span>`;
+  }).join("");
 }
 
 // ---- export options (resolution / fps / codec / quality / audio) — server: engine/encode.py

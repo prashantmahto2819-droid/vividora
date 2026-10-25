@@ -12,10 +12,26 @@ from pathlib import Path
 
 # Devanagari: vowel signs / independent vowels → mouth shape, consonants by articulation
 _DEV_VOWEL = {"अ": "AA", "आ": "AA", "ा": "AA", "इ": "EE", "ई": "EE", "ि": "EE", "ी": "EE", "ए": "EE", "ै": "EE", "े": "EE",
-              "उ": "OO", "ऊ": "OO", "ु": "OO", "ू": "OO", "ओ": "OO", "ो": "OO", "ौ": "OO", "ऑ": "AA", "ॉ": "AA", "ऋ": "DD"}
-_DEV_CONS = {"म": "MBP", "प": "MBP", "ब": "MBP", "भ": "MBP", "फ": "FV", "व": "FV", "ल": "L", "ळ": "L"}
+              "उ": "OO", "ऊ": "OO", "ु": "OO", "ू": "OO", "ओ": "OO", "ो": "OO", "ौ": "OO", "ऑ": "AA", "ॉ": "AA", "ऋ": "DD",
+              "ँ": "AA", "ं": "MBP", "ः": "AA", "ऐ": "EE", "औ": "OO"}
+_DEV_CONS = {"म": "MBP", "प": "MBP", "ब": "MBP", "भ": "MBP", "फ": "FV", "व": "FV", "ल": "L", "ळ": "L",
+             "त": "TH", "थ": "TH", "द": "TH", "ध": "TH", "न": "TH", "ट": "TH", "ठ": "TH", "ड": "TH", "ढ": "TH", "ण": "TH",
+             "क": "KG", "ख": "KG", "ग": "KG", "घ": "KG", "ङ": "KG",
+             "च": "CH", "छ": "CH", "ज": "CH", "झ": "CH", "ञ": "CH",
+             "स": "SS", "श": "SS", "ष": "SS", "ज़": "SS", "ह": "AA",
+             "य": "EE", "र": "DD", "ड़": "DD", "ढ़": "DD", "क़": "KG", "ख़": "KG", "ग़": "KG", "फ़": "FV"}
 _LAT_VOWEL = {"a": "AA", "e": "EE", "i": "EE", "o": "OO", "u": "OO", "y": "EE"}
-_LAT_CONS = {"m": "MBP", "b": "MBP", "p": "MBP", "f": "FV", "v": "FV", "w": "OO", "l": "L", "r": "DD"}
+_LAT_CONS = {"m": "MBP", "b": "MBP", "p": "MBP", "f": "FV", "v": "FV", "w": "OO", "l": "L", "r": "DD",
+             "t": "TH", "d": "TH", "n": "TH", "s": "SS", "z": "SS", "c": "KG", "k": "KG", "g": "KG",
+             "h": "AA", "j": "CH", "q": "KG", "x": "KG", "th": "TH", "sh": "SS", "ch": "CH"}
+
+# Coarticulation: how much each viseme shape blends into the next (0=instant, 1=full overlap)
+_COART = {"AA": 0.3, "EE": 0.4, "OO": 0.5, "MBP": 0.2, "FV": 0.3, "L": 0.3, "DD": 0.3,
+          "TH": 0.25, "KG": 0.2, "CH": 0.25, "SS": 0.35, "rest": 0.1}
+
+# Viseme openness weight (jaw contribution factor) — consonants need less jaw opening
+_OPENNESS = {"AA": 1.0, "EE": 0.7, "OO": 0.8, "MBP": 0.15, "FV": 0.3, "L": 0.5, "DD": 0.6,
+             "TH": 0.4, "KG": 0.35, "CH": 0.45, "SS": 0.3, "rest": 0.0}
 
 
 def visemes_of(word: str) -> list[str]:
@@ -112,6 +128,41 @@ def mouth_at(sched, env, t: float, hop: float = 0.02) -> tuple[str, float]:
     if v == "rest":
         return "rest", 0.0
     j = jaw_at(env, t, hop) if env else 0.7
-    if j < 0.08:
+    openness = _OPENNESS.get(v, 0.6)
+    j = j * openness  # scale jaw by viseme's natural openness
+    if j < 0.05:
         return ("rest" if v == "MBP" else v), 0.0
     return v, j
+
+
+def mouth_blend(sched, env, t: float, hop: float = 0.02) -> tuple[str, str, float, float]:
+    """Advanced: returns (current_viseme, next_viseme, jaw, blend_factor) for smooth interpolation.
+    blend_factor 0..1 indicates how far into the transition to the next viseme we are."""
+    v = viseme_at(sched, t)
+    if v == "rest":
+        return "rest", "rest", 0.0, 0.0
+    j = jaw_at(env, t, hop) if env else 0.7
+    openness = _OPENNESS.get(v, 0.6)
+    j = j * openness
+    # find current viseme's time window for blend calculation
+    lo, hi = 0, len(sched) - 1
+    blend = 0.0
+    nxt = "rest"
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        a, b, vis = sched[mid]
+        if t < a:
+            hi = mid - 1
+        elif t >= b:
+            lo = mid + 1
+        else:
+            dur = b - a
+            if dur > 0.01:
+                coart = _COART.get(v, 0.3)
+                transition_start = b - dur * coart
+                if t >= transition_start:
+                    blend = (t - transition_start) / (dur * coart)
+                    if mid + 1 < len(sched):
+                        nxt = sched[mid + 1][2]
+            break
+    return v, nxt, j, min(1.0, blend)

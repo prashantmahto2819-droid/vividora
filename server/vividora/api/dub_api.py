@@ -42,6 +42,19 @@ async def create_dub(request: Request, user: dict):
         pl = await run_in_threadpool(dub.plan, p, mode=mode, language=data.get("language"),
                                      script=str(data.get("script") or ""), effects=effects)
         voice = dub.resolve_voice(data.get("voice"), data.get("description"), pl["language"])
+        # ElevenLabs: allow frontend to override voice settings (stability, similarity_boost, style, use_speaker_boost)
+        el_overrides = data.get("elevenlabs_settings")
+        if el_overrides and isinstance(el_overrides, dict) and voice.get("engine") == "elevenlabs":
+            merged = dict(voice.get("elevenlabs_settings") or {})
+            for k in ("stability", "similarity_boost", "style"):
+                if k in el_overrides:
+                    try:
+                        merged[k] = max(0.0, min(1.0, float(el_overrides[k])))
+                    except (TypeError, ValueError):
+                        pass
+            if "use_speaker_boost" in el_overrides:
+                merged["use_speaker_boost"] = bool(el_overrides["use_speaker_boost"])
+            voice["elevenlabs_settings"] = merged
         # dialogue scripts: `Name: …` lines get the voice from the project's cast (settings.render.voice_cast)
         cast = dub.cast_payload(data.get("cast") if data.get("cast") is not None else rs.get("voice_cast"), pl["language"])
     except ValueError as e:

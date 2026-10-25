@@ -411,6 +411,34 @@ def _key(item: dict) -> str:
 ALPHA_RANGE = "lut=y='if(lt(val\\,22)\\,0\\,clip((val-16)*255/219\\,0\\,255))'"
 
 
+_CPN = [0]
+
+
+def color_pop_filter(alpha_label: str, video_label: str, out_label: str,
+                     bg_saturation: float = 0.0, bg_brightness: float = -0.02,
+                     bg_contrast: float = 1.05) -> list[str]:
+    """Color Pop: person stays in full color, background is desaturated (B&W by default).
+    Uses the person matte (alpha) to composite: colored person over desaturated background.
+    Returns a list of ffmpeg filter chain strings."""
+    _CPN[0] += 1
+    n = _CPN[0]
+    sat = max(0.0, min(1.0, float(bg_saturation)))
+    bri = max(-0.3, min(0.3, float(bg_brightness)))
+    con = max(0.5, min(2.0, float(bg_contrast)))
+    return [
+        # extract and clean alpha matte
+        f"{alpha_label}format=gray,{ALPHA_RANGE}[cpa{n}]",
+        # split video into person foreground and background
+        f"{video_label}split[cpfg{n}][cpbg{n}]",
+        # desaturate background
+        f"[cpbg{n}]eq=saturation={sat}:brightness={bri}:contrast={con}[cpbw{n}]",
+        # scale alpha to match foreground
+        f"[cpa{n}][cpfg{n}]scale2ref=flags=bicubic[cpam{n}][cpfgr{n}]",
+        # composite: coloured person over B&W background
+        f"[cpbw{n}][cpfgr{n}][cpam{n}]maskedmerge{out_label}",
+    ]
+
+
 def edge_filter(shrink: float, feather: float, short_side: int) -> str:
     """Edge refinement of a gray alpha: shrink (erode) the matte by `shrink` px and soften it by
     `feather` px. Values are in pixels of a 720p picture and scale with the real size."""
@@ -522,9 +550,21 @@ def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_la
 
 
 def watermark_filter(input_index: int, w: int, h: int, in_label: str, out_label: str,
-                     opacity: float = 0.75, size: float = 0.14, pos: str = "tr") -> str:
+                     opacity: float = 0.75, size: float = 0.14, pos: str = "tr",
+                     x: float | None = None, y: float | None = None,
+                     rotate: float = 0) -> str:
     lw = int(w * size)
     margin = int(min(w, h) * 0.035)
+    # free positioning: center-based normalized coords with rotation
+    if pos == "free" and x is not None and y is not None:
+        prep = f"[{input_index}:v]scale={lw}:-2,format=rgba"
+        if rotate:
+            prep += f",rotate={rotate}*PI/180:c=black@0:ow='hypot(iw,ih)':oh=ow"
+        prep += f",colorchannelmixer=aa={opacity:.2f}[wm]"
+        px = f"'{w * x:.1f}-w/2'"
+        py = f"'{h * y:.1f}-h/2'"
+        return f"{prep};{in_label}[wm]overlay=x={px}:y={py}{out_label}"
+    # backward-compatible corner positions
     place = {"tl": f"{margin}:{margin}", "tr": f"W-w-{margin}:{margin}",
              "bl": f"{margin}:H-h-{margin}", "br": f"W-w-{margin}:H-h-{margin}"}.get(pos, f"W-w-{margin}:{margin}")
     return (f"[{input_index}:v]scale={lw}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[wm];"
@@ -538,11 +578,14 @@ def title_events(titles: list[dict], width: int, height: int, font: str = "Poppi
 
 
 STICKER_ANIMS = {"none": "कोई नहीं", "fade": "Fade", "pop": "Pop (bounce in)", "bounce": "Bounce", "zoom": "Zoom in",
-                 "slide_up": "नीचे से", "slide_left": "दाएँ से", "drop": "ऊपर से गिरे", "shake": "Shake", "float": "Float"}
+                 "slide_up": "नीचे से", "slide_left": "दाएँ से", "drop": "ऊपर से गिरे", "shake": "Shake", "float": "Float",
+                 "spin": "Spin (घूमकर आए)", "flip": "Flip (पलटकर)", "elastic": "Elastic (spring)",
+                 "wiggle": "Wiggle (हिलना)", "glitch": "Glitch", "rotate_in": "Rotate in"}
 
 
 TEXT_ANIMS = {"none": "कोई नहीं", "fade": "Fade", "pop": "Pop", "slide_up": "Slide up", "slide_left": "Slide in (बाएँ से)",
-              "zoom_out": "Zoom out", "typewriter": "Typewriter", "bounce": "Bounce", "glow": "Glow pulse", "shake": "Shake"}
+              "zoom_out": "Zoom out", "typewriter": "Typewriter", "bounce": "Bounce", "glow": "Glow pulse", "shake": "Shake",
+              "flip": "Flip (पलटकर)", "spin": "Spin (घूमकर)", "wave": "Wave (लहर)", "elastic": "Elastic (spring)"}
 
 
 def text_anim_tags(anim: str, an: int, w: int, h: int, dur_ms: int) -> str:
@@ -571,6 +614,18 @@ def text_anim_tags(anim: str, an: int, w: int, h: int, dur_ms: int) -> str:
         return (f"\\fad(80,120)\\t(0,60,\\frz2)\\t(60,120,\\frz-2)\\t(120,180,\\frz1.5)\\t(180,240,\\frz-1)\\t(240,300,\\frz0)")
     if anim == "typewriter":
         return ""
+    if anim == "flip":
+        return f"\\fad(60,150)\\fscy0\\t(0,{o},\\fscy110)\\t({o},{o + 80},\\fscy100)"
+    if anim == "spin":
+        return f"\\fad(60,120)\\frz90\\fscx60\\fscy60\\t(0,{o},\\frz0\\fscx100\\fscy100)"
+    if anim == "wave":
+        half = dur_ms // 2
+        return (f"\\fad(100,100)\\frz-3\\t(0,{half // 3},\\frz3)\\t({half // 3},{2 * half // 3},\\frz-2)"
+                f"\\t({2 * half // 3},{half},\\frz1.5)\\t({half},{dur_ms},\\frz0)")
+    if anim == "elastic":
+        return (f"\\fad(60,120)\\fscx40\\fscy40\\t(0,{o // 2},\\fscx120\\fscy120)"
+                f"\\t({o // 2},{o},\\fscx90\\fscy90)\\t({o},{o + 100},\\fscx105\\fscy105)"
+                f"\\t({o + 100},{o + 180},\\fscx100\\fscy100)")
     return "\\fad(150,150)"
 
 

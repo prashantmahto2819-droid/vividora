@@ -1,0 +1,125 @@
+{
+ "id": "realestate_plot",
+ "name": "Real Estate — Plot for Sale",
+ "industry": "realestate",
+ "format": "square",
+ "tags": [
+  "realestate",
+  "plot",
+  "land",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "cta",
+  "address"
+ ],
+ "defaults": {
+  "business": "Land Deals",
+  "offer": "*प्लॉट बिकाऊ* — Prime Location",
+  "price": "₹ 15 लाख से",
+  "phone": "98765 43210",
+  "cta": "संपर्क करें",
+  "address": "NH-8 के पास, जयपुर"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#4CAF50",
+  "font": "Poppins",
+  "text": "{{offer}}",
+  "style": "box",
+  "hl": "#4CAF50",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1B5E20",
+   "color2": "#2E7D32",
+   "angle": 110
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.048,
+    "color": "#A5D6A7",
+    "font": "Poppins"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "pill",
+    "x": 0.5,
+    "y": 0.6,
+    "w": 0.4,
+    "h": 0.16,
+    "fill": 1,
+    "color": "#FFFFFF",
+    "shadow": 1
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.6,
+    "size": 0.055,
+    "color": "#1B5E20",
+    "font": "Poppins",
+    "stroke_w": 0
+   },
+   {
+    "uid": "address",
+    "txt": "{{address}}",
+    "x": 0.5,
+    "y": 0.73,
+    "size": 0.032,
+    "color": "#C8E6C9",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.83,
+    "size": 0.04,
+    "color": "#111",
+    "font": "Poppins",
+    "bg": "#A5D6A7"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.035,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.3,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:pricebox",
+     "s:price",
+     "s:address",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

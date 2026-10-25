@@ -1,0 +1,137 @@
+{
+ "id": "auto_usedcar",
+ "name": "Auto — Used Car Dealer",
+ "industry": "auto",
+ "format": "vertical",
+ "tags": [
+  "auto",
+  "ad",
+  "vertical"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "address",
+  "cta",
+  "product"
+ ],
+ "defaults": {
+  "business": "आपकी car dealership",
+  "price": "₹ 2.5 लाख से",
+  "phone": "98765 43210",
+  "address": "Auto Market, आपका शहर",
+  "cta": "test drive बुक करें",
+  "offer": "Certified *used cars*",
+  "tagline": "EMI available — exchange भी"
+ },
+ "settings": {
+  "template": "big_top",
+  "size": "vertical",
+  "no_person": true,
+  "accent": "#F44336",
+  "font": "Mukta",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#F44336",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A0A0A",
+   "color2": "#3D1515",
+   "angle": 155
+  },
+  "vignette": 0.25,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.07,
+    "size": 0.05,
+    "color": "#F44336",
+    "font": "Mukta"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "pill",
+    "x": 0.5,
+    "y": 0.55,
+    "w": 0.36,
+    "h": 0.22,
+    "fill": 1,
+    "color": "accent",
+    "shadow": 1,
+    "stroke": "#FFFFFF",
+    "stroke_w": 0.012
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.55,
+    "size": 0.042,
+    "color": "#111111",
+    "font": "Poppins",
+    "stroke_w": 0
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.72,
+    "size": 0.042,
+    "color": "#FFFFFF",
+    "font": "Mukta",
+    "bg": "#111111"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.88,
+    "size": 0.038,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   },
+   {
+    "uid": "address",
+    "txt": "{{address}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.028,
+    "color": "#FFFFFF",
+    "font": "Mukta"
+   },
+   {
+    "uid": "product",
+    "role": "product",
+    "x": 0.5,
+    "y": 0.47,
+    "w": 0.3,
+    "id": null
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "vertical": {
+    "text": {
+     "x": 0.5,
+     "y": 0.28,
+     "s": 1.05
+    },
+    "_order": [
+     "text",
+     "s:pricebox",
+     "s:price",
+     "s:product",
+     "s:business",
+     "s:cta",
+     "s:phone",
+     "s:address"
+    ]
+   }
+  }
+ }
+}

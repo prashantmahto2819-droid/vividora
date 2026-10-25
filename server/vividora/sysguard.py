@@ -179,6 +179,22 @@ def check_heavy_slots(c) -> bool:
 _BOOT = time.monotonic()
 
 
+def _optimization_info() -> dict[str, Any]:
+    """Current hwaccel optimization settings for the health endpoint."""
+    try:
+        from .engine import hwaccel
+        return {
+            "vaapi_device": hwaccel.vaapi_device(),
+            "vaapi_codecs": sorted(hwaccel.vaapi_supported_codecs()),
+            "cpu_count": hwaccel.cpu_count(),
+            "heavy_threads": max(2, hwaccel.cpu_count() // 2),
+            "encoder_preset": hwaccel.smart_preset(None),
+            "segment_seconds": hwaccel.smart_segment_seconds(),
+        }
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def system_snapshot() -> dict[str, Any]:
     """Full system resource snapshot for the enhanced health endpoint."""
     from . import db
@@ -232,6 +248,7 @@ def system_snapshot() -> dict[str, Any]:
             "max_concurrent_heavy": MAX_CONCURRENT_HEAVY,
         },
         "uptime_seconds": round(time.monotonic() - _BOOT),
+        "optimizations": _optimization_info(),
     }
 
 

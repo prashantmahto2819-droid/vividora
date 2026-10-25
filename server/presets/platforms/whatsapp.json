@@ -1,0 +1,17 @@
+{
+  "id": "whatsapp",
+  "label": "WhatsApp Status",
+  "platform": "whatsapp",
+  "width": 1080,
+  "height": 1920,
+  "fit": "crop",
+  "max_seconds": 30,
+  "burn_captions": true,
+  "sidecar_srt": false,
+  "caption_margin_v": 0.18,
+  "caption_scale": 1.0,
+  "safe_zone": {"width": 1080, "height": 1500},
+  "video": {"crf": 26, "preset": "fast", "fps_max": 30},
+  "audio": {"loudness": -14, "true_peak": -1.5},
+  "notes": "WhatsApp Status — max 30s, smaller file size for mobile sharing. CRF higher for compression."
+}

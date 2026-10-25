@@ -1,0 +1,86 @@
+{
+ "id": "festival_diwali",
+ "name": "Festival — Diwali",
+ "industry": "festival",
+ "format": "square",
+ "tags": [
+  "festival",
+  "diwali",
+  "greeting",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "आपका Business",
+  "offer": "*शुभ दीपावली* 🪔",
+  "tagline": "सुख, समृद्धि और खुशियों की कामना"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#FFD700",
+  "font": "PlayfairDisplay",
+  "text": "{{offer}}",
+  "style": "neon",
+  "hl": "#FFD700",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A0A00",
+   "color2": "#4A2000",
+   "angle": 180
+  },
+  "vignette": 0.4,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.1,
+    "size": 0.045,
+    "color": "#FFD700",
+    "font": "PlayfairDisplay"
+   },
+   {
+    "uid": "glow",
+    "shape": "circle",
+    "x": 0.5,
+    "y": 0.45,
+    "w": 0.35,
+    "fill": 1,
+    "color": "#FFD700",
+    "shadow": 1
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.78,
+    "size": 0.035,
+    "color": "#FFE082",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.42,
+     "s": 1.1
+    },
+    "_order": [
+     "s:glow",
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

@@ -479,6 +479,23 @@ async def export_estimate(request: Request, user: dict):
     return ok({"estimate": out, "export": exp})
 
 
+@require("viewer")
+async def multiformat_analyze(request: Request, user: dict):
+    """Smart reframing analysis — returns per-preset optimal focus + crop info."""
+    p = own_project(request, user)
+    from ..engine import multiformat
+    meta = p.get("meta") or {}
+    data = await body(request)
+    presets = data.get("presets") or [pr for pr in platforms()]
+    analysis = multiformat.analyze(meta, presets)
+    suggestions = multiformat.suggested_presets(meta)
+    # Add crop preview rectangles for the frontend overlay
+    previews = {}
+    for pid in presets:
+        previews[pid] = multiformat.preview_crop(meta, pid, frame_w=640)
+    return ok({"analysis": analysis, "suggestions": suggestions, "previews": previews})
+
+
 @require("editor")
 async def render(request: Request, user: dict):
     p = own_project(request, user)
@@ -854,6 +871,7 @@ routes = [
     Route("/projects/{project_id}/audio-preview", audio_preview, methods=["POST"]),
     Route("/projects/{project_id}/render", render, methods=["POST"]),
     Route("/projects/{project_id}/export-estimate", export_estimate, methods=["POST"]),
+    Route("/projects/{project_id}/multiformat", multiformat_analyze, methods=["POST"]),
     Route("/system/encoders", encoders),
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
     Route("/projects/{project_id}/jobs/{job_id}/cancel", job_cancel, methods=["POST"]),

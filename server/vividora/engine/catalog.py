@@ -205,6 +205,8 @@ EFFECTS += [
     _fx("gameboy", "Retro handheld", "stylized", "pixelize=w=6:h=6,hue=s=0,colorchannelmixer=rr=0.6:gg=0.9:bb=0.3", [], ["8bit", "green"]),
     _fx("cyber_tint", "Cyber tint", "stylized", "colorbalance=rs=-0.2:bs=0.25:rh=0.25:bh=0.1,eq=contrast=1.15:saturation=1.3", [], ["neon"], "hue-rotate(-20deg) saturate(1.3)"),
     _fx("color_isolate", "Color pop (लाल रहे)", "stylized", "colorhold=color=red:similarity={amount:n0.4}:blend=0.1", [_AMT(0.6)], ["splash", "selective"]),
+    {**_fx("color_pop", "Color Pop (इंसान रंगीन, बाकी B&W)", "portrait", "__color_pop__", [], ["colorpop", "bw_bg", "person_color"],
+           "grayscale(0.6)"), "needs_matte": True},
     _fx("noir", "Noir", "stylized", "hue=s=0,eq=contrast=1.45:brightness=-0.03,vignette=PI/3", [], ["bw"], "grayscale(1) contrast(1.45)"),
     _fx("high_key", "High key", "stylized", "eq=brightness=0.12:contrast=0.85:saturation=0.8", [], ["bright"], "brightness(1.12) contrast(0.85)"),
     # portrait

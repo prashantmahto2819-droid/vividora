@@ -1,0 +1,110 @@
+{
+ "id": "wedding_invitation",
+ "name": "Wedding — Invitation",
+ "industry": "wedding",
+ "format": "square",
+ "tags": [
+  "wedding",
+  "invitation",
+  "shaadi",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "address",
+  "phone"
+ ],
+ "defaults": {
+  "business": "राम & सीता",
+  "offer": "शादी का शुभ निमंत्रण",
+  "tagline": "15 दिसम्बर 2025 · शाम 7 बजे",
+  "address": "राजमहल बैंक्वेट, लखनऊ",
+  "phone": "98765 43210"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#D4AF37",
+  "font": "PlayfairDisplay",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#D4AF37",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#2D0A1E",
+   "color2": "#5C1A3A",
+   "angle": 180
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.15,
+    "size": 0.065,
+    "color": "#D4AF37",
+    "font": "PlayfairDisplay"
+   },
+   {
+    "uid": "divider",
+    "shape": "rect",
+    "x": 0.5,
+    "y": 0.56,
+    "w": 0.4,
+    "h": 0.003,
+    "fill": 1,
+    "color": "#D4AF37"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.63,
+    "size": 0.038,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   },
+   {
+    "uid": "address",
+    "txt": "{{address}}",
+    "x": 0.5,
+    "y": 0.75,
+    "size": 0.032,
+    "color": "#D4AF37",
+    "font": "Poppins"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.92,
+    "size": 0.03,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.38,
+     "s": 0.9
+    },
+    "_order": [
+     "s:business",
+     "text",
+     "s:divider",
+     "s:tagline",
+     "s:address",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

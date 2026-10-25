@@ -1,0 +1,75 @@
+{
+ "id": "podcast_guest",
+ "name": "Podcast — Guest Feature",
+ "industry": "podcast",
+ "format": "square",
+ "tags": [
+  "podcast",
+  "guest",
+  "interview",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "Deep Dive Podcast",
+  "offer": "Special Guest: *Expert Name*",
+  "tagline": "Topic: AI in Healthcare · Live Friday 8 PM"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": false,
+  "accent": "#FF4081",
+  "font": "Montserrat",
+  "text": "{{offer}}",
+  "style": "box",
+  "hl": "#FF4081",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A0011",
+   "color2": "#33001A",
+   "angle": 110
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.045,
+    "color": "#FF80AB",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.85,
+    "size": 0.028,
+    "color": "#FF80AB",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": true,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.3,
+     "s": 0.9
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

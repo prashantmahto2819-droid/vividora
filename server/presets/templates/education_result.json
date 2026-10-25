@@ -1,0 +1,75 @@
+{
+ "id": "education_result",
+ "name": "Education — Result Celebration",
+ "industry": "education",
+ "format": "square",
+ "tags": [
+  "education",
+  "result",
+  "topper",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "ABC Coaching",
+  "offer": "*99.5%* — Board Topper! 🏆",
+  "tagline": "हमारे 50+ students ने किया top"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": false,
+  "accent": "#FFD600",
+  "font": "Anton",
+  "text": "{{offer}}",
+  "style": "neon",
+  "hl": "#FFD600",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A237E",
+   "color2": "#283593",
+   "angle": 180
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.052,
+    "color": "#FFD600",
+    "font": "Anton"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.82,
+    "size": 0.035,
+    "color": "#9FA8DA",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": true,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.35,
+     "s": 1.1
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

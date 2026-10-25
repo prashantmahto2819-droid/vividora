@@ -1,0 +1,111 @@
+{
+ "id": "grocery_organic",
+ "name": "Grocery — Organic Products",
+ "industry": "grocery",
+ "format": "square",
+ "tags": [
+  "grocery",
+  "organic",
+  "natural",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "Nature's Basket",
+  "offer": "100% *Organic* Products",
+  "price": "₹ 199 onwards",
+  "phone": "98765 43210",
+  "cta": "Order Online"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#66BB6A",
+  "font": "Lora",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#66BB6A",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1B3A1B",
+   "color2": "#2E5A2E",
+   "angle": 180
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.048,
+    "color": "#A5D6A7",
+    "font": "Lora"
+   },
+   {
+    "uid": "leaf",
+    "shape": "circle",
+    "x": 0.5,
+    "y": 0.48,
+    "w": 0.2,
+    "fill": 0,
+    "stroke": "#66BB6A",
+    "stroke_w": 0.006
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.65,
+    "size": 0.045,
+    "color": "#C8E6C9",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.8,
+    "size": 0.04,
+    "color": "#1B5E20",
+    "font": "Lora",
+    "bg": "#A5D6A7"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.033,
+    "color": "#81C784",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.28,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:leaf",
+     "s:business",
+     "s:price",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

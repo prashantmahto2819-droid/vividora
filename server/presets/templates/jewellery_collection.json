@@ -1,0 +1,108 @@
+{
+ "id": "jewellery_collection",
+ "name": "Jewellery — New Collection",
+ "industry": "jewellery",
+ "format": "square",
+ "tags": [
+  "jewellery",
+  "gold",
+  "collection",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "phone"
+ ],
+ "defaults": {
+  "business": "Shree Jewellers",
+  "offer": "New *Bridal Collection*",
+  "tagline": "22 Karat Gold · Hallmark Certified",
+  "phone": "98765 43210"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#C9A96E",
+  "font": "PlayfairDisplay",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#C9A96E",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A1A1A",
+   "color2": "#2D2D2D",
+   "angle": 180
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.05,
+    "color": "#C9A96E",
+    "font": "PlayfairDisplay"
+   },
+   {
+    "uid": "frame",
+    "shape": "rect",
+    "x": 0.5,
+    "y": 0.5,
+    "w": 0.8,
+    "h": 0.75,
+    "fill": 0,
+    "stroke": "#C9A96E",
+    "stroke_w": 0.008
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.72,
+    "size": 0.03,
+    "color": "#C9A96E",
+    "font": "Poppins"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.032,
+    "color": "#999",
+    "font": "Poppins"
+   },
+   {
+    "uid": "product",
+    "role": "product",
+    "x": 0.5,
+    "y": 0.45,
+    "w": 0.35,
+    "id": null
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.25,
+     "s": 0.95
+    },
+    "_order": [
+     "s:frame",
+     "text",
+     "s:product",
+     "s:business",
+     "s:tagline",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

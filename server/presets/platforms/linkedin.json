@@ -1,0 +1,16 @@
+{
+  "id": "linkedin",
+  "label": "LinkedIn Video",
+  "platform": "linkedin",
+  "width": 1080,
+  "height": 1080,
+  "fit": "blur",
+  "max_seconds": 600,
+  "burn_captions": true,
+  "sidecar_srt": true,
+  "caption_margin_v": 0.10,
+  "caption_scale": 0.85,
+  "video": {"crf": 22, "preset": "medium", "fps_max": 30},
+  "audio": {"loudness": -14, "true_peak": -1.5},
+  "notes": "Square LinkedIn video with burned captions — most LinkedIn is watched without sound."
+}

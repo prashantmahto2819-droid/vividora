@@ -480,6 +480,15 @@ export function brollInspector(it, dis) {
     <div class="irow">${H.field("कैसे", `<select data-k="fit" ${dis}>${[["cover", "पूरा frame (cover)"], ["contain", "पूरा दिखे (contain)"], ["pip", "छोटा box (PiP)"], ["free", "free (जगह/size/घुमाव)"]].map(([v, l]) => `<option value="${v}" ${fit === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
       ${fit === "pip" ? H.field("कोना", `<select data-k="pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${(it.pos || "tr") === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`) : ""}
       ${fit === "free" ? H.field(`size <b>${(+(it.scale ?? 0.4)).toFixed(2)}</b>`, `<input type="range" data-k="scale" min="0.03" max="2.5" step="0.01" value="${it.scale ?? 0.4}" ${dis}>`) : ""}</div>
+    <div class="box" style="margin:6px 0;padding:8px 10px;border-left:3px solid var(--accent,#7c3aed)"><b class="small">🎬 Smart Layout (render में)</b>
+      <div class="irow">${H.field("layout mode", `<select data-k="layout" ${dis}>${[["", "Default (fullscreen)"], ["behind", "🧑 Smart — इंसान सामने, B-roll पीछे"], ["pip", "📺 PiP — छोटी window"], ["split", "⬛⬜ Split screen"], ["overlay", "🌫 Semi-transparent overlay"]].map(([v, l]) => `<option value="${v}" ${(it.layout || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}</div>
+      ${(it.layout || "") === "behind" ? `<div class="irow">${H.field(`edge softness <b>${(+(it.edge_feather ?? 0)).toFixed(1)}</b>`, `<input type="range" data-pk="edge_feather" min="0" max="30" step="1" value="${it.edge_feather ?? 0}" ${dis}>`)}${H.field(`shrink <b>${(+(it.edge_shrink ?? 0)).toFixed(1)}</b>`, `<input type="range" data-pk="edge_shrink" min="0" max="20" step="1" value="${it.edge_shrink ?? 0}" ${dis}>`)}</div><p class="small muted">person matte (cutout) ज़रूरी — नहीं है तो auto बनेगा render में। edge feather = धुँधला किनारा।</p>` : ""}
+      ${(it.layout || "") === "pip" ? `<div class="irow">${H.field("corner", `<select data-pk="pip_corner" ${dis}>${[["br", "नीचे दाएँ"], ["bl", "नीचे बाएँ"], ["tr", "ऊपर दाएँ"], ["tl", "ऊपर बाएँ"]].map(([v, l]) => `<option value="${v}" ${(it.pip_corner || "br") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}${H.field(`size <b>${Math.round((+(it.pip_size ?? 0.28)) * 100)}%</b>`, `<input type="range" data-pk="pip_size" min="0.15" max="0.4" step="0.02" value="${it.pip_size ?? 0.28}" ${dis}>`)}</div>
+        <div class="irow">${H.field(`radius <b>${+(it.pip_radius ?? 12)}</b>`, `<input type="range" data-pk="pip_radius" min="0" max="40" step="2" value="${it.pip_radius ?? 12}" ${dis}>`)}${H.field(`feather <b>${+(it.feather ?? 6)}</b>`, `<input type="range" data-pk="feather" min="0" max="24" step="2" value="${it.feather ?? 6}" ${dis}>`)}</div>` : ""}
+      ${(it.layout || "") === "split" ? `<div class="irow">${H.field("ratio", `<select data-pk="split_ratio" ${dis}>${[["50_50", "50/50"], ["60_40", "60/40 (इंसान ज़्यादा)"], ["40_60", "40/60 (B-roll ज़्यादा)"]].map(([v, l]) => `<option value="${v}" ${(it.split_ratio || "50_50") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}${H.field("side", `<select data-pk="split_side" ${dis}>${[["person_left", "इंसान बाएँ"], ["person_right", "इंसान दाएँ"]].map(([v, l]) => `<option value="${v}" ${(it.split_side || "person_left") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}</div>
+        ${H.field(`seam feather <b>${+(it.feather ?? 12)}</b>`, `<input type="range" data-pk="feather" min="0" max="40" step="2" value="${it.feather ?? 12}" ${dis}>`)}` : ""}
+      ${(it.layout || "") === "overlay" ? `<div class="irow">${H.field(`opacity <b>${Math.round((+(it.opacity ?? 0.35)) * 100)}%</b>`, `<input type="range" data-pk="opacity" min="0.05" max="0.95" step="0.05" value="${it.opacity ?? 0.35}" ${dis}>`)}${H.field(`feather <b>${+(it.feather ?? 18)}</b>`, `<input type="range" data-pk="feather" min="0" max="40" step="2" value="${it.feather ?? 18}" ${dis}>`)}</div>` : ""}
+    </div>
     <div class="layouts"><span class="small muted">Layout</span>${[["full", "पूरा frame", LAYOUT_IC.full], ["pip_tl", "PiP ऊपर बाएँ", LAYOUT_IC.tl], ["pip_tr", "PiP ऊपर दाएँ", LAYOUT_IC.tr], ["pip_bl", "PiP नीचे बाएँ", LAYOUT_IC.bl], ["pip_br", "PiP नीचे दाएँ", LAYOUT_IC.br], ["2up", "2-up split screen", LAYOUT_IC.s2], ["3up", "3-up split screen", LAYOUT_IC.s3]].map(([k, l, ic]) => `<button class="lyb" data-layout="${k}" title="${l}${k.endsWith("up") ? " — इसी समय के सारे overlay clips (दूसरे V tracks पर) एक साथ" : ""}" ${dis}><svg viewBox="0 0 18 24">${ic}</svg></button>`).join("")}</div>`;
   // --- transform (keyframeable)
   h += sec("tf", "Position · Zoom · घुमाव", `${["x", "y", "scale", "rotation"].map((p) => kfSlider(o, p, dis)).join("")}
@@ -586,7 +595,8 @@ export function bindBrollInspector(ins, it) {
     else if (k === "trim_in") it.trim_in = r3(Math.min(v, it.trim_out != null && it.trim_out !== "" ? +it.trim_out - 0.1 : v));
     else if (k === "volume") it.volume = v; else if (k === "speed_warp") { if (v === "off") delete it.speed_warp; else it.speed_warp = v; }
     else if (k === "blend_mode") { if (v === "normal") delete it.blend_mode; else it.blend_mode = v; }
-    const lb = el.closest(".ifield")?.querySelector("label b"); if (lb && el.type === "range") lb.textContent = k === "volume" ? Math.round(v * 100) + "%" : v.toFixed(2) + "s";
+    else it[k] = v;
+    const lb = el.closest(".ifield")?.querySelector("label b"); if (lb && el.type === "range") lb.textContent = k === "volume" ? Math.round(v * 100) + "%" : k === "pip_size" || k === "opacity" ? Math.round(v * 100) + "%" : k === "edge_feather" || k === "edge_shrink" || k === "pip_radius" || k === "feather" ? String(Math.round(v)) : v.toFixed(2) + "s";
     H.touch(); after(); if (el.type !== "range" || el.tagName === "SELECT") H.renderInspector(); }));
   const am = $("[data-amute]", ins); if (am) am.onchange = () => { it.volume = am.checked ? 0 : 1; re(); };
   $$("[data-gcc]", ins).forEach((b) => (b.onclick = () => { ed.gCatClip = b.dataset.gcc; H.renderInspector(); }));
@@ -960,9 +970,12 @@ export function bindAutopilot(el) {
 
 // ====================================================================== shortcuts help (?)
 export function shortcutsHtml() {
-  const K = [["Space", "चलाएँ / रोकें"], ["← / →", "1 frame (Shift = 1 s)"], ["Home / End", "शुरू / अंत"], ["I / O", "हिस्सा चुनें (In / Out)"], ["X", "In–Out हटाएँ (कट)"], ["S", "playhead पर split"],
+  const K = [["Space", "चलाएँ / रोकें"], ["← / →", "1 frame (Shift = 1 s)"], ["Home / End", "शुरू / अंत"], ["I / O", "हिस्सा चुनें (In / Out)"], ["X", "In–Out हटाएँ (कट)"], ["S / C", "playhead पर split"],
     ["Del / Backspace", "चुना item हटाएँ · Text से edit में: चुने शब्द काटें"], ["Ctrl+Z / Ctrl+Y", "undo / redo"], ["Ctrl+S", "सेव"], ["Ctrl+D", "duplicate"], ["F", "full screen"],
-    ["M", "playhead पर marker (Shift+M = chapter)"], ["K", "चुने clip/main video पर ◆ keyframe (position, zoom, घुमाव, opacity)"], ["Alt+← / Alt+→", "पिछला / अगला keyframe"], ["Esc", "selection हटाएँ"], ["?", "यह सूची"]];
+    ["J / K / L", "shuttle: J = पीछे, K = रोकें, L = आगे (speed बढ़ता है)"],
+    ["M", "playhead पर marker (Shift+M = chapter)"], ["K", "चुने clip/main video पर ◆ keyframe (position, zoom, घुमाव, opacity)"], ["Alt+← / Alt+→", "पिछला / अगला keyframe"],
+    ["G", "snap on/off (timeline items एक-दूसरे से चिपके)"],
+    ["Esc", "selection हटाएँ"], ["?", "यह सूची"]];
   return `<div class="modal shortcuts"><div class="row between"><h2>⌨ Keyboard shortcuts</h2><button class="ibtn" data-scx>✕</button></div><table>${K.map(([k, l]) => `<tr><td>${k.split(" / ").map((x) => `<kbd>${esc(x)}</kbd>`).join(" / ")}</td><td>${esc(l)}</td></tr>`).join("")}</table></div>`;
 }
 

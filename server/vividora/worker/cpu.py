@@ -143,6 +143,15 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
                     if key == "broll" and item.get("cutout") and kind == "video":
                         out[-1]["alpha_path"] = _lib_alpha(client, item["id"], tmp, e)
         e[key] = out
+    # Smart Layout: B-roll with layout="behind" needs the main video's person matte
+    from ..engine import layout as smart_layout
+    if any(smart_layout.needs_main_alpha(it) for it in (e.get("broll") or []) if isinstance(it, dict)):
+        alpha = next((a for a in (assets or []) if a["kind"] == "alpha"), None)
+        if alpha:
+            alpha_path = tmp / "main_alpha.mp4"
+            if not alpha_path.exists():
+                alpha_path = client.download(alpha["id"], alpha_path)
+            e["_main_alpha_path"] = str(alpha_path)
     # AI voice-over / dub chosen as the voice: download that project file like the other assets
     vt = e.get("voice_track")
     if vt and vt != "original":
@@ -200,10 +209,21 @@ HEAVY_KINDS = {"render", "montage", "matte", "dub", "transcribe"}
 
 
 def _x264_preset(p: dict) -> str | None:
-    """Export "draft" mode encodes fast; otherwise the X264_PRESET env (or the platform preset's own)."""
+    """Export "draft" mode encodes fast; otherwise memory-aware selection.
+
+    Priority: draft → env X264_PRESET → hwaccel.smart_preset (memory-aware).
+    """
     if ((p.get("export") or {}).get("quality") == "draft"):
         return "veryfast"
-    return os.getenv("X264_PRESET") or None
+    env = os.getenv("X264_PRESET")
+    if env:
+        return env
+    # Let hwaccel decide based on available RAM
+    try:
+        from ..engine import hwaccel
+        return hwaccel.smart_preset(None)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> dict:

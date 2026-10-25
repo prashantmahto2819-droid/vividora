@@ -1,0 +1,96 @@
+{
+ "id": "tech_launch",
+ "name": "Tech — Product Launch",
+ "industry": "tech",
+ "format": "square",
+ "tags": [
+  "tech",
+  "launch",
+  "startup",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "website"
+ ],
+ "defaults": {
+  "business": "TechVerse",
+  "offer": "Introducing *AppName* 2.0",
+  "tagline": "Faster · Smarter · Better",
+  "website": "www.yourapp.com"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#6C63FF",
+  "font": "Montserrat",
+  "text": "{{offer}}",
+  "style": "block",
+  "hl": "#6C63FF",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0A0A1A",
+   "color2": "#1A1A3E",
+   "angle": 180
+  },
+  "vignette": 0.15,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.048,
+    "color": "#6C63FF",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.65,
+    "size": 0.035,
+    "color": "#B0BEC5",
+    "font": "Poppins"
+   },
+   {
+    "uid": "website",
+    "txt": "{{website}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.03,
+    "color": "#6C63FF",
+    "font": "Poppins"
+   },
+   {
+    "uid": "product",
+    "role": "product",
+    "x": 0.5,
+    "y": 0.48,
+    "w": 0.3,
+    "id": null
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.25,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:product",
+     "s:tagline",
+     "s:website"
+    ]
+   }
+  }
+ }
+}

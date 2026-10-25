@@ -1,0 +1,85 @@
+{
+ "id": "festival_eid",
+ "name": "Festival — Eid",
+ "industry": "festival",
+ "format": "square",
+ "tags": [
+  "festival",
+  "eid",
+  "greeting",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "आपका Business",
+  "offer": "*Eid Mubarak* 🌙",
+  "tagline": "चाँद रात की ढेर सारी मुबारकबाद"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#00C853",
+  "font": "PlayfairDisplay",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#00C853",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#003300",
+   "color2": "#1B5E20",
+   "angle": 180
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.045,
+    "color": "#A5D6A7",
+    "font": "PlayfairDisplay"
+   },
+   {
+    "uid": "moon",
+    "shape": "circle",
+    "x": 0.7,
+    "y": 0.18,
+    "w": 0.12,
+    "fill": 1,
+    "color": "#FFD700"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.78,
+    "size": 0.033,
+    "color": "#A5D6A7",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.42,
+     "s": 1.0
+    },
+    "_order": [
+     "s:moon",
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

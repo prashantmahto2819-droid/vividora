@@ -151,6 +151,13 @@ async def workers_status(request: Request, user: dict):
 
 
 @require("viewer")
+async def queue_status(request: Request, user: dict):
+    """Live queue health: queued/running counts, per-user breakdown, limits."""
+    with db.tx() as c:
+        return ok(queue.queue_status(c))
+
+
+@require("viewer")
 async def activity(request: Request, user: dict):
     rows = db.rows(db.conn().execute(
         "SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id "
@@ -166,5 +173,6 @@ routes = [
     Route("/worker/jobs/{job_id}/upload", upload, methods=["PUT"]),
     Route("/worker/files/{asset_id}", file),
     Route("/status", workers_status),
+    Route("/queue", queue_status),
     Route("/activity", activity),
 ]

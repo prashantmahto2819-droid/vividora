@@ -74,9 +74,12 @@ def ideas(topics: list[str], *, count: int = 6, fmt: str = "short", language: st
 def script(idea: dict, *, fmt: str = "short", language: str = "hi", target_seconds: int | None = None) -> dict:
     secs = target_seconds or (45 if fmt == "short" else 480 if fmt == "long" else 30)
     words = int(secs * 2.3)  # ~140 Hindi words/minute on camera
-    fallback = {"script": (f"[HOOK — पहले 2 सेकंड]\n{idea.get('hook') or idea.get('title')}\n\n[SETUP]\n(किसकी कहानी? कहाँ? एक लाइन में समस्या)\n\n"
-                           f"[STORY]\n{idea.get('outline') or '…'}\n\n[TURN]\n(वो एक पल जहाँ सब बदला)\n\n[LESSON]\n(एक लाइन में सीख — वही जो title promise करता है)\n\n"
-                           f"[CTA]\nअगर यह बात दिल को लगी तो follow करो — ऐसी कहानियाँ रोज़ आती हैं।"),
+    fallback = {"script": (f"[HOOK]\n\n{idea.get('hook') or idea.get('title')}\n\n\n"
+                           f"[SETUP]\n\n(किसकी कहानी? कहाँ? एक लाइन में समस्या)\n\n\n"
+                           f"[STORY]\n\n{idea.get('outline') or '…'}\n\n\n"
+                           f"[TURN]\n\n(वो एक पल जहाँ सब बदला)\n\n\n"
+                           f"[LESSON]\n\n(एक लाइन में सीख — वही जो title promise करता है)\n\n\n"
+                           f"[CTA]\n\nअगर यह बात दिल को लगी तो follow करो — ऐसी कहानियाँ रोज़ आती हैं।"),
                 "words": words, "seconds": secs, "source": "template",
                 "shotlist": ["talking head, eye-level", "B-roll: सुबह / रास्ता / मेहनत", "text overlay on the lesson line"]}
     if not llm.available():
@@ -86,7 +89,14 @@ def script(idea: dict, *, fmt: str = "short", language: str = "hi", target_secon
               f"Write the on-camera script for: {idea.get('title')}\nHook: {idea.get('hook')}\nAngle: {idea.get('angle')}\n"
               f"Outline: {idea.get('outline')}\nFormat: {FORMATS.get(fmt, fmt)}, about {secs} seconds (~{words} words).\n"
               f"Language: {'spoken Hindi/Hinglish as this creator talks' if language != 'en' else 'English'}. Spoken, not written — short "
-              "sentences, no headings inside the speech. Mark sections in square brackets: [HOOK] [SETUP] [STORY] [TURN] [LESSON] [CTA]. "
+              "sentences, no headings inside the speech. Mark sections in square brackets with a blank line between each: "
+              "[HOOK] [SETUP] [STORY] [TURN] [LESSON] [CTA].\n"
+              "HOOK RULES (first 2 seconds — most important):\n"
+              "- Must create instant curiosity or shock — the viewer decides to stay or scroll in 1.5 seconds\n"
+              "- Use one of: a bold contrarian claim, a specific number/stat, a 'what if' question, a pattern interrupt, or an emotional punch\n"
+              "- NO generic openings like 'aaj hum baat karenge' or 'kya aapne socha hai'\n"
+              "- Keep it under 12 words — punchy, specific, surprising\n"
+              "Each section should have 1-2 blank lines between them for breathing room.\n"
               "Also give 4–6 shot/B-roll suggestions and 3 on-screen text lines. "
               'Reply JSON: {"script":"...","shotlist":["..."],"overlays":["..."],"title_options":["..."]}')
     data = llm.ask_json(prompt, system="You are a screenwriter for short motivational videos. JSON only.", max_tokens=3500)
@@ -133,7 +143,7 @@ def structured(script: str) -> dict:
 
 
 def join_sections(secs: list[dict]) -> str:
-    return "\n\n".join(f"[{s['key']}]\n{s['text'].strip()}" for s in secs if s.get("text", "").strip() or s.get("key") == "HOOK")
+    return "\n\n\n".join(f"[{s['key']}]\n\n{s['text'].strip()}" for s in secs if s.get("text", "").strip() or s.get("key") == "HOOK")
 
 
 SECTION_MODES = {"rewrite": "Rewrite this section from scratch with a fresh angle; same meaning, different words and rhythm.",
@@ -178,9 +188,14 @@ def hook_options(idea: dict, script: str, language: str = "hi", pack: dict | Non
     prompt = ((f"Creator voice & style:\n{voice}\n\n" if voice else "") +
               f"Video: {idea.get('title')}\nAngle: {idea.get('angle')}\nOutline: {idea.get('outline')}\nCurrent hook: {cur}\n"
               f"Language: {'spoken Hindi/Hinglish' if language != 'en' else 'English'}. Write 3 different scroll-stopping opening lines "
-              "(≤14 words each, spoken: one a question, one a shock/contrast, one a promise). No clickbait lies. "
+              "(≤12 words each, spoken). Each hook MUST:\n"
+              "- Use a specific number, name, or detail — never vague\n"
+              "- Create a gap the viewer NEEDS to close (curiosity, disbelief, or fear of missing out)\n"
+              "- Sound like a friend grabbing your shoulder, not a teacher starting a lecture\n"
+              "Types: one a bold contrarian claim, one a 'did you know' with a shocking stat, one an emotional gut-punch. "
+              "No clickbait lies. No 'aaj hum baat karenge' or 'kya aapne kabhi socha'. "
               'Reply JSON: {"hooks": ["...", "...", "..."]}')
-    data = llm.ask_json(prompt, system="You write hooks for short Hindi motivational videos. JSON only.", max_tokens=600)
+    data = llm.ask_json(prompt, system="You write viral hooks for short Hindi motivational videos. Every word must earn its place. JSON only.", max_tokens=600)
     hooks = [str(h).strip() for h in ((data.get("hooks") if isinstance(data, dict) else None) or []) if str(h).strip()][:3]
     if not hooks:
         return {"ok": False, "error": llm.LAST_ERROR or "AI से जवाब नहीं आया", "hooks": []}

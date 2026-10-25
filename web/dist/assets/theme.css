@@ -181,6 +181,7 @@ select option:checked { background-color: #3A3020; color: #FFC65C; }
 :is(.app2, .login) .btn.primary:not(:where(#throot *)):hover { background: var(--amber-hi); border-color: var(--amber-hi); }
 :is(.app2, .login) .btn.quiet:not(:where(#throot *)) { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-2); }
 :is(.app2, .login) .btn.quiet:not(:where(#throot *)):hover { background: rgba(255, 255, 255, .06); color: var(--text); }
+:is(.app2, .login) .btn.quiet.active:not(:where(#throot *)) { background: var(--accent, #7c3aed); color: #fff; border-color: var(--accent, #7c3aed); }
 :is(.app2, .login) .btn.danger:not(:where(#throot *)) { color: var(--rose); background: var(--rose-soft); border-color: var(--rose-line); }
 :is(.app2, .login) .btn.danger:not(:where(#throot *)):hover { background: rgba(242, 123, 114, .2); border-color: var(--rose); }
 :is(.app2, .login) .btn.danger.quiet:not(:where(#throot *)) { background: transparent; border-color: transparent; }

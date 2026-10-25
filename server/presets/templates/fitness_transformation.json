@@ -1,0 +1,100 @@
+{
+ "id": "fitness_transformation",
+ "name": "Fitness — Transformation",
+ "industry": "fitness",
+ "format": "square",
+ "tags": [
+  "fitness",
+  "transformation",
+  "gym",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "FitZone Gym",
+  "offer": "*30 Day* Transformation",
+  "tagline": "Before → After · Real Results",
+  "phone": "98765 43210",
+  "cta": "Join Now"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": false,
+  "accent": "#FF3D00",
+  "font": "Anton",
+  "text": "{{offer}}",
+  "style": "block",
+  "hl": "#FF3D00",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A1A1A",
+   "color2": "#333333",
+   "angle": 110
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.05,
+    "color": "#FF6E40",
+    "font": "Anton"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.65,
+    "size": 0.035,
+    "color": "#FFAB91",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.82,
+    "size": 0.042,
+    "color": "#FFFFFF",
+    "font": "Anton",
+    "bg": "#FF3D00"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.033,
+    "color": "#BDBDBD",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": true,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.3,
+     "s": 1.1
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

@@ -1,0 +1,100 @@
+{
+ "id": "wedding_vendor",
+ "name": "Wedding — Vendor Ad",
+ "industry": "wedding",
+ "format": "square",
+ "tags": [
+  "wedding",
+  "vendor",
+  "service",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "phone",
+  "cta",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "Royal Photography",
+  "offer": "Wedding Photography *Package*",
+  "phone": "98765 43210",
+  "cta": "Book Now",
+  "tagline": "From ₹ 25,000"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#9C27B0",
+  "font": "Montserrat",
+  "text": "{{offer}}",
+  "style": "box",
+  "hl": "#CE93D8",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A0025",
+   "color2": "#380050",
+   "angle": 110
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.05,
+    "color": "#CE93D8",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.62,
+    "size": 0.05,
+    "color": "#FFD700",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.78,
+    "size": 0.042,
+    "color": "#111",
+    "font": "Montserrat",
+    "bg": "#CE93D8"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.92,
+    "size": 0.035,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.35,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

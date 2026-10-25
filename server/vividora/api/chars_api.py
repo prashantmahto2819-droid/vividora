@@ -79,7 +79,7 @@ def _pose_from_query(q) -> dict:
 @require("viewer")
 async def list_chars(request: Request, user: dict):
     return ok({"library": catalog.library(), "custom": _custom(user["workspace_id"]), "options": catalog.options(),
-               "clips": anim.clip_list(), "voices": [{k: v.get(k) for k in ("id", "label", "lang", "gender")} for v in tts.VOICE_PRESETS]})
+               "clips": anim.clip_list(), "voices": [{k: v.get(k) for k in ("id", "label", "lang", "gender", "engine", "cloud")} for v in tts.available_voices()]})
 
 
 @require("viewer")

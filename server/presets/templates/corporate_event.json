@@ -1,0 +1,100 @@
+{
+ "id": "corporate_event",
+ "name": "Corporate — Event",
+ "industry": "corporate",
+ "format": "yt",
+ "tags": [
+  "corporate",
+  "event",
+  "conference",
+  "yt"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "website",
+  "cta"
+ ],
+ "defaults": {
+  "business": "TechConf 2025",
+  "offer": "Annual *Leadership Summit*",
+  "tagline": "Dec 15-17 · Hyatt Regency, Delhi",
+  "website": "www.techconf.in",
+  "cta": "Register Now"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "yt",
+  "no_person": true,
+  "accent": "#37474F",
+  "font": "Montserrat",
+  "text": "{{offer}}",
+  "style": "box",
+  "hl": "#78909C",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#ECEFF1",
+   "color2": "#CFD8DC",
+   "angle": 135
+  },
+  "vignette": 0.1,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.1,
+    "size": 0.055,
+    "color": "#37474F",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.65,
+    "size": 0.032,
+    "color": "#546E7A",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.82,
+    "size": 0.038,
+    "color": "#FFFFFF",
+    "font": "Montserrat",
+    "bg": "#37474F"
+   },
+   {
+    "uid": "website",
+    "txt": "{{website}}",
+    "x": 0.5,
+    "y": 0.92,
+    "size": 0.025,
+    "color": "#78909C",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "yt": {
+    "text": {
+     "x": 0.5,
+     "y": 0.4,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:cta",
+     "s:website"
+    ]
+   }
+  }
+ }
+}

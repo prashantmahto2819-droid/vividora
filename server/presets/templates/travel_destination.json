@@ -1,0 +1,88 @@
+{
+ "id": "travel_destination",
+ "name": "Travel — Destination",
+ "industry": "travel",
+ "format": "story",
+ "tags": [
+  "travel",
+  "destination",
+  "explore",
+  "story"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "cta"
+ ],
+ "defaults": {
+  "business": "Incredible India",
+  "offer": "Explore *Rajasthan*",
+  "tagline": "Heritage · Culture · Desert Safari",
+  "cta": "Plan Your Trip"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "story",
+  "no_person": true,
+  "accent": "#FFB300",
+  "font": "Oswald",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#FFB300",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A1A2E",
+   "color2": "#16213E",
+   "angle": 180
+  },
+  "vignette": 0.3,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.06,
+    "size": 0.04,
+    "color": "#FFB300",
+    "font": "Oswald"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.58,
+    "size": 0.032,
+    "color": "#E0E0E0",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.9,
+    "size": 0.038,
+    "color": "#111",
+    "font": "Oswald",
+    "bg": "#FFB300"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "story": {
+    "text": {
+     "x": 0.5,
+     "y": 0.4,
+     "s": 1.3
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:cta"
+    ]
+   }
+  }
+ }
+}

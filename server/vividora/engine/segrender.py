@@ -33,11 +33,20 @@ from .render import _cut_points, _snap, out_timeline, render
 
 log = logging.getLogger("vividora.segrender")
 
-TARGET_SECONDS = 15.0     # wanted piece length
+TARGET_SECONDS = 15.0     # default piece length (may be reduced when RAM is low)
 MAX_SECONDS = 26.0        # a piece never gets longer than this (split inside a long take)
 MIN_TOTAL = 40.0          # shorter videos: one plain render is faster than pieces + join
 CACHE_DAYS = 7
 CACHE_GB = float(os.getenv("SEG_CACHE_GB", "20"))
+
+
+def _effective_target() -> float:
+    """Dynamically reduce segment size when RAM is low."""
+    try:
+        from . import hwaccel
+        return hwaccel.smart_segment_seconds(TARGET_SECONDS)
+    except Exception:  # noqa: BLE001
+        return TARGET_SECONDS
 
 
 def cache_root() -> Path:
@@ -212,7 +221,7 @@ def render_segmented(*, project_id: str, source_sig: str, on_progress=None, **kw
         emph = [wd["start"] for wd in words if _re.sub(r"[^\w]", "", wd["w"].lower()) in HOOK_WORDS or wd["w"].rstrip().endswith("!")]
     plan = (fx.zoom_plan(cuts, full_dur, float(zoom.get("strength", 1.0)), mode=zoom.get("mode") or "punch", emphasis=emph)
             if zoom.get("enabled") else [(0.0, 1.0)])
-    pieces = plan_pieces(keep, [t for t, _ in plan], fps)
+    pieces = plan_pieces(keep, [t for t, _ in plan], fps, target=_effective_target())
     if len(pieces) < 2:
         raise ValueError("एक ही टुकड़ा")
     # transition kind at each cut (source time of the cut's end → kind)

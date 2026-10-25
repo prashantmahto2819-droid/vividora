@@ -1,0 +1,113 @@
+{
+ "id": "electronics_sale",
+ "name": "Electronics — Mega Sale",
+ "industry": "electronics",
+ "format": "square",
+ "tags": [
+  "electronics",
+  "sale",
+  "clearance",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "Tech Mart",
+  "offer": "Mega *Clearance Sale*",
+  "price": "Up to 70% off",
+  "phone": "98765 43210",
+  "cta": "Shop Now"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#FF1744",
+  "font": "Oswald",
+  "text": "{{offer}}",
+  "style": "block",
+  "hl": "#FF1744",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#212121",
+   "color2": "#424242",
+   "angle": 110
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.05,
+    "color": "#FF8A80",
+    "font": "Oswald"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "pill",
+    "x": 0.5,
+    "y": 0.62,
+    "w": 0.4,
+    "h": 0.16,
+    "fill": 1,
+    "color": "#FF1744",
+    "shadow": 1
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.62,
+    "size": 0.055,
+    "color": "#FFFFFF",
+    "font": "Oswald",
+    "stroke_w": 0
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.82,
+    "size": 0.042,
+    "color": "#FFFFFF",
+    "font": "Oswald",
+    "bg": "#FF1744"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.033,
+    "color": "#BDBDBD",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.3,
+     "s": 1.1
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:pricebox",
+     "s:price",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}

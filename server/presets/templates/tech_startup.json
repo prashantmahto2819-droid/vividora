@@ -1,0 +1,87 @@
+{
+ "id": "tech_startup",
+ "name": "Tech — Startup Pitch",
+ "industry": "tech",
+ "format": "yt",
+ "tags": [
+  "tech",
+  "startup",
+  "pitch",
+  "yt"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline",
+  "website"
+ ],
+ "defaults": {
+  "business": "NexGen AI",
+  "offer": "The Future of *AI Automation*",
+  "tagline": "$2M Seed Round · Backed by Top VCs",
+  "website": "www.nexgenai.com"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "yt",
+  "no_person": true,
+  "accent": "#448AFF",
+  "font": "Montserrat",
+  "text": "{{offer}}",
+  "style": "box",
+  "hl": "#448AFF",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0A0A2E",
+   "color2": "#1A237E",
+   "angle": 135
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.1,
+    "size": 0.055,
+    "color": "#82B1FF",
+    "font": "Montserrat"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.7,
+    "size": 0.035,
+    "color": "#B0BEC5",
+    "font": "Poppins"
+   },
+   {
+    "uid": "website",
+    "txt": "{{website}}",
+    "x": 0.5,
+    "y": 0.9,
+    "size": 0.03,
+    "color": "#448AFF",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "yt": {
+    "text": {
+     "x": 0.5,
+     "y": 0.42,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline",
+     "s:website"
+    ]
+   }
+  }
+ }
+}

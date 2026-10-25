@@ -1,0 +1,100 @@
+{
+ "id": "education_online",
+ "name": "Education — Online Course",
+ "industry": "education",
+ "format": "yt",
+ "tags": [
+  "education",
+  "online",
+  "course",
+  "yt"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "website",
+  "cta"
+ ],
+ "defaults": {
+  "business": "LearnHub Academy",
+  "offer": "Complete *Web Development* Course",
+  "price": "₹ 499 only",
+  "website": "www.learnhub.in",
+  "cta": "Enroll Now"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "yt",
+  "no_person": true,
+  "accent": "#2979FF",
+  "font": "Poppins",
+  "text": "{{offer}}",
+  "style": "box",
+  "hl": "#2979FF",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#0D47A1",
+   "color2": "#1565C0",
+   "angle": 135
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.1,
+    "size": 0.045,
+    "color": "#82B1FF",
+    "font": "Poppins"
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.65,
+    "size": 0.055,
+    "color": "#FFD600",
+    "font": "Poppins"
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.8,
+    "size": 0.04,
+    "color": "#0D47A1",
+    "font": "Poppins",
+    "bg": "#82B1FF"
+   },
+   {
+    "uid": "website",
+    "txt": "{{website}}",
+    "x": 0.5,
+    "y": 0.92,
+    "size": 0.028,
+    "color": "#90CAF9",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "yt": {
+    "text": {
+     "x": 0.5,
+     "y": 0.38,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:price",
+     "s:cta",
+     "s:website"
+    ]
+   }
+  }
+ }
+}

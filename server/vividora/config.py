@@ -90,6 +90,8 @@ class Settings:
     backup_keep_days: int = field(default_factory=lambda: int(os.getenv("BACKUP_KEEP_DAYS", "7")))
     # Freesound.org API key (https://freesound.org/apiv2 — free tier)
     freesound_api_key: str = field(default_factory=lambda: os.getenv("FREESOUND_API_KEY", ""))
+    # Tenor GIF/sticker API key (https://developers.google.com/tenor — free, or GOOGLE_API_KEY)
+    tenor_api_key: str = field(default_factory=lambda: os.getenv("TENOR_API_KEY", os.getenv("GOOGLE_API_KEY", "")))
     # the operator's (your) workspace id: sees every workspace in Admin; default = the first workspace created
     operator_workspace: str = field(default_factory=lambda: os.getenv("OPERATOR_WORKSPACE", ""))
 

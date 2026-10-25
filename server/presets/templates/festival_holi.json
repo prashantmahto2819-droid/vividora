@@ -1,0 +1,75 @@
+{
+ "id": "festival_holi",
+ "name": "Festival — Holi",
+ "industry": "festival",
+ "format": "square",
+ "tags": [
+  "festival",
+  "holi",
+  "greeting",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "आपका Business",
+  "offer": "*Happy Holi!* 🎨",
+  "tagline": "रंगों का त्योहार मुबारक हो"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#E040FB",
+  "font": "Anton",
+  "text": "{{offer}}",
+  "style": "block",
+  "hl": "#00E676",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#FF6F00",
+   "color2": "#E040FB",
+   "angle": 135
+  },
+  "vignette": 0.15,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.048,
+    "color": "#FFFFFF",
+    "font": "Anton"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.8,
+    "size": 0.035,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.42,
+     "s": 1.2
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

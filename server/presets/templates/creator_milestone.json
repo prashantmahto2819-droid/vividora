@@ -1,0 +1,95 @@
+{
+ "id": "creator_milestone",
+ "name": "Creator — Milestone",
+ "industry": "creator",
+ "format": "square",
+ "tags": [
+  "creator",
+  "milestone",
+  "subscriber",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "tagline"
+ ],
+ "defaults": {
+  "business": "@YourChannel",
+  "offer": "*100K* Subscribers! 🎉",
+  "tagline": "Thank you for the love & support ❤️"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": false,
+  "accent": "#FFD700",
+  "font": "Anton",
+  "text": "{{offer}}",
+  "style": "neon",
+  "hl": "#FFD700",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1A0033",
+   "color2": "#330066",
+   "angle": 180
+  },
+  "vignette": 0.35,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.1,
+    "size": 0.05,
+    "color": "#FFD700",
+    "font": "Anton"
+   },
+   {
+    "uid": "confetti",
+    "shape": "star",
+    "x": 0.2,
+    "y": 0.2,
+    "w": 0.08,
+    "fill": 1,
+    "color": "#FFD700"
+   },
+   {
+    "uid": "confetti2",
+    "shape": "star",
+    "x": 0.8,
+    "y": 0.25,
+    "w": 0.06,
+    "fill": 1,
+    "color": "#E040FB"
+   },
+   {
+    "uid": "tagline",
+    "txt": "{{tagline}}",
+    "x": 0.5,
+    "y": 0.82,
+    "size": 0.032,
+    "color": "#CE93D8",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": true,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.42,
+     "s": 1.2
+    },
+    "_order": [
+     "s:confetti",
+     "s:confetti2",
+     "text",
+     "s:business",
+     "s:tagline"
+    ]
+   }
+  }
+ }
+}

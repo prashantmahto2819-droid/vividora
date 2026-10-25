@@ -1,0 +1,138 @@
+{
+ "id": "wedding_catering",
+ "name": "Wedding — Caterer / हलवाई",
+ "industry": "events",
+ "format": "vertical",
+ "tags": [
+  "events",
+  "food",
+  "ad",
+  "vertical"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "address",
+  "cta",
+  "product"
+ ],
+ "defaults": {
+  "business": "आपका catering",
+  "price": "₹ 350/plate से",
+  "phone": "98765 43210",
+  "address": "आपका शहर",
+  "cta": "menu & quote लें",
+  "offer": "शादी का *शानदार खाना*",
+  "tagline": "500 से 5000 plate — हर budget में"
+ },
+ "settings": {
+  "template": "big_top",
+  "size": "vertical",
+  "no_person": true,
+  "accent": "#FF6F00",
+  "font": "Mukta",
+  "text": "{{offer}}",
+  "style": "outline",
+  "hl": "#FF6F00",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#1F0F00",
+   "color2": "#3E2200",
+   "angle": 145
+  },
+  "vignette": 0.25,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.07,
+    "size": 0.05,
+    "color": "#FF6F00",
+    "font": "Mukta"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "pill",
+    "x": 0.5,
+    "y": 0.55,
+    "w": 0.36,
+    "h": 0.22,
+    "fill": 1,
+    "color": "accent",
+    "shadow": 1,
+    "stroke": "#FFFFFF",
+    "stroke_w": 0.012
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.55,
+    "size": 0.042,
+    "color": "#111111",
+    "font": "Poppins",
+    "stroke_w": 0
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.72,
+    "size": 0.042,
+    "color": "#FFFFFF",
+    "font": "Mukta",
+    "bg": "#111111"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.88,
+    "size": 0.038,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   },
+   {
+    "uid": "address",
+    "txt": "{{address}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.028,
+    "color": "#FFFFFF",
+    "font": "Mukta"
+   },
+   {
+    "uid": "product",
+    "role": "product",
+    "x": 0.5,
+    "y": 0.47,
+    "w": 0.3,
+    "id": null
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "vertical": {
+    "text": {
+     "x": 0.5,
+     "y": 0.28,
+     "s": 1.05
+    },
+    "_order": [
+     "text",
+     "s:pricebox",
+     "s:price",
+     "s:product",
+     "s:business",
+     "s:cta",
+     "s:phone",
+     "s:address"
+    ]
+   }
+  }
+ }
+}

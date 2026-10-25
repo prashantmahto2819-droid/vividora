@@ -92,12 +92,13 @@ def _grade_with_correction(preset: dict, analysis: dict) -> dict:
 # What autopilot does — each switch can be turned off per channel (brand kit → Autopilot)
 AUTOPILOT_DEFAULTS = {"captions": True, "hook": True, "music": True, "cta": True, "zoom": True, "transitions": True,
                       "keyword_stickers": True, "highlights": True, "sfx": True, "auto_color": True, "voice": True,
-                      "logo": True, "shorts": 3}
+                      "logo": True, "lower_thirds": True, "auto_broll": True, "shorts": 3}
 AUTOPILOT_LABELS = {"captions": "Captions (बोले हुए शब्द)", "hook": "शुरू में Hook heading", "music": "Background music",
                     "cta": "Subscribe / Follow popup", "zoom": "Auto zoom in/out", "transitions": "Transitions (Shorts)",
                     "keyword_stickers": "शब्दों पर emoji sticker (पैसा → 💰)", "highlights": "ज़रूरी lines पर बड़ा text",
                     "sfx": "Sound effects (pop, whoosh)", "auto_color": "Auto color correction", "voice": "Voice enhance + noise हटाना",
-                    "logo": "Logo / watermark", "shorts": "लंबी video से कितने Shorts"}
+                    "logo": "Logo / watermark", "lower_thirds": "Speaker name plate (शुरू में नाम पट्टी)",
+                    "auto_broll": "Auto B-roll (transcript से matching images)", "shorts": "लंबी video से कितने Shorts"}
 
 
 def settings_for(brand: dict, channel_switches: dict | None = None) -> dict:
@@ -180,7 +181,8 @@ def plan(project: dict, workspace_settings: dict, library: list[dict], clip: dic
         "stack": [],
         "music": {"id": music, "volume": 0.12, "duck": True, "duck_amount": 0.6, "fade": 1.5},
         "voice": analyze.auto_voice(analysis, brand.get("voice_preset") or "studio") if ap["voice"] else {"preset": "off", "denoise": "off"},
-        "broll": [], "titles": [], "sfx": [],
+        "broll": [], "broll_layout": "behind",  # Smart B-roll: नया B-roll इंसान के पीछे (behind mode)
+        "titles": [], "sfx": [],
         "watermark": {"id": logo, "opacity": 0.7, "size": 0.12, "pos": "tr"},
     }
     # CTA popup + SFX (output timeline ≈ source minus cuts; place relative to the end)
@@ -230,8 +232,77 @@ def plan(project: dict, workspace_settings: dict, library: list[dict], clip: dic
     if ap["highlights"]:
         effects["titles"].extend(autoedit.highlight_titles(project, out_dur=out_dur, avoid=avoid,
                                                             style=(brand.get("title_style") or None)))
+    # Lower thirds: auto-add speaker name plate near the start (brand name + tagline or channel niche)
+    if ap.get("lower_thirds") and not clip:
+        speaker_name = brand.get("name") or brand.get("speaker_name") or ""
+        speaker_title = brand.get("tagline") or brand.get("speaker_title") or (workspace_settings or {}).get("niche") or ""
+        if speaker_name:
+            lt_text = f"{speaker_name}|{speaker_title}" if speaker_title else speaker_name
+            # pick a lower_third style: use brand preference or default lt_modern
+            lt_style = brand.get("lower_third_style") or "lt_modern"
+            # place at 3-5 seconds (after hook settles), show for 3 seconds
+            lt_start = 3.0 if is_short_source else 4.0
+            lt_end = lt_start + 3.0
+            if lt_end < out_dur - 1:
+                effects["titles"].append({
+                    "_id": "ap_lower_third", "text": lt_text, "style": lt_style,
+                    "start": round(lt_start, 2), "end": round(lt_end, 2),
+                    "pos": "bottom_left", "anim_in": "slide_right", "anim_out": "slide_left_out",
+                })
+    # Auto B-roll: search library for clips matching transcript keywords and place them on the timeline
+    if ap.get("auto_broll") and not clip:
+        broll_clips = [m for m in library if m.get("kind") in ("video", "broll")]
+        if broll_clips:
+            tr = project.get("transcript") or {}
+            segments = tr.get("segments") or []
+            # gather unique topic words from transcript
+            topic_words: set[str] = set()
+            for seg in segments:
+                for w in seg.get("words") or []:
+                    word = str(w.get("w") or w.get("word") or "").strip().lower()
+                    if len(word) >= 4:
+                        topic_words.add(word)
+            # match library items by name/tags against topic words
+            placed = 0
+            last_broll = -999.0
+            broll_interval = 15.0 if is_short_source else 25.0  # how often to place B-roll
+            for bc in broll_clips:
+                if placed >= (3 if is_short_source else 5):
+                    break
+                bc_name = (bc.get("name") or "").lower()
+                bc_tags = (bc.get("tags") or "").lower()
+                bc_text = bc_name + " " + bc_tags
+                # check if any topic word matches this B-roll
+                matched = any(tw in bc_text for tw in topic_words) if topic_words else False
+                if not matched and placed > 0:
+                    continue  # first one can be random, rest must match
+                # find a good placement time: after the hook, spread across the video
+                place_at = max(6.0, last_broll + broll_interval)
+                if place_at >= out_dur - 4:
+                    break
+                bc_dur = min(float(bc.get("duration") or 5), 5.0, out_dur - place_at - 1)
+                if bc_dur < 2:
+                    break
+                # avoid overlapping with CTA
+                if any(a - 1 <= place_at <= b + 1 for a, b in avoid):
+                    place_at = max(place_at, avoid[0][1] + 1.5) if avoid else place_at
+                    if place_at >= out_dur - 4:
+                        break
+                effects["broll"].append({
+                    "_id": f"ap_broll_{placed}", "id": bc["id"],
+                    "start": round(place_at, 2), "end": round(place_at + bc_dur, 2),
+                    "fit": "cover", "opacity": 1, "anim": "fade",
+                })
+                last_broll = place_at
+                placed += 1
     if not is_short_source and out_dur > 90:
         effects["extras"] = ["soft_glow"] if (analysis.get("video") or {}).get("contrast", 0.2) < 0.15 else []
+    # Smart Layout: autopilot B-roll clips (not stickers/CTAs) default to "behind" mode
+    # so the person stays visible with B-roll as background replacement
+    default_layout = effects.pop("broll_layout", "behind")
+    for b in effects["broll"]:
+        if b.get("fit") != "free" and not b.get("layout"):
+            b["layout"] = default_layout
     presets = (["yt-short"] if clip else ["yt-short", "ig-reel", "fb-reel"]) if is_short_source else ["yt-long"]
     return {
         "presets": presets,

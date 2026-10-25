@@ -167,8 +167,18 @@ function bind() {
   $("#tp-close", R.root).onclick = () => (tp.style.display = "none");
   $("#tp-full", R.root).onclick = () => { R.tp.full = !R.tp.full; tp.classList.toggle("full", R.tp.full); };
   $("#tp-edit", R.root).onclick = () => { $("#rec-tp", R.root).hidden = false; $("#tp-src", R.root).focus(); };
-  const scroll = () => { if (!R || !R.tp.playing) return; txt.scrollTop += R.tp.speed / 60; R.tpRaf = requestAnimationFrame(scroll); };
-  const togglePlay = () => { R.tp.playing = !R.tp.playing; $("#tp-play", R.root).textContent = R.tp.playing ? "⏸" : "▶"; if (R.tp.playing) scroll(); else cancelAnimationFrame(R.tpRaf); };
+  let scrollAcc = 0, scrollLast = 0;
+  const scroll = (ts) => { if (!R || !R.tp.playing) return;
+    if (!scrollLast) scrollLast = ts;
+    const dt = Math.min(ts - scrollLast, 200); // cap delta to avoid jumps after tab-switch
+    scrollLast = ts;
+    scrollAcc += R.tp.speed * (dt / 1000); // speed = px per second, time-based for consistent speed across refresh rates
+    if (scrollAcc >= 1) { const px = Math.floor(scrollAcc); txt.scrollTop += px; scrollAcc -= px; }
+    R.tpRaf = requestAnimationFrame(scroll); };
+  const togglePlay = () => {
+    if (tp.style.display === "none") tp.style.display = ""; // ensure teleprompter is visible before scrolling
+    R.tp.playing = !R.tp.playing; $("#tp-play", R.root).textContent = R.tp.playing ? "⏸" : "▶";
+    if (R.tp.playing) { scrollAcc = 0; scrollLast = 0; R.tpRaf = requestAnimationFrame(scroll); } else cancelAnimationFrame(R.tpRaf); };
   $("#tp-play", R.root).onclick = togglePlay; R.togglePlay = togglePlay;
   txt.onwheel = () => { }; // manual scroll allowed
   $("#tp-size", R.root).oninput = (e) => { R.tp.size = +e.target.value; applyTp(); };

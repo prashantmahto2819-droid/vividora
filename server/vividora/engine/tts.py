@@ -67,6 +67,35 @@ VOICE_PRESETS: list[dict] = [
      "kokoro_voice": "am_michael", "kokoro_lang": "a"},
     {"id": "en_kokoro_heart", "label": "Heart — American English, हल्का model (महिला)", "lang": "en", "gender": "f", "engine": "kokoro",
      "kokoro_voice": "af_heart", "kokoro_lang": "a"},
+    # ---- ElevenLabs Cloud voices (require ELEVENLABS_API_KEY) ----
+    {"id": "el_rachel", "label": "Rachel — ElevenLabs, शांत professional (महिला)", "lang": "en", "gender": "f",
+     "engine": "elevenlabs", "elevenlabs_voice_id": "21m00Tcm4TlvDq8ikWAM", "cloud": True,
+     "elevenlabs_settings": {"stability": 0.5, "similarity_boost": 0.75}},
+    {"id": "el_adam", "label": "Adam — ElevenLabs, गहरी narration (पुरुष)", "lang": "en", "gender": "m",
+     "engine": "elevenlabs", "elevenlabs_voice_id": "pNInz6obpgDQGcFmaJgB", "cloud": True,
+     "elevenlabs_settings": {"stability": 0.5, "similarity_boost": 0.75}},
+    {"id": "el_bella", "label": "Bella — ElevenLabs, soft storytelling (महिला)", "lang": "en", "gender": "f",
+     "engine": "elevenlabs", "elevenlabs_voice_id": "EXAVITQu4vr4xnSDxMaL", "cloud": True,
+     "elevenlabs_settings": {"stability": 0.6, "similarity_boost": 0.8}},
+    {"id": "el_josh", "label": "Josh — ElevenLabs, जोशीला energetic (पुरुष)", "lang": "en", "gender": "m",
+     "engine": "elevenlabs", "elevenlabs_voice_id": "TxGEqnHWrfWFTfGW9XjX", "cloud": True,
+     "elevenlabs_settings": {"stability": 0.4, "similarity_boost": 0.7, "style": 0.3}},
+    {"id": "el_hindi_narrator", "label": "Hindi Narrator — ElevenLabs multilingual (पुरुष)", "lang": "hi", "gender": "m",
+     "engine": "elevenlabs", "elevenlabs_voice_id": "pNInz6obpgDQGcFmaJgB", "cloud": True,
+     "elevenlabs_settings": {"stability": 0.55, "similarity_boost": 0.8}},
+    # ---- Google Cloud TTS voices (require GOOGLE_APPLICATION_CREDENTIALS) ----
+    {"id": "gc_hi_wavenet_a", "label": "Google Hindi Wavenet — महिला", "lang": "hi", "gender": "f",
+     "engine": "google_cloud", "google_voice_name": "hi-IN-Wavenet-A", "google_language_code": "hi-IN", "cloud": True},
+    {"id": "gc_hi_wavenet_b", "label": "Google Hindi Wavenet — पुरुष", "lang": "hi", "gender": "m",
+     "engine": "google_cloud", "google_voice_name": "hi-IN-Wavenet-B", "google_language_code": "hi-IN", "cloud": True},
+    {"id": "gc_en_wavenet_d", "label": "Google English Wavenet — Indian (पुरुष)", "lang": "en", "gender": "m",
+     "engine": "google_cloud", "google_voice_name": "en-IN-Wavenet-D", "google_language_code": "en-IN", "cloud": True},
+    {"id": "gc_en_wavenet_a", "label": "Google English Wavenet — Indian (महिला)", "lang": "en", "gender": "f",
+     "engine": "google_cloud", "google_voice_name": "en-IN-Wavenet-A", "google_language_code": "en-IN", "cloud": True},
+    {"id": "gc_hi_neural_a", "label": "Google Hindi Neural2 — premium (महिला)", "lang": "hi", "gender": "f",
+     "engine": "google_cloud", "google_voice_name": "hi-IN-Neural2-A", "google_language_code": "hi-IN", "cloud": True},
+    {"id": "gc_hi_neural_d", "label": "Google Hindi Neural2 — premium (पुरुष)", "lang": "hi", "gender": "m",
+     "engine": "google_cloud", "google_voice_name": "hi-IN-Neural2-D", "google_language_code": "hi-IN", "cloud": True},
 ]
 LANGS = {"hi": "हिन्दी", "en": "English"}
 
@@ -84,8 +113,28 @@ def voice_preset(vid: str | None) -> dict | None:
 
 
 def is_premium(voice: dict | None) -> bool:
-    """Plans can gate the heavy Parler voices (and any custom description); Kokoro voices are always allowed."""
-    return bool(voice) and (voice.get("engine") == "parler" or bool(voice.get("custom")))
+    """Plans can gate the heavy Parler voices (and any custom description); Kokoro voices are always allowed.
+    Cloud voices (ElevenLabs, Google Cloud) are always premium — they cost money per call."""
+    if not voice:
+        return False
+    engine = voice.get("engine", "")
+    if engine in ("elevenlabs", "google_cloud", "google", "gcloud"):
+        return True
+    return engine == "parler" or bool(voice.get("custom"))
+
+
+def available_voices() -> list[dict]:
+    """VOICE_PRESETS filtered to only include cloud voices whose API keys are configured."""
+    out = []
+    for v in VOICE_PRESETS:
+        if v.get("cloud"):
+            engine = v.get("engine", "")
+            if engine == "elevenlabs" and not os.getenv("ELEVENLABS_API_KEY", ""):
+                continue
+            if engine in ("google_cloud",) and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""):
+                continue
+        out.append(v)
+    return out
 
 
 # ---------------------------------------------------------------- wav helpers
@@ -204,12 +253,110 @@ class KokoroBackend:
         return write_wav(out, _float_to_pcm(np.concatenate(parts)), 24000)
 
 
+class ElevenLabsBackend:
+    """Cloud TTS via ElevenLabs API — high-quality multilingual voices with emotion/mood control.
+    Requires ELEVENLABS_API_KEY in env. Voice presets use `elevenlabs_voice_id` and optional
+    `elevenlabs_settings` (stability, similarity_boost, style, use_speaker_boost)."""
+    name = "elevenlabs"
+    native_speed = False  # speed handled by atempo post-processing
+
+    def synth(self, text: str, voice: dict, lang: str, speed: float, out: Path) -> Path:
+        try:
+            from elevenlabs import ElevenLabs as ELClient
+        except ImportError:
+            raise TTSMissing("ElevenLabs SDK नहीं मिला। pip install elevenlabs चलाएँ।") from None
+        api_key = os.getenv("ELEVENLABS_API_KEY", "")
+        if not api_key:
+            raise TTSMissing("ELEVENLABS_API_KEY सेट नहीं है — .env में API key डालें।")
+        client = ELClient(api_key=api_key)
+        voice_id = voice.get("elevenlabs_voice_id") or "21m00Tcm4TlvDq8ikWAM"  # default: Rachel
+        model_id = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+        # Build voice settings from preset or defaults
+        vs = voice.get("elevenlabs_settings") or {}
+        voice_settings = {
+            "stability": float(vs.get("stability", 0.5)),
+            "similarity_boost": float(vs.get("similarity_boost", 0.75)),
+            "style": float(vs.get("style", 0.0)),
+            "use_speaker_boost": bool(vs.get("use_speaker_boost", True)),
+        }
+        try:
+            audio_gen = client.text_to_speech.convert(
+                voice_id=voice_id,
+                text=text,
+                model_id=model_id,
+                voice_settings=voice_settings,
+                output_format="pcm_24000",
+            )
+            # Collect all chunks
+            pcm_data = b"".join(chunk for chunk in audio_gen)
+        except Exception as e:
+            raise RuntimeError(f"ElevenLabs API error: {e}") from e
+        if not pcm_data:
+            raise RuntimeError("ElevenLabs ने कोई audio नहीं दिया")
+        # pcm_24000 = signed 16-bit little-endian PCM at 24 kHz mono
+        # Write as WAV then ffmpeg will resample to 48 kHz in clean_piece
+        write_wav(out, pcm_data, 24000)
+        return out
+
+
+class GoogleCloudTTSBackend:
+    """Cloud TTS via Google Cloud Text-to-Speech API — supports Hindi, English, 50+ languages.
+    Requires GOOGLE_APPLICATION_CREDENTIALS in env pointing to a service-account JSON.
+    Voice presets use `google_voice_name` (e.g. 'hi-IN-Wavenet-A') and `google_language_code`."""
+    name = "google_cloud"
+    native_speed = True  # Google supports speaking_rate natively
+
+    def synth(self, text: str, voice: dict, lang: str, speed: float, out: Path) -> Path:
+        try:
+            from google.cloud import texttospeech
+        except ImportError:
+            raise TTSMissing("Google Cloud TTS SDK नहीं मिला। pip install google-cloud-texttospeech चलाएँ।") from None
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+        if not creds_path:
+            raise TTSMissing("GOOGLE_APPLICATION_CREDENTIALS सेट नहीं है — service account JSON का path .env में डालें।")
+        client = texttospeech.TextToSpeechClient()
+        # Map our lang codes to Google's language codes
+        lang_map = {"hi": "hi-IN", "en": "en-IN"}
+        language_code = voice.get("google_language_code") or lang_map.get(lang, "hi-IN")
+        voice_name = voice.get("google_voice_name") or ("hi-IN-Wavenet-A" if lang == "hi" else "en-IN-Wavenet-A")
+        # Build the request
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        voice_params = texttospeech.VoiceSelectionParams(
+            language_code=language_code,
+            name=voice_name,
+        )
+        # speaking_rate: 0.25 to 4.0 (1.0 = normal)
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+            sample_rate_hertz=24000,
+            speaking_rate=max(0.5, min(2.0, float(speed or 1.0))),
+            pitch=float(voice.get("google_pitch", 0.0)),
+        )
+        try:
+            response = client.synthesize_speech(
+                input=synthesis_input,
+                voice=voice_params,
+                audio_config=audio_config,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Google Cloud TTS API error: {e}") from e
+        if not response.audio_content:
+            raise RuntimeError("Google Cloud TTS ने कोई audio नहीं दिया")
+        # Response is a complete WAV file
+        out.write_bytes(response.audio_content)
+        return out
+
+
 def backend_for(engine: str):
     forced = (os.getenv("VIVIDORA_TTS") or "").strip().lower()
     if forced == "fake" or engine == "fake":
         return FakeBackend()
     if engine == "kokoro":
         return KokoroBackend()
+    if engine == "elevenlabs":
+        return ElevenLabsBackend()
+    if engine in ("google_cloud", "google", "gcloud"):
+        return GoogleCloudTTSBackend()
     return ParlerBackend()
 
 
@@ -219,6 +366,14 @@ def check_ready(engine: str) -> None:
         raise TTSMissing("ffmpeg नहीं मिला — AI voice-over के लिए ffmpeg चाहिए। Windows: winget install Gyan.FFmpeg (फिर नया PowerShell खोलें)")
     b = backend_for(engine)
     if isinstance(b, FakeBackend):
+        return
+    if isinstance(b, ElevenLabsBackend):
+        if not os.getenv("ELEVENLABS_API_KEY", ""):
+            raise TTSMissing("ELEVENLABS_API_KEY सेट नहीं है — .env में ElevenLabs API key डालें।")
+        return
+    if isinstance(b, GoogleCloudTTSBackend):
+        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""):
+            raise TTSMissing("GOOGLE_APPLICATION_CREDENTIALS सेट नहीं है — .env में service account JSON path डालें।")
         return
     import importlib.util
     need = ["torch", "parler_tts", "transformers"] if isinstance(b, ParlerBackend) else ["torch", "kokoro"]
@@ -425,7 +580,8 @@ def cache_dir() -> Path | None:
 
 
 def line_key(text: str, voice: dict, lang: str, speed: float, pitch: float, engine: str) -> str:
-    vk = {k: voice.get(k) for k in ("id", "engine", "description", "kokoro_voice", "kokoro_lang", "seed") if voice.get(k)}
+    vk = {k: voice.get(k) for k in ("id", "engine", "description", "kokoro_voice", "kokoro_lang", "seed",
+                                      "elevenlabs_voice_id", "google_voice_name", "google_language_code") if voice.get(k)}
     raw = json.dumps({"t": text, "v": vk, "l": lang, "s": round(speed, 3), "p": round(float(pitch or 0), 2), "e": engine},
                      sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(raw.encode()).hexdigest()

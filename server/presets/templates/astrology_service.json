@@ -1,0 +1,113 @@
+{
+ "id": "astrology_service",
+ "name": "Astrology — Puja Booking",
+ "industry": "astrology",
+ "format": "square",
+ "tags": [
+  "astrology",
+  "puja",
+  "pandit",
+  "square"
+ ],
+ "fields": [
+  "business",
+  "offer",
+  "price",
+  "phone",
+  "cta"
+ ],
+ "defaults": {
+  "business": "पंडित शर्मा जी",
+  "offer": "सत्यनारायण पूजा *Special*",
+  "price": "₹ 2,100 से",
+  "phone": "98765 43210",
+  "cta": "अभी बुक करें"
+ },
+ "settings": {
+  "template": "headline",
+  "size": "square",
+  "no_person": true,
+  "accent": "#FF8F00",
+  "font": "Poppins",
+  "text": "{{offer}}",
+  "style": "banner",
+  "hl": "#FF8F00",
+  "color": "#FFFFFF",
+  "bg": {
+   "type": "gradient",
+   "color": "#3E2723",
+   "color2": "#5D4037",
+   "angle": 90
+  },
+  "vignette": 0.2,
+  "stickers": [
+   {
+    "uid": "business",
+    "txt": "{{business}}",
+    "x": 0.5,
+    "y": 0.08,
+    "size": 0.048,
+    "color": "#FFD54F",
+    "font": "Poppins"
+   },
+   {
+    "uid": "pricebox",
+    "shape": "pill",
+    "x": 0.5,
+    "y": 0.62,
+    "w": 0.35,
+    "h": 0.18,
+    "fill": 1,
+    "color": "#FF8F00",
+    "shadow": 1
+   },
+   {
+    "uid": "price",
+    "txt": "{{price}}",
+    "x": 0.5,
+    "y": 0.62,
+    "size": 0.06,
+    "color": "#FFFFFF",
+    "font": "Poppins",
+    "stroke_w": 0
+   },
+   {
+    "uid": "cta",
+    "txt": "{{cta}}",
+    "x": 0.5,
+    "y": 0.8,
+    "size": 0.04,
+    "color": "#111",
+    "font": "Poppins",
+    "bg": "#FFD54F"
+   },
+   {
+    "uid": "phone",
+    "txt": "{{phone}}",
+    "x": 0.5,
+    "y": 0.93,
+    "size": 0.035,
+    "color": "#FFFFFF",
+    "font": "Poppins"
+   }
+  ],
+  "cutout": false,
+  "layout": {
+   "square": {
+    "text": {
+     "x": 0.5,
+     "y": 0.3,
+     "s": 1.0
+    },
+    "_order": [
+     "text",
+     "s:business",
+     "s:pricebox",
+     "s:price",
+     "s:cta",
+     "s:phone"
+    ]
+   }
+  }
+ }
+}
