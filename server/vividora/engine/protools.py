@@ -215,28 +215,34 @@ def detect_faces(video: Path, until: float, step: float = 0.5, width: int = 320,
     h = max(2, int(round(sh * width / sw / 2)) * 2)
     cv2, det = _haar()
     start = max(0.0, min(start, until))
+    from . import ffmpeg as _ff
     proc = subprocess.Popen(["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-i", str(video), "-t", f"{until - start + step:.3f}", "-an",
                              "-vf", f"fps={1 / step:.4f},scale={width}:{h}", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    _ff.track(proc)
     out, n, fb = [], 0, width * h * 3
     assert proc.stdout is not None
-    while True:
-        buf = proc.stdout.read(fb)
-        if len(buf) < fb:
-            break
-        rgb = np.frombuffer(buf, np.uint8).reshape(h, width, 3)
-        box = None
-        if det is not None:
-            faces = det.detectMultiScale(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), scaleFactor=1.15, minNeighbors=4, minSize=(20, 20))
-            if len(faces):
-                x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-                box = ((x + fw / 2) / width, (y + fh / 2) / h, fw / width, fh / h)
-        if box is None:
-            box = _skin_box(rgb)
-        if box:
-            out.append((start + n * step, *box))
-        n += 1
-    proc.wait()
+    try:
+        while True:
+            buf = proc.stdout.read(fb)
+            if len(buf) < fb:
+                break
+            rgb = np.frombuffer(buf, np.uint8).reshape(h, width, 3)
+            box = None
+            if det is not None:
+                faces = det.detectMultiScale(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), scaleFactor=1.15, minNeighbors=4, minSize=(20, 20))
+                if len(faces):
+                    x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                    box = ((x + fw / 2) / width, (y + fh / 2) / h, fw / width, fh / h)
+            if box is None:
+                box = _skin_box(rgb)
+            if box:
+                out.append((start + n * step, *box))
+            n += 1
+    finally:
+        proc.stdout.close()
+        proc.wait()
+        _ff.untrack(proc)
     return out
 
 

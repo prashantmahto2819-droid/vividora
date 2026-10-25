@@ -154,28 +154,32 @@ def clip(path: Path, kind: str = "video", fps: float = 4.0, max_seconds: float =
     prev = None
     n = 0
     assert proc.stdout is not None
-    while True:
-        ffmpeg.check_cancel()
-        buf = proc.stdout.read(sw * sh)
-        if len(buf) < sw * sh:
-            break
-        fr = np.frombuffer(buf, dtype=np.uint8).reshape(sh, sw)
-        f = fr.astype(np.float32)
-        ts.append(n / fps)
-        thumbs.append(_thumb(f))
-        mot.append(float(np.abs(f - prev.astype(np.float32)).mean() / 255) if prev is not None else 0.0)
-        lap = f[1:-1, 1:-1] * 4 - f[:-2, 1:-1] - f[2:, 1:-1] - f[1:-1, :-2] - f[1:-1, 2:]
-        sharp.append(float(lap.var()))
-        bright.append(float(f.mean() / 255))
-        # faces every 2nd sample (cheap enough at 256 px)
-        if n % 2 == 0 or not fxs:
-            fx, fy, face = _focus(fr, prev, det)
-        else:
-            fx, fy, face = fxs[-1], fys[-1], faces[-1]
-        fxs.append(round(fx, 3)); fys.append(round(fy, 3)); faces.append(face)
-        prev = fr
-        n += 1
-    proc.wait()
+    try:
+        while True:
+            ffmpeg.check_cancel()
+            buf = proc.stdout.read(sw * sh)
+            if len(buf) < sw * sh:
+                break
+            fr = np.frombuffer(buf, dtype=np.uint8).reshape(sh, sw)
+            f = fr.astype(np.float32)
+            ts.append(n / fps)
+            thumbs.append(_thumb(f))
+            mot.append(float(np.abs(f - prev.astype(np.float32)).mean() / 255) if prev is not None else 0.0)
+            lap = f[1:-1, 1:-1] * 4 - f[:-2, 1:-1] - f[2:, 1:-1] - f[1:-1, :-2] - f[1:-1, 2:]
+            sharp.append(float(lap.var()))
+            bright.append(float(f.mean() / 255))
+            # faces every 2nd sample (cheap enough at 256 px)
+            if n % 2 == 0 or not fxs:
+                fx, fy, face = _focus(fr, prev, det)
+            else:
+                fx, fy, face = fxs[-1], fys[-1], faces[-1]
+            fxs.append(round(fx, 3)); fys.append(round(fy, 3)); faces.append(face)
+            prev = fr
+            n += 1
+    finally:
+        proc.stdout.close()
+        proc.wait()
+        ffmpeg.untrack(proc)
     if not ts:
         return {"kind": "video", "duration": dur, "w": w, "h": h, "t": [0.0], "score": [0.3], "motion": [0.0], "fx": [.5], "fy": [.5], "face": [False]}
     m = np.array(mot)

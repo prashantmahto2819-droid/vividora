@@ -46,22 +46,26 @@ def track(video: Path, duration: float, width: int, height: int, *, step: float 
     n = 0
     frame_bytes = sw * sh
     assert proc.stdout is not None
-    while True:
-        _ff.check_cancel()
-        buf = proc.stdout.read(frame_bytes)
-        if len(buf) < frame_bytes:
-            break
-        frame = np.frombuffer(buf, dtype=np.uint8).reshape(sh, sw)
-        faces = det.detectMultiScale(frame, scaleFactor=1.15, minNeighbors=4, minSize=(24, 24))
-        t = n * step
-        if len(faces):
-            # biggest face wins (the speaker); ignore tiny background faces
-            x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-            raw.append((t, (x + w / 2) / sw))
-        else:
-            raw.append((t, None))
-        n += 1
-    proc.wait()
+    try:
+        while True:
+            _ff.check_cancel()
+            buf = proc.stdout.read(frame_bytes)
+            if len(buf) < frame_bytes:
+                break
+            frame = np.frombuffer(buf, dtype=np.uint8).reshape(sh, sw)
+            faces = det.detectMultiScale(frame, scaleFactor=1.15, minNeighbors=4, minSize=(24, 24))
+            t = n * step
+            if len(faces):
+                # biggest face wins (the speaker); ignore tiny background faces
+                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                raw.append((t, (x + w / 2) / sw))
+            else:
+                raw.append((t, None))
+            n += 1
+    finally:
+        proc.stdout.close()
+        proc.wait()
+        _ff.untrack(proc)
     return _smooth(raw, dead_zone)
 
 
