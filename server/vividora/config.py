@@ -87,6 +87,14 @@ class Settings:
     signup_open: bool = field(default_factory=lambda: _bool("SIGNUP_OPEN", True))
     invite_only: bool = field(default_factory=lambda: _bool("INVITE_ONLY"))
     require_email_verify: bool = field(default_factory=lambda: _bool("REQUIRE_EMAIL_VERIFY"))
+    # SMTP — optional; when set, password-reset and verify emails are sent automatically.
+    # Without SMTP the reset link is returned in the API response (self-hosted debug mode).
+    smtp_host: str = field(default_factory=lambda: os.getenv("SMTP_HOST", ""))
+    smtp_port: int = field(default_factory=lambda: int(os.getenv("SMTP_PORT", "587")))
+    smtp_user: str = field(default_factory=lambda: os.getenv("SMTP_USER", ""))
+    smtp_password: str = field(default_factory=lambda: os.getenv("SMTP_PASSWORD", ""))
+    smtp_from: str = field(default_factory=lambda: os.getenv("SMTP_FROM", ""))
+    smtp_tls: bool = field(default_factory=lambda: _bool("SMTP_TLS", True))
     backup_keep_days: int = field(default_factory=lambda: int(os.getenv("BACKUP_KEEP_DAYS", "7")))
     # Freesound.org API key (https://freesound.org/apiv2 — free tier)
     freesound_api_key: str = field(default_factory=lambda: os.getenv("FREESOUND_API_KEY", ""))

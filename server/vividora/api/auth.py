@@ -83,8 +83,7 @@ async def signup(request: Request):
         u = {"id": db.new_id(), "workspace_id": ws_id, "email": email, "name": data["name"].strip()[:80],
              "password_hash": hash_password(data["password"]), "role": role, "active": True,
              "created_at": db.now(), "last_login_at": None, "token_version": 0,
-             # email verification: the token is stored; sending mail is the operator's job (no SMTP wired yet),
-             # so accounts start verified unless REQUIRE_EMAIL_VERIFY=1
+             # email verification: auto-sent when SMTP is configured; otherwise operator's job
              "verified": 0 if settings.require_email_verify else 1, "verify_token": verify}
         db.insert(c, "users", u)
         if role == "admin":
@@ -93,6 +92,10 @@ async def signup(request: Request):
             db.update(c, "invites", code, {"uses_left": inv["uses_left"] - 1}, key="code")
         service.log(c, ws_id, "signup", user_id=u["id"], detail={"email": email, "invite": bool(inv), "ip": client_ip(request)})
     if not u["verified"]:
+        from .. import mail
+        if mail.configured():
+            base = settings.public_url or ""
+            mail.send_verify(email, f"{base}/api/auth/verify?t={verify}")
         return ok({"verify_needed": True, "message": "account बना — email में आया link खोलकर verify करें"}, 201)
     return _session(u)
 
@@ -139,8 +142,8 @@ async def list_invites(request: Request, user: dict):
 
 
 async def forgot_password(request: Request):
-    """Generate a password-reset token (valid 1 hour). Since SMTP isn't wired yet, the token
-    is returned in the response (self-hosted) or — when email is configured — would be mailed."""
+    """Generate a password-reset token (valid 1 hour). When SMTP is configured the reset link
+    is emailed; otherwise the URL is returned in the response (debug / self-hosted)."""
     if not saas.enabled():
         raise ApiError(404, "self-hosted mode में admin से password बदलवाएँ")
     rate_limit(request, "forgot", 5, 10)
@@ -156,11 +159,13 @@ async def forgot_password(request: Request):
         db.update(c, "users", user["id"], {"reset_token": token, "reset_token_at": db.now()})
         service.log(c, user["workspace_id"], "password.reset_request", user_id=user["id"],
                     detail={"ip": client_ip(request)})
-    # TODO: send email with reset link when SMTP is configured
-    # For now the reset URL is returned so the self-hosted operator can share it manually
     base = settings.public_url or ""
+    reset_url = f"{base}/#/reset?t={token}"
+    from .. import mail
+    if mail.configured():
+        mail.send_reset(email, reset_url)
     return ok({"message": "अगर यह email मौजूद है तो reset link भेजा गया है",
-               "reset_url": f"{base}/#/reset?t={token}" if settings.debug else None})
+               "reset_url": reset_url if settings.debug else None})
 
 
 async def reset_password(request: Request):
