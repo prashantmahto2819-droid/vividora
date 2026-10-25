@@ -103,7 +103,19 @@ export function renderText(t0, P, now, fb, opts = {}) {
     });
     inner = parts.join("");
   } else inner = esc(raw).replace(/\|/g, "<br>");
+  // subtitle line for lower thirds
+  let subHtml = "";
+  if (t.subtitle) {
+    const subRatio = t.subtitle_size_ratio || 0.7;
+    const subColor = t.subtitle_color || "#BBBBBB";
+    const subSize = (t.size || 0.075) * subRatio;
+    const subStyle = { ...t, size: subSize, color: subColor, bold: false, box: false, outline: null, outline_w: 0, shadow: null };
+    if ((t.template || t._id || "").includes("lt_split")) {
+      Object.assign(subStyle, { box: true, box_color: "#FFFFFF", box_pad: t.box_pad || 0.016, color: "#111111" });
+    }
+    subHtml = `<div style="${textStyle(subStyle, base)}color:${subColor};display:block;margin-top:${(base * 0.004).toFixed(1)}px;line-height:1.15;">${esc(t.subtitle)}</div>`;
+  }
   const sel = opts.selected ? " sel" : "";
   return `<div class="ov-title tfx${sel}" data-id="${t._id || ""}" style="position:absolute;${anchorCss(t, fb)}transform:translate(-50%,-50%);text-align:center;white-space:pre-wrap;max-width:94%;line-height:1.2;pointer-events:auto;cursor:move">
-    <div style="${textStyle(t, base)}${cssFor(t, s, fb, base)}display:inline-block;transform-origin:50% 50%;">${inner}</div></div>`;
+    <div style="${textStyle(t, base)}${cssFor(t, s, fb, base)}display:inline-block;transform-origin:50% 50%;">${inner}${subHtml}</div></div>`;
 }
