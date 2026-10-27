@@ -107,6 +107,9 @@ class Settings:
     tenor_api_key: str = field(default_factory=lambda: os.getenv("TENOR_API_KEY", os.getenv("GOOGLE_API_KEY", "")))
     # the operator's (your) workspace id: sees every workspace in Admin; default = the first workspace created
     operator_workspace: str = field(default_factory=lambda: os.getenv("OPERATOR_WORKSPACE", ""))
+    # ---- local AI services (self-hosted on this machine) ----
+    triposr_url: str = field(default_factory=lambda: os.getenv("TRIPOSR_URL", "http://127.0.0.1:8090"))
+    voicestudio_url: str = field(default_factory=lambda: os.getenv("VOICESTUDIO_URL", "http://127.0.0.1:3900"))
 
 
 settings = Settings()

@@ -96,6 +96,13 @@ VOICE_PRESETS: list[dict] = [
      "engine": "google_cloud", "google_voice_name": "hi-IN-Neural2-A", "google_language_code": "hi-IN", "cloud": True},
     {"id": "gc_hi_neural_d", "label": "Google Hindi Neural2 — premium (पुरुष)", "lang": "hi", "gender": "m",
      "engine": "google_cloud", "google_voice_name": "hi-IN-Neural2-D", "google_language_code": "hi-IN", "cloud": True},
+    # ---- VoiceStudio (self-hosted OmniVoice — 41 models, 646 languages, localhost:3900) ----
+    {"id": "vs_hi_default", "label": "VoiceStudio Hindi — default (self-hosted)", "lang": "hi", "gender": "m",
+     "engine": "voicestudio", "vs_language": "hi", "vs_model": None, "vs_voice": None},
+    {"id": "vs_en_default", "label": "VoiceStudio English — default (self-hosted)", "lang": "en", "gender": "m",
+     "engine": "voicestudio", "vs_language": "en", "vs_model": None, "vs_voice": None},
+    {"id": "vs_multi", "label": "VoiceStudio Multilingual — 646 भाषाएँ (self-hosted)", "lang": "hi", "gender": "m",
+     "engine": "voicestudio", "vs_language": "hi", "vs_model": None, "vs_voice": None},
 ]
 LANGS = {"hi": "हिन्दी", "en": "English"}
 
@@ -126,12 +133,19 @@ def is_premium(voice: dict | None) -> bool:
 def available_voices() -> list[dict]:
     """VOICE_PRESETS filtered to only include cloud voices whose API keys are configured."""
     out = []
+    _vs_checked: bool | None = None
     for v in VOICE_PRESETS:
+        engine = v.get("engine", "")
         if v.get("cloud"):
-            engine = v.get("engine", "")
             if engine == "elevenlabs" and not os.getenv("ELEVENLABS_API_KEY", ""):
                 continue
             if engine in ("google_cloud",) and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""):
+                continue
+        if engine == "voicestudio":
+            if _vs_checked is None:
+                from . import voicestudio as vs
+                _vs_checked = vs.is_available()
+            if not _vs_checked:
                 continue
         out.append(v)
     return out
@@ -299,6 +313,27 @@ class ElevenLabsBackend:
         return out
 
 
+class VoiceStudioBackend:
+    """Self-hosted TTS via VoiceStudio (OmniVoice) on localhost:3900.
+    41 models, 646 languages.  No API key needed — runs locally."""
+    name = "voicestudio"
+    native_speed = True  # VoiceStudio supports speed natively
+
+    def synth(self, text: str, voice: dict, lang: str, speed: float, out: Path) -> Path:
+        from . import voicestudio as vs
+        if not vs.is_available():
+            raise TTSMissing("VoiceStudio (localhost:3900) चालू नहीं — systemctl start voicestudio चलाएँ")
+        vs.synthesise(
+            text,
+            model=voice.get("vs_model"),
+            voice=voice.get("vs_voice"),
+            language=voice.get("vs_language") or lang or "hi",
+            speed=max(0.5, min(2.0, float(speed or 1.0))),
+            out=out,
+        )
+        return out
+
+
 class GoogleCloudTTSBackend:
     """Cloud TTS via Google Cloud Text-to-Speech API — supports Hindi, English, 50+ languages.
     Requires GOOGLE_APPLICATION_CREDENTIALS in env pointing to a service-account JSON.
@@ -357,6 +392,8 @@ def backend_for(engine: str):
         return ElevenLabsBackend()
     if engine in ("google_cloud", "google", "gcloud"):
         return GoogleCloudTTSBackend()
+    if engine == "voicestudio":
+        return VoiceStudioBackend()
     return ParlerBackend()
 
 
@@ -374,6 +411,11 @@ def check_ready(engine: str) -> None:
     if isinstance(b, GoogleCloudTTSBackend):
         if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""):
             raise TTSMissing("GOOGLE_APPLICATION_CREDENTIALS सेट नहीं है — .env में service account JSON path डालें।")
+        return
+    if isinstance(b, VoiceStudioBackend):
+        from . import voicestudio as vs
+        if not vs.is_available():
+            raise TTSMissing("VoiceStudio (localhost:3900) चालू नहीं — systemctl start voicestudio चलाएँ")
         return
     import importlib.util
     need = ["torch", "parler_tts", "transformers"] if isinstance(b, ParlerBackend) else ["torch", "kokoro"]

@@ -165,6 +165,10 @@ def create_app() -> Starlette:
     api_routes += scriptgen_api.routes  # AI Script Generator
     from .api import dashboard_api
     api_routes += dashboard_api.routes  # Creator performance dashboard
+    from .api import triposr_api
+    api_routes += triposr_api.routes  # TripoSR: image → 3D GLB model (self-hosted, localhost:8090)
+    from .api import voicestudio_api
+    api_routes += voicestudio_api.routes  # VoiceStudio: 41-model TTS (self-hosted, localhost:3900)
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))
