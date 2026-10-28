@@ -49,12 +49,18 @@ def health() -> dict:
     return h if isinstance(h, dict) and h.get("status") else {"status": "ok", **(h if isinstance(h, dict) else {})}
 
 
+TTS_ENGINES = {"omnivoice", "cosyvoice", "kittentts", "mlx-audio", "voxcpm2", "moss-tts-nano", "gpt-sovits", "sherpa-onnx", "indextts2"}
+
+
 def models() -> list[dict]:
     """TTS models (OpenAI-style /v1/models)."""
     try:
         data = _get("/v1/models")
         items = data.get("data", data) if isinstance(data, dict) else data
-        return [{"id": m.get("id"), "name": m.get("id")} if isinstance(m, dict) else {"id": m, "name": m} for m in items]
+        ids = [(m.get("id") if isinstance(m, dict) else m) for m in items]
+        ids = [i for i in ids if i in TTS_ENGINES]  # /v1/models also lists speech-to-text models (whisperx…) that cannot speak
+        ids.sort(key=lambda i: (i != "omnivoice", i))
+        return [{"id": i, "name": i} for i in ids]
     except Exception as e:  # noqa: BLE001
         log.warning("VoiceStudio models list failed: %s", e)
         return []
