@@ -67,14 +67,24 @@ async def image_to_3d(image: UploadFile = File(...)):
     with open(input_path, "wb") as f:
         f.write(await image.read())
     img = _prepare(input_path)
-    img.save(os.path.join(temp_dir, f"{job_id}_prepared.png"))
+    img.save(os.path.join(os.path.dirname(__file__), "last_prepared.png"))  # debug: http://<server>:8090/last_prepared.png
     with torch.no_grad():
         scene_codes = model([img], device="cpu")
         meshes = model.extract_mesh(scene_codes, has_vertex_color=True, resolution=MC_RESOLUTION)
     mesh = _clean(meshes[0])
     print(f"mesh: {len(mesh.vertices)} verts, {len(mesh.faces)} faces")
     mesh.export(glb_path)
+    try:
+        import shutil
+        shutil.copy(glb_path, os.path.join(os.path.dirname(__file__), "last.glb"))
+    except Exception:  # noqa: BLE001
+        pass
     return FileResponse(glb_path, media_type="model/gltf-binary", filename=f"{job_id}.glb")
+
+
+@app.get("/last_prepared.png")
+async def last_prepared():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "last_prepared.png"), media_type="image/png")
 
 
 @app.get("/health")

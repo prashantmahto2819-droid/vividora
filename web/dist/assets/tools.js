@@ -78,7 +78,7 @@ export function glbView() {
     <div class="drop" id="g3-drop"><input type="file" id="g3-file" accept="image/*" hidden><b>तस्वीर यहाँ छोड़ें या click करें</b><br><span class="muted small">PNG / JPG, 10 MB तक</span><div id="g3-name" class="small"></div></div>
     <div id="g3-cropbox" hidden><p class="small muted" style="margin:.4rem 0">⚠ सिर्फ़ <b>एक</b> character/object चाहिए। कई poses वाली sheet हो तो उंगली/माउस से <b>एक character पर box खींचें</b>।</p>
       <div class="tl-crop" id="g3-crop"><canvas id="g3-cv"></canvas><i id="g3-sel" hidden></i></div>
-      <label class="chk" style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="g3-bg" checked> background हटाएँ (साफ़/एक रंग के background के लिए)</label></div>
+      <label class="chk" style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="g3-bg"> सादा background मैं ख़ुद हटाऊँ (सिर्फ़ एक-रंग के background पर; वरना बंद रखें — server का AI हटाएगा)</label></div>
     <div class="field"><label>Model का नाम</label><input id="g3-title" placeholder="जैसे: Sunil character"></div>
     <button class="btn primary" id="g3-go" disabled>🧊 3D बनाएँ</button>
     <div class="tl-st" id="g3-st"></div>
@@ -113,6 +113,7 @@ export function glbBind(c) {
       let left = 0; for (let i = 0; i < w * h; i++) if (px[i * 4 + 3]) left++; if (left < w * h * 0.04) return rej(new Error("background हटाने पर कुछ नहीं बचा — «background हटाएँ» बंद करके देखें"));
       g.putImageData(D, 0, 0);
     }
+    if (!$("#g3-bg").checked) return a.toBlob((b) => (b ? res(b) : rej(new Error("तस्वीर तैयार नहीं हुई"))), "image/png"); // opaque crop → the server's AI removes the background
     const S = Math.round(Math.max(w, h) * 1.2), o = document.createElement("canvas"); o.width = o.height = S; o.getContext("2d").drawImage(a, (S - w) / 2, (S - h) / 2);
     o.toBlob((b) => (b ? res(b) : rej(new Error("तस्वीर तैयार नहीं हुई"))), "image/png");
   });
