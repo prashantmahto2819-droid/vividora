@@ -33,6 +33,7 @@ export async function viewModel(item) {
   const close = () => { dead = true; cancelAnimationFrame(raf); renderer.dispose(); modal.remove(); };
   modal.querySelector("#m3-x").onclick = close; modal.onclick = (e) => { if (e.target === modal) close(); };
   new GLTFLoader().load(item.url, (g) => {
+    g.scene.traverse((o) => { if (o.isMesh) for (const m of [].concat(o.material || [])) { m.side = THREE.DoubleSide; m.needsUpdate = true; } });
     const box = new THREE.Box3().setFromObject(g.scene), c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
     const k = 1.6 / Math.max(sz.x, sz.y, sz.z, 1e-6); g.scene.scale.setScalar(k); g.scene.position.sub(c.multiplyScalar(k)); pivot.add(g.scene);
     dist = 3.4; st.textContent = "खींचकर घुमाएँ · scroll से zoom"; loop();
