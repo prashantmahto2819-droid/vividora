@@ -342,6 +342,17 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         cs, ce = _snap(float(clip["start"]), fps), _snap(float(clip["end"]), fps)
         keep = [(max(a, cs), min(b, ce)) for a, b in keep if b > cs and a < ce]
     keep = [(a, b) for a, b in keep if b - a >= 1 / fps]
+    cut_warn: list[str] = []
+    if not keep and seek is None and not (video_only or audio_only) and any(c.get("enabled", True) for c in (edl.get("cuts") or []) if isinstance(c, dict)):
+        # the enabled cuts removed everything (silence/auto-cut too aggressive): render without them instead of failing
+        edl = {**edl, "cuts": [{**c, "enabled": False} if isinstance(c, dict) else c for c in (edl.get("cuts") or [])]}
+        keep = [(_snap(a, fps), _snap(b, fps)) for a, b in keep_segments(edl)]
+        if clip and clip.get("end", 0) > clip.get("start", 0):
+            cs, ce = _snap(float(clip["start"]), fps), _snap(float(clip["end"]), fps)
+            keep = [(max(a, cs), min(b, ce)) for a, b in keep if b > cs and a < ce]
+        keep = [(a, b) for a, b in keep if b - a >= 1 / fps]
+        if keep:
+            cut_warn.append("सारे कट मिलकर पूरा वीडियो काट रहे थे — इसलिए कट छोड़कर render हुआ। Cuts जाँचें / कुछ कट बंद करें")
     if not keep:
         raise ValueError("कट के बाद कुछ नहीं बचा — कुछ कट बंद करें")
     if clip:
@@ -865,7 +876,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         files.append({"kind": "subtitle", "path": srt, "mime": "application/x-subrip",
                       "label": preset["id"], "meta": {"preset": preset["id"]}})
 
-    warnings = []
+    warnings = list(cut_warn)
     max_s = preset.get("max_seconds")
     if max_s and new_dur > max_s:
         warnings.append(f"{preset.get('label')}: वीडियो {new_dur:.0f}s है, सीमा {max_s}s — upload नहीं होगा")
