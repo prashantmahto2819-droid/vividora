@@ -34,77 +34,73 @@ async def health_check(request: Request):
     return ok(triposr.health())
 
 
+_JOBS: dict[str, dict] = {}  # in-memory state of image→3D runs (a run takes 1–3 min on CPU; the browser polls)
+
+
+def _run(job_id: str, ws: str, user_id: str, image_bytes: bytes, filename: str, content_type: str, name: str):
+    import tempfile
+    st = _JOBS[job_id]
+    try:
+        with tempfile.TemporaryDirectory(prefix="triposr_") as td:
+            glb = Path(td) / f"{name[:60] or 'model'}.glb"
+            triposr.image_to_3d(image_bytes, filename, content_type, out=glb)
+            from .library import _add_file
+            item = _add_file(ws, user_id, "3d_model", glb, name=name, tags="3d,glb", source="triposr",
+                             license="", analyse=False)
+        with db.tx() as c:
+            service.log(c, ws, "triposr.generate", user_id=user_id, detail={"item_id": item["id"], "name": name})
+        st.update(status="done", item=_view(item), finished=time.time())
+    except Exception as e:  # noqa: BLE001 — reported to the browser
+        log.warning("image→3D failed: %s", e)
+        st.update(status="failed", error=str(e)[:300], finished=time.time())
+
+
 @require("editor")
 async def generate(request: Request, user: dict):
-    """Accept image upload, enqueue an image-to-3D job.
-
-    The image is saved to media, and the job payload points at it.
-    The worker calls triposr.image_to_3d() and stores the GLB in the library.
-    For now (no separate worker for this), we do it inline (synchronous).
-    """
-    # Parse multipart form
+    """POST multipart (field: file) → 202 {job_id}. The GLB is made in the background and saved in the
+    library (kind 3d_model); poll GET /triposr/job/{job_id}."""
+    import threading
     form = await request.form()
     uploaded = form.get("file") or form.get("image")
-    if not uploaded:
+    if not uploaded or not hasattr(uploaded, "read"):
         raise ApiError(422, "image file upload करें (field: file या image)")
-
     image_bytes = await uploaded.read()
     if len(image_bytes) > _MAX_IMAGE:
         raise ApiError(413, f"image बहुत बड़ी (max {_MAX_IMAGE // (1024 * 1024)} MB)")
     if len(image_bytes) < 100:
         raise ApiError(422, "image file खाली या corrupt")
-
     filename = getattr(uploaded, "filename", "input.png") or "input.png"
     content_type = getattr(uploaded, "content_type", "image/png") or "image/png"
-
-    # Check TripoSR is available
     h = triposr.health()
     if h.get("status") != "ok":
         raise ApiError(503, f"TripoSR service उपलब्ध नहीं: {h.get('error', 'offline')}")
-
-    # Save uploaded image to media
-    ws = user["workspace_id"]
-    media = Path(config.settings.media_root) / ws / "triposr"
-    media.mkdir(parents=True, exist_ok=True)
-
-    img_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
-    img_ext = filename.rsplit(".", 1)[-1] if "." in filename else "png"
-    img_path = media / f"{img_hash}.{img_ext}"
-    img_path.write_bytes(image_bytes)
-
-    # Generate GLB synchronously (CPU mode, takes 1-3 min)
-    glb_id = uuid.uuid4().hex[:16]
-    glb_path = media / f"{glb_id}.glb"
-
-    try:
-        triposr.image_to_3d(image_bytes, filename, content_type, out=glb_path)
-    except RuntimeError as e:
-        raise ApiError(502, f"3D generation failed: {e}")
-
-    # Create library item for the GLB
-    item_id = db.new_id()
-    now = db.now()
+    if sum(1 for j in _JOBS.values() if j["status"] == "running") >= 1:
+        raise ApiError(429, "एक 3D model अभी बन रहा है — ख़त्म होने दें")
+    for k in [k for k, j in _JOBS.items() if j.get("finished") and time.time() - j["finished"] > 3600]:
+        _JOBS.pop(k, None)
     name = str(form.get("name") or filename.rsplit(".", 1)[0] or "3D Model")[:120]
-    item = {
-        "id": item_id,
-        "workspace_id": ws,
-        "kind": "3d_model",
-        "name": name,
-        "ext": "glb",
-        "mime": "model/gltf-binary",
-        "size": glb_path.stat().st_size,
-        "path": str(glb_path.relative_to(config.settings.media_root)),
-        "meta": {"source": "triposr", "source_image": str(img_path.relative_to(config.settings.media_root)),
-                 "source_hash": img_hash},
-        "created_at": now,
-        "updated_at": now,
-        "user_id": user["id"],
-    }
-    with db.tx() as c:
-        db.insert(c, "library", item)
-        service.log(c, ws, "triposr.generate", user_id=user["id"], detail={"item_id": item_id, "name": name})
+    job_id = uuid.uuid4().hex[:16]
+    _JOBS[job_id] = {"status": "running", "ws": user["workspace_id"], "started": time.time()}
+    threading.Thread(target=_run, args=(job_id, user["workspace_id"], user["id"], image_bytes, filename, content_type, name),
+                     daemon=True).start()
+    return ok({"job_id": job_id}, 202)
 
-    return ok({"item": _view(item), "glb_size": glb_path.stat().st_size}, 201)
+
+@require("viewer")
+async def job_status(request: Request, user: dict):
+    st = _JOBS.get(request.path_params["job_id"])
+    if not st or st["ws"] != user["workspace_id"]:
+        raise ApiError(404, "job नहीं मिला (server restart हुआ हो तो Library देखें)")
+    return ok({"status": st["status"], "error": st.get("error"), "item": st.get("item"),
+               "seconds": int(time.time() - st["started"])})
+
+
+@require("viewer")
+async def models(request: Request, user: dict):
+    """The workspace's generated 3D models (newest first)."""
+    rows = db.rows(db.conn().execute("SELECT * FROM library WHERE workspace_id = ? AND kind = '3d_model' ORDER BY created_at DESC LIMIT 60",
+                                     (user["workspace_id"],)))
+    return ok({"models": [_view(r) for r in rows]})
 
 
 @require("viewer")
@@ -146,6 +142,8 @@ async def cancel(request: Request, user: dict):
 routes = [
     Route("/triposr/health", health_check),
     Route("/triposr/generate", generate, methods=["POST"]),
+    Route("/triposr/job/{job_id}", job_status),
+    Route("/triposr/models", models),
     Route("/triposr/jobs", jobs),
     Route("/triposr/jobs/{job_id}/cancel", cancel, methods=["POST"]),
 ]

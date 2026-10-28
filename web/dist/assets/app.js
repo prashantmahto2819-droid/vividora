@@ -5,6 +5,7 @@ import * as TH from "./thumbs.js";
 import * as VO from "./voice.js";
 import * as CHS from "./chars.js";
 import * as SCN from "./scenes.js";
+import * as TL from "./tools.js";
 // 3D Studio (characters / scenes): lazy — three.js (~700 KB) only loads when the page opens
 const C3D = { mod: null, async mount(kind, root, ctx) { const ui = await import("./chars3d-ui.js"); const sc = await import("./scenes3d.js"); this.mod = { ui, sc }; return kind === "scenes3d" ? sc.mountScenes(root, ctx) : ui.mountStudio(root, ctx); },
   unmount() { this.mod?.ui.unmountStudio(); this.mod?.sc.unmountScenes(); } };
@@ -92,7 +93,7 @@ function toast(msg, ms = 2600) {
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|forgot|reset|characters|scenes|characters3d|scenes3d|copilot|yt-shorts)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|forgot|reset|characters|scenes|characters3d|scenes3d|copilot|yt-shorts|voicestudio|image3d)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -147,18 +148,18 @@ function schedulePoll() {
   if (busy || anyBusy || compBusy || ytBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy || ytBusy ? 2500 : 6000);
 }
 // a background poll must never wipe a form someone is filling in: the upload/montage page keeps chosen files in memory
-function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "templates", "characters", "scenes", "characters3d", "scenes3d"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
+function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "templates", "characters", "scenes", "characters3d", "scenes3d", "voicestudio", "image3d"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
 
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
-  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["yt-shorts", "#/yt-shorts", "film", "YT → Shorts", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["edit", "#/new?quick=1", "film", "Timeline Editor", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["yt-shorts", "#/yt-shorts", "film", "YT → Shorts", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1], ["voicestudio", "#/voicestudio", "music", "Voice Studio (TTS)", 1], ["image3d", "#/image3d", "cube", "Image → 3D (.glb)", 1]]],
   ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["dashboard", "#/dashboard", "grid", "Dashboard"], ["copilot", "#/copilot", "pulse", "Copilot"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
 ];
 function navActive(id) {
   const k = S.route.kind; const mont = /type=montage/.test(location.hash);
-  if (id === "montage") return k === "new" && mont; if (id === "new") return k === "new" && !mont;
+  if (id === "montage") return k === "new" && mont; if (id === "edit") return k === "new" && /quick=1/.test(location.hash); if (id === "new") return k === "new" && !mont && !/quick=1/.test(location.hash);
   if (id === "account") return k === "account" || k === "users"; return k === id;
 }
 function shellHTML(main, wide = false) {
@@ -242,12 +243,12 @@ function render() {
   }
   app.dataset.mode = "shell"; ED.unmount();
   const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, dashboard: dashboardView, copilot: copilotView, library: libraryView,
-                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView, "yt-shorts": ytShortsView };
+                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView, "yt-shorts": ytShortsView, voicestudio: TL.voiceView, image3d: TL.glbView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, dashboard: bindDashboard, copilot: bindCopilot, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts, voicestudio: () => TL.voiceBind({ S, api, toast, go }), image3d: () => TL.glbBind({ S, api, toast, go }) };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
@@ -432,7 +433,7 @@ function homeView() {
     ${HS.find((x) => x.id === "hero")?.on ? `<div class="hero2"><div class="hero2-t"><p class="kicker">${greet}, ${esc(S.user.name.split(" ")[0])}</p><h1>${review.length ? `${review.length} वीडियो आपकी मंज़ूरी का इंतज़ार कर रहे हैं` : working.length ? `${working.length} वीडियो पर काम चल रहा है` : "आज क्या बनाएँ?"}</h1>
       <p class="muted">Record या upload करें — Vividora cuts, captions, zoom, music, Shorts, titles और thumbnails तैयार कर देगा। आपको बस मंज़ूरी देनी है।</p></div>
       <button class="btn small quiet hcust-btn" id="home-custom" title="Sections दिखाएँ या छुपाएँ">⚙ Customize</button>
-      ${canEdit ? `<div class="qacts">${[["#/record", "rec", "Record", "Camera और teleprompter", "c1"], ["#/new", "upload", "Upload", "Recording या clips", "c2"], ["#/new?type=montage", "music", "Montage", "Music और clips", "c3"], ["#/plan", "bulb", "Plan", "Trends, ideas और script", "c4"], ["#/thumbs", "image", "Thumbnail", "ज़्यादा clicks वाले thumbnails", "c5"]].map(([h, i, b, s, c]) => `<a class="qact ${c}" href="${h}"><span class="qi">${ic(i)}</span><b>${b}</b><span>${s}</span></a>`).join("")}</div>` : ""}</div>` : `<div class="row between"><span></span><button class="btn small quiet" id="home-custom">⚙ Customize</button></div>`}
+      ${canEdit ? `<div class="qacts">${[["#/record", "rec", "Record", "Camera और teleprompter", "c1"], ["#/new", "upload", "Upload", "Recording या clips", "c2"], ["#/new?type=montage", "music", "Montage", "Music और clips", "c3"], ["#/plan", "bulb", "Plan", "Trends, ideas और script", "c4"], ["#/thumbs", "image", "Thumbnail", "ज़्यादा clicks वाले thumbnails", "c5"], ["#/new?quick=1", "film", "Timeline Editor", "वीडियो डालो, सीधे timeline में edit", "c1"], ["#/voicestudio", "music", "Voice Studio", "Text से AI आवाज़ (TTS)", "c2"], ["#/image3d", "cube", "Image → 3D", "तस्वीर से .glb model", "c3"]].map(([h, i, b, s, c]) => `<a class="qact ${c}" href="${h}"><span class="qi">${ic(i)}</span><b>${b}</b><span>${s}</span></a>`).join("")}</div>` : ""}</div>` : `<div class="row between"><span></span><button class="btn small quiet" id="home-custom">⚙ Customize</button></div>`}
     <div id="home-cust" hidden class="box hcust"><b>Home के sections</b> <span class="small muted">— दिखाएँ या छुपाएँ, ↑↓ से क्रम बदलें। यह इसी browser में याद रहता है।</span><ul>${HS.map((x, i) => `<li><label class="chk"><input type="checkbox" data-hs="${x.id}" ${x.on ? "checked" : ""}> ${x.label}</label><span><button class="btn small quiet" data-hsu="${i}">↑</button><button class="btn small quiet" data-hsd="${i}">↓</button></span></li>`).join("")}</ul></div>
     ${HS.find((x) => x.id === "stats")?.on ? `<div class="stats2">${counters.map(([k, n, l, h]) => `<a class="stat ${k}" href="${h}"><b>${n}</b><span>${l}</span></a>`).join("")}</div>` : ""}
     <div class="hcols2"><div class="hmain">${main}</div><div class="hside2">${side}</div></div></div>`;
@@ -531,7 +532,7 @@ function bindLogin() {
 function newView() {
   const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; const idea = ideaId && (S.ideas || []).find((i) => i.id === ideaId);
   const chn = S.channels.find((c) => c.id === S.channel);
-  return `<div class="pghead"><div><h1>नया वीडियो</h1><p class="muted">पहले नाम दें, फिर फ़ाइल चुनें। Upload बीच में टूटे तो वहीं से फिर शुरू होता है।</p></div></div>${chn ? `<p class="small muted">Channel: <b style="color:${esc(chn.color || "#F2B33D")}">${esc(chn.name)}</b> — इसी channel का brand kit और connections लगेंगे। Channel बाएँ menu में ऊपर से बदलें।</p>` : ""}${idea ? `<div class="note">Idea: <b>${esc(idea.title)}</b> — upload के बाद यह “Record हो गया” में चला जाएगा।</div>` : ""}
+  return `<div class="pghead"><div><h1>${/quick=1/.test(location.hash) ? "🎞 Timeline Editor" : "नया वीडियो"}</h1><p class="muted">${/quick=1/.test(location.hash) ? "वीडियो चुनें — Autopilot बंद रहेगा और सीधे timeline खुलेगी, जहाँ आप खुद edit करें। (मंज़ूरी और Publish आपके हाथ में ही है)" : "पहले नाम दें, फिर फ़ाइल चुनें। Upload बीच में टूटे तो वहीं से फिर शुरू होता है।"}</p></div></div>${chn ? `<p class="small muted">Channel: <b style="color:${esc(chn.color || "#F2B33D")}">${esc(chn.name)}</b> — इसी channel का brand kit और connections लगेंगे। Channel बाएँ menu में ऊपर से बदलें।</p>` : ""}${idea ? `<div class="note">Idea: <b>${esc(idea.title)}</b> — upload के बाद यह “Record हो गया” में चला जाएगा।</div>` : ""}
     <div class="choices" style="margin-bottom:1rem"><label class="chip on"><input type="radio" name="ptype" value="talking_head" checked>Recording — मेरी आवाज़ वाला वीडियो</label><label class="chip"><input type="radio" name="ptype" value="montage">Montage — music और clips, बिना आवाज़</label></div>
     <form id="new"><div class="field"><label>वीडियो का नाम</label><input name="title" required placeholder="जैसे: 4 बजे उठने वाला लड़का" value="${idea ? esc(idea.title) : ""}"></div>
     <div class="field"><label>भाषा</label><select name="language"><option value="auto">अपने-आप पहचानें (हिंदी / English / Hinglish)</option><option value="hi">हिंदी</option><option value="en">English</option></select></div>
@@ -558,6 +559,7 @@ function newView() {
     <div class="actionbar"><a class="btn quiet" href="#/">रद्द करें</a><button class="btn primary" id="start" disabled>Upload शुरू करें</button></div></form>`;
 }
 function bindNew() {
+  if (/quick=1/.test(location.hash)) { const ap = document.querySelector("input[name=autopilot]"); if (ap) ap.checked = false; const sk = document.querySelector("input[name=transcript_mode][value=skip]"); if (sk) { sk.checked = true; document.querySelectorAll("#tr-row .chip").forEach((c) => c.classList.toggle("on", c.contains(sk))); } }
   const drop = $("#drop"), file = $("#file"); let chosen = null; let chosenAll = [];
   drop.onclick = () => file.click();
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
