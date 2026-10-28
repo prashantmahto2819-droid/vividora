@@ -57,7 +57,7 @@ def image_to_3d(image_bytes: bytes, filename: str = "input.png",
     boundary = "----VividoraTripoSR9f8e7d6c"
     body = (
         f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'
         f"Content-Type: {content_type}\r\n\r\n"
     ).encode() + image_bytes + f"\r\n--{boundary}--\r\n".encode()
 
