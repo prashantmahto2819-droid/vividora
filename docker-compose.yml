@@ -7,7 +7,13 @@ services:
     image: vividora/server
     restart: always
     env_file: .env
+    # TripoSR (:8090) and VoiceStudio (:3900) run on the VM itself, not in Docker — "127.0.0.1" inside the
+    # container is the container, so reach the host through host.docker.internal (overrides .env on purpose)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      TRIPOSR_URL: http://host.docker.internal:8090
+      VOICESTUDIO_URL: http://host.docker.internal:3900
       DATA_ROOT: /data
       MEDIA_ROOT: /media
       RAW_ROOT: /raw
