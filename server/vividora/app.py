@@ -169,6 +169,8 @@ def create_app() -> Starlette:
     api_routes += triposr_api.routes  # TripoSR: image → 3D GLB model (self-hosted, localhost:8090)
     from .api import voicestudio_api
     api_routes += voicestudio_api.routes  # VoiceStudio: 41-model TTS (self-hosted, localhost:3900)
+    from .api import voiceover_api
+    api_routes += voiceover_api.routes  # editor voice-over: text → library 'voice' item (async)
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))

@@ -18,6 +18,7 @@ const ICON = {
   audio: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
   overlay: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>',
   montage: '<svg viewBox="0 0 24 24"><path d="M4 18V8M9 18V4M14 18v-8M19 18v-5"/><path d="M3 21h18"/></svg>',
+  studio3d: '<svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
   body: '<svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/><path d="M2 12l2-2M22 12l-2-2" stroke-dasharray="2 2"/></svg>',
   color: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 010 18c-2.5 0-3-2-1.5-3.5S13 15 11 13s-4-3-2.5-5S12 3 12 3z"/></svg>',
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg>',
@@ -42,7 +43,7 @@ import * as CUT from "./cutout.js";
 import * as PRO from "./pro.js";
 import * as MIX from "./mix.js";
 import * as LUT from "./lut.js";
-const TABS_ALL = [["cuts", "कट"], ["media", "Media"], ["audio", "Audio"], ["text", "Text"], ["stickers", "Stickers"], ["effects", "Effects"], ["transitions", "Transitions"], ["color", "Filters"], ["pro", "Pro"], ["captions", "Captions"], ["body", "Cutout"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["ai", "AI Studio"], ["refs", "Refs"]];
+const TABS_ALL = [["cuts", "कट"], ["media", "Media"], ["audio", "Audio"], ["studio3d", "3D & Voice"], ["text", "Text"], ["stickers", "Stickers"], ["effects", "Effects"], ["transitions", "Transitions"], ["color", "Filters"], ["pro", "Pro"], ["captions", "Captions"], ["body", "Cutout"], ["overlay", "Overlay"], ["shorts", "Shorts"], ["ai", "AI Studio"], ["refs", "Refs"]];
 const TABS_MONTAGE = [["montage", "Montage"], ["media", "Media"], ["audio", "Audio"], ["overlay", "Overlay"], ["refs", "Refs"]];
 let TABS = TABS_ALL;
 const TITLE_PRESETS = [
@@ -53,7 +54,7 @@ const TITLE_PRESETS = [
 ];
 const LOOK_CSS = { none: "", warm: "sepia(.15) saturate(1.1)", cinematic: "contrast(1.1) saturate(.9) brightness(.97)", vivid: "saturate(1.35) contrast(1.05)",
   soft: "contrast(.95) saturate(.95) blur(.3px)", bw: "grayscale(1) contrast(1.12)", cool: "hue-rotate(-8deg) saturate(1.02)", vintage: "sepia(.35) contrast(.95)" };
-const LIB_KINDS = [["music", "Music"], ["sfx", "SFX"], ["broll", "B-roll"], ["image", "Image"], ["sticker", "Sticker"], ["logo", "Logo"], ["frame", "Frame"], ["lut", "LUT"]];
+const LIB_KINDS = [["music", "Music"], ["sfx", "SFX"], ["voice", "Voice-over"], ["broll", "B-roll"], ["image", "Image"], ["sticker", "Sticker"], ["logo", "Logo"], ["frame", "Frame"], ["lut", "LUT"]];
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 // ---------- mount / state ----------
@@ -1435,7 +1436,7 @@ function renderPanel() {
       <div class="box"><b>Transition (हर कट पर)</b><p class="small muted" style="margin:.2rem 0">Effect-style (cut पर flash/blur…):</p><div class="trgrid">${(S.presets?.transitions || []).filter((t) => !t.id.startsWith("x_")).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-${t.id}"></i>${esc(t.label)}</button>`).join("")}</div>
         <p class="small muted" style="margin:.5rem 0 .2rem">Clip transitions (दोनों clips 0.4s overlap — wipe/slide/dissolve, CapCut जैसे):</p><div class="trgrid">${(S.presets?.transitions || []).filter((t) => t.id.startsWith("x_")).map((t) => `<button class="trbtn ${(fx.transition || "none") === t.id ? "on" : ""}" data-tr="${t.id}" ${dis}><i class="tr-x"></i>${esc(t.label)}</button>`).join("")}</div><p class="small muted">एक कट के लिए अलग: timeline पर कट चुनें → inspector।</p></div>`;
   } else if (t === "media" || t === "audio" || t === "overlay" || t === "stickers") {
-    const kinds = t === "media" ? ["broll", "image", "sticker"] : t === "audio" ? ["music", "sfx"] : t === "stickers" ? ["sticker"] : ["sticker", "image", "logo", "frame", "lut"];
+    const kinds = t === "media" ? ["broll", "image", "sticker"] : t === "audio" ? ["music", "sfx", "voice"] : t === "stickers" ? ["sticker"] : ["sticker", "image", "logo", "frame", "lut"];
     if (!kinds.includes(E.libKind)) E.libKind = kinds[0];
     const subTags = { sticker: ["", "popup", "emoji", "social", "shape"], music: ["", "motivational", "emotional", "lofi", "upbeat", "cinematic", "story", "energetic", "news"], frame: ["", "vertical", "horizontal"], broll: ["", "background", "overlay"] }[E.libKind] || [];
     const lq = (E.libQ || "").toLowerCase();
@@ -1455,7 +1456,7 @@ function renderPanel() {
         <div id="clip-progress"></div></div>` : "";
     h = `<div class="ph"><h3>${{ media: "Media library", audio: "Audio", overlay: "Overlay", stickers: "Stickers" }[t]}</h3><span class="small muted">खींचकर preview/timeline पर छोड़ें या “+”</span></div>${clipBox}
       <div class="seg">${kinds.map((k) => `<button data-kind="${k}" class="${E.libKind === k ? "on" : ""}">${LIB_KINDS.find((x) => x[0] === k)[1]}</button>`).join("")}</div>
-      <label class="drop small ${dis ? "off" : ""}"><input type="file" id="lib-file" multiple hidden ${dis}>${ICON.plus} ${E.libKind} upload करें <span class="muted">(${{ music: "mp3/wav", sfx: "mp3/wav", broll: "mp4/mov", image: "png/jpg", sticker: "png (transparent)", logo: "png", frame: "png 1080×1920/1920×1080 transparent", lut: ".cube" }[E.libKind]})</span></label>
+      <label class="drop small ${dis ? "off" : ""}"><input type="file" id="lib-file" multiple hidden ${dis}>${ICON.plus} ${E.libKind} upload करें <span class="muted">(${{ music: "mp3/wav", sfx: "mp3/wav", voice: "mp3/wav", broll: "mp4/mov", image: "png/jpg", sticker: "png (transparent)", logo: "png", frame: "png 1080×1920/1920×1080 transparent", lut: ".cube" }[E.libKind]})</span></label>
       <div id="lib-progress"></div>
       <div class="irow"><input id="lib-q" placeholder="खोजें…" value="${esc(E.libQ || "")}" style="flex:1">${t === "stickers" ? `<button class="btn small primary" id="stk-search" title="Tenor पर खोजें">🔍 Tenor</button>` : ""}<a class="btn small quiet" href="#/library" title="पूरी library">⤢</a></div>
       ${t === "stickers" && (E.stkWeb || []).length ? `<div class="box" style="margin:.3rem 0"><b class="small">Tenor results</b> <button class="btn small quiet" id="stk-clear">✕ बंद</button><div class="lib grid" style="margin-top:.3rem">${(E.stkWeb || []).map((x, i) => `<div class="stk-web" data-stki="${i}" style="cursor:pointer" title="${esc(x.title)}"><img src="${esc(x.preview)}" alt="" loading="lazy" style="object-fit:contain;width:72px;height:72px;background:repeating-conic-gradient(#1a2130 0 25%,#222b3b 0 50%) 50%/8px 8px;border-radius:6px"></div>`).join("")}</div></div>` : ""}
@@ -1473,7 +1474,7 @@ function renderPanel() {
         ${["image", "logo", "sticker", "frame"].includes(x.kind) ? `<img src="${x.url}" alt="" loading="lazy" style="object-fit:contain;background:repeating-conic-gradient(#1a2130 0 25%,#222b3b 0 50%) 50%/10px 10px">` : x.kind === "broll" ? `<video src="${x.url}#t=0.5" muted preload="metadata"></video>` : `<i class="libicon">${ICON.audio}</i>`}
         <div class="grow"><b class="small">${esc(x.name)}</b><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}${x.meta?.width ? ` · ${x.meta.width}×${x.meta.height}` : ""}${x.kind === "music" && x.meta?.bpm ? ` · ${Math.round(x.meta.bpm)} BPM` : ""}${x.kind === "music" && x.meta?.moods?.length ? ` · ${x.meta.moods.slice(0, 2).join(", ")}` : ""}${x.kind === "music" && E.musicComm && E.musicComm[x.id] === false ? ` · <span style="color:var(--rose)">NC</span>` : ""}</span></div>
         ${x.kind === "music" ? `<button class="ibtn" data-fav="${x.id}" title="पसंदीदा">${x.meta?.fav ? "★" : "☆"}</button>` : ""}
-        ${x.kind === "music" || x.kind === "sfx" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
+        ${x.kind === "music" || x.kind === "sfx" || x.kind === "voice" || x.kind === "broll" ? `<button class="ibtn" data-prev="${x.id}" title="सुनें/देखें">${ICON.play}</button>` : ""}
         ${x.kind === "music" ? `<button class="btn small" data-addclip="${x.id}" title="किसी audio track पर clip की तरह (playhead से)" ${dis}>+ clip</button>` : ""}<button class="btn small primary" data-add="${x.id}" ${dis}>${{ music: "लगाएँ", logo: "लगाएँ", lut: "लगाएँ", frame: "लगाएँ" }[x.kind] || "+ जोड़ें"}</button>
         <button class="ibtn" data-del="${x.id}" title="library से हटाएँ" ${dis}>${ICON.trash}</button></li>`).join("") || `<li class="muted small">अभी कुछ नहीं — ऊपर से upload करें।</li>`}</ul>`;
   } else if (t === "montage") {
@@ -1617,6 +1618,8 @@ function renderPanel() {
       <div class="box"><b>🎨 Colour wheels · Curves · HSL · Colour match</b><p class="small muted">DaVinci जैसा pro colour — Pro tab में।</p><button class="btn small" data-tabgo="pro">🎛 Pro colour खोलें</button></div>`;
   } else if (t === "pro") {
     h = PRO.proPanel(dis);
+  } else if (t === "studio3d") {
+    h = s3Html(dis);
   }
   panel.innerHTML = h;
   bindPanel();
@@ -1627,6 +1630,7 @@ function bindPanel() {
   // pro features
   if (E.tab === "pro") PRO.bindProPanel(panel);
   if (E.tab === "audio") PRO.bindMusicFit(panel);
+  if (E.tab === "studio3d") s3Bind(panel);
   if (E.tab === "captions" && E.capMode === "text") PRO.bindTextDoc(panel);
   $$("[data-capmode]", panel).forEach((b) => (b.onclick = () => { E.capMode = b.dataset.capmode; renderPanel(); if (E.capMode === "text") $("[data-tdoc]", panel)?.focus(); }));
   $$("[data-tabgo]", panel).forEach((b) => (b.onclick = () => { E.tab = b.dataset.tabgo; $$(".ed-tabs button", E.root).forEach((x) => x.classList.toggle("on", x.dataset.tab === E.tab)); renderPanel(); }));
@@ -2018,6 +2022,147 @@ function audioControls(dis) {
       ${music.id ? `<button class="btn small quiet" id="mus-clear">हटाएँ</button>` : ""}</div>
     <p class="small muted">SFX की volume: timeline पर SFX पर क्लिक करें।</p>`;
 }
+// ---------------------------------------------------------------- 3D & Voice tab: make a talking 3D character / a voice-over and drop it on the timeline in one go
+const s3sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function s3State() {
+  return (E.s3 = E.s3 || { cat: null, models: null, loading: false, loadErr: "", char: "", anim: "talk1", text: "", voice: "", seconds: 6, cam: "medium", busy: false, msg: "", err: false,
+    vo: { text: "", voice: "", speed: 1, busy: false, msg: "", err: false } });
+}
+function s3Load(force) {
+  const s = s3State(); if (s.loading || (!force && s.cat && s.models)) return; s.loading = true; s.loadErr = ""; const me = E; const { api } = E.ctx;
+  Promise.all([api("GET", "/chars3d").catch((e) => { s.loadErr = e.message; return null; }), api("GET", "/triposr/models").catch(() => ({ models: [] }))]).then(([cat, mm]) => {
+    s.loading = false; if (E !== me) return;
+    if (cat) s.cat = cat; s.models = mm?.models || [];
+    const voices = s.cat?.voices || []; const pick = voices.find((v) => v.id.startsWith("vs_hi")) || voices[0];
+    if (!s.voice && pick) s.voice = pick.id; if (!s.vo.voice && pick) s.vo.voice = pick.id;
+    if (s.cat && !(s.cat.animations || []).some((a) => a.id === s.anim)) s.anim = s.cat.animations?.[0]?.id || "idle";
+    if (!s.char || (s.char.startsWith("glb:") && !s.models.some((m) => "glb:" + m.id === s.char))) s.char = s.models[0] ? "glb:" + s.models[0].id : s.cat?.profiles?.[0] ? "p:" + s.cat.profiles[0].id : "";
+    if (E.tab === "studio3d") renderPanel();
+  });
+}
+function s3Say(box, msg, err) { // box = state object (s or s.vo); also paints the live element when the panel is open
+  box.msg = msg || ""; box.err = !!err; const el = $(box === E.s3 ? "#s3-st" : "#vo-st", E.root);
+  if (el) { el.textContent = box.msg; el.classList.toggle("err", box.err); }
+}
+function s3Html(dis) {
+  const { esc } = E.ctx; const s = s3State(); s3Load(); const cat = s.cat; const vo = s.vo;
+  const opt = (v, l, cur) => `<option value="${esc(v)}" ${String(cur) === String(v) ? "selected" : ""}>${esc(l)}</option>`;
+  const models = s.models || []; const profs = cat?.profiles || []; const cats = cat?.categories || {};
+  const charOpts = `<optgroup label="मेरे 3D models (.glb)">${models.map((m) => opt("glb:" + m.id, m.name, s.char)).join("") || `<option value="" disabled>अभी कोई .glb नहीं</option>`}</optgroup>`
+    + Object.keys(cats).map((c) => { const ps = profs.filter((p) => p.category === c); return ps.length ? `<optgroup label="${esc(cats[c])}">${ps.map((p) => opt("p:" + p.id, p.name, s.char)).join("")}</optgroup>` : ""; }).join("");
+  const voices = cat?.voices || [];
+  const vOpts = (cur) => voices.length ? voices.map((v) => opt(v.id, v.label, cur)).join("") : `<option value="">(auto)</option>`;
+  const dl = s.busy || vo.busy || !!dis;
+  return `<div class="ph"><h3>3D & Voice</h3><a class="small" href="#/image3d" title="photo से .glb बनाएँ, models देखें/हटाएँ">→ पूरा 3D Studio</a></div>
+    <p class="small muted">यहीं से character या आवाज़ बनाएँ — तैयार होते ही timeline पर playhead की जगह लग जाती है।</p>
+    ${s.loadErr ? `<p class="small" style="color:#ff6b5e">⚠ ${esc(s.loadErr)} <button class="btn small quiet" id="s3-retry">फिर कोशिश</button></p>` : ""}
+    <div class="box"><b>🧍 3D character</b>
+      <div class="irow">${field("Character", `<select id="s3-char" ${dis}>${charOpts}</select>`)}</div>
+      <div class="irow"><label class="btn small ${dis ? "off" : ""}">⬆ .glb import<input type="file" id="s3-glb" accept=".glb,model/gltf-binary" hidden ${dis}></label><span class="small muted">photo से बनाने के लिए ऊपर वाला link</span></div>
+      <div class="irow">${field("Animation", `<select id="s3-anim" ${dis}>${(cat?.animations || [{ id: "talk1", label: "talk" }]).map((a) => opt(a.id, a.label, s.anim)).join("")}</select>`)}${field("Camera", `<select id="s3-cam" ${dis}>${(cat?.cameras || ["medium"]).map((c) => opt(c, c, s.cam)).join("")}</select>`)}</div>
+      ${field("क्या बोले (हर line = एक वाक्य, खाली = बिना आवाज़)", `<textarea id="s3-text" rows="4" maxlength="1500" placeholder="नमस्ते दोस्तों!\nआज हम कुछ नया सीखेंगे।" ${dis}>${esc(s.text)}</textarea>`)}
+      <div class="irow">${field("आवाज़", `<select id="s3-voice" ${dis}>${vOpts(s.voice)}</select>`)}${field("लंबाई (s) — बिना text के", `<input type="number" id="s3-sec" min="2" max="30" step="1" value="${+s.seconds || 6}" ${dis}>`)}</div>
+      <button class="btn primary" id="s3-go" ${dl || !s.char ? "disabled" : ""}>🎬 बनाओ और timeline में लगाओ</button>
+      <div class="small ${s.err ? "err" : "muted"}" id="s3-st" style="margin-top:.4rem;${s.err ? "color:#ff6b5e" : ""}">${esc(s.msg)}</div>
+      <p class="small muted">CPU पर character बनने में कुछ मिनट लगते हैं — बनते समय editor में दूसरा काम कर सकते हैं।</p></div>
+    <div class="box"><b>🎙 Voice-over (TTS)</b>
+      ${field("Text (max 4000 अक्षर)", `<textarea id="vo-text" rows="5" maxlength="4000" placeholder="जो बुलवाना है यहाँ लिखें…" ${dis}>${esc(vo.text)}</textarea>`)}
+      <div class="irow">${field("आवाज़", `<select id="vo-voice" ${dis}>${vOpts(vo.voice)}</select>`)}${field(`Speed <b id="vo-sp-l">${(+vo.speed).toFixed(2)}×</b>`, `<input type="range" id="vo-speed" min="0.6" max="1.6" step="0.05" value="${vo.speed}" ${dis}>`)}</div>
+      <button class="btn primary" id="vo-go" ${dl ? "disabled" : ""}>🔊 आवाज़ बनाओ और timeline में लगाओ</button>
+      <div class="small ${vo.err ? "err" : "muted"}" id="vo-st" style="margin-top:.4rem;${vo.err ? "color:#ff6b5e" : ""}">${esc(vo.msg)}</div>
+      <p class="small muted">आवाज़ audio lane पर लगती है; Audio tab → Voice-over में सहेजी रहती है।</p></div>`;
+}
+function s3Bind(panel) {
+  const s = s3State(); const vo = s.vo; const on = (sel, ev, fn) => { const el = $(sel, panel); if (el) el[ev] = fn; };
+  on("#s3-retry", "onclick", () => { s3Load(true); renderPanel(); });
+  on("#s3-char", "onchange", (e) => { s.char = e.target.value; });
+  on("#s3-anim", "onchange", (e) => { s.anim = e.target.value; });
+  on("#s3-cam", "onchange", (e) => { s.cam = e.target.value; });
+  on("#s3-text", "oninput", (e) => { s.text = e.target.value; });
+  on("#s3-voice", "onchange", (e) => { s.voice = e.target.value; });
+  on("#s3-sec", "onchange", (e) => { s.seconds = clamp(+e.target.value || 6, 2, 30); e.target.value = s.seconds; });
+  on("#vo-text", "oninput", (e) => { vo.text = e.target.value; });
+  on("#vo-voice", "onchange", (e) => { vo.voice = e.target.value; });
+  on("#vo-speed", "oninput", (e) => { vo.speed = +e.target.value; const l = $("#vo-sp-l", panel); if (l) l.textContent = vo.speed.toFixed(2) + "×"; });
+  on("#s3-glb", "onchange", (e) => s3Import(e.target));
+  on("#s3-go", "onclick", s3Go);
+  on("#vo-go", "onclick", voGo);
+}
+// make sure the finished library item is known to the editor (preview + timeline resolve it through E.lib)
+async function s3Fresh(item) {
+  await loadLib(); if (!E.lib) E.lib = [];
+  if (!libItem(item.id)) E.lib.unshift(item);
+  return libItem(item.id) || item;
+}
+async function s3Import(inp) {
+  const s = s3State(); const me = E; const f = inp.files && inp.files[0]; inp.value = ""; if (!f || !E.canEdit) return;
+  if (!/\.glb$/i.test(f.name)) return s3Say(s, "सिर्फ़ .glb फ़ाइल चुनें", true);
+  if (f.size > 150 * 1024 * 1024) return s3Say(s, "फ़ाइल बहुत बड़ी (max 150 MB)", true);
+  s3Say(s, "⬆ .glb भेज रहे हैं…");
+  try {
+    const fd = new FormData(); fd.append("file", f); fd.append("name", f.name.replace(/\.glb$/i, ""));
+    const r = await fetch("/api/triposr/import", { method: "POST", headers: { authorization: "Bearer " + E.ctx.S.token }, body: fd });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || r.statusText);
+    if (E !== me) return;
+    s.models = [d.item, ...(s.models || []).filter((m) => m.id !== d.item.id)]; s.char = "glb:" + d.item.id; s.msg = ""; s.err = false;
+    if (E.tab === "studio3d") renderPanel(); E.ctx.toast(`${d.item.name} import हुआ`);
+  } catch (e) { if (E === me) s3Say(s, "import नहीं हुआ: " + e.message, true); }
+}
+function s3Place(item) { // transparent character clip → bottom-right, up to 55% of width / 60% of height, own sound on
+  const fx = E.rs.effects; const m = E.p.meta || {}; const W = +m.width || 1080, H = +m.height || 1920;
+  const ar = item.meta?.width && item.meta?.height ? item.meta.width / item.meta.height : 2 / 3;
+  const bw = Math.min(0.55 * W, 0.6 * H * ar), bh = bw / ar; const od = outDur();
+  let st = +outOf(E.t).toFixed(2); if (st > od - 0.5) st = 0;
+  const d = Math.max(1, Math.min(item.meta?.duration || 4, 120));
+  const b = { _id: uid(), id: item.id, start: st, end: +Math.min(od || st + d, st + d).toFixed(2), fit: "free", x: +clamp(1 - bw / (2 * W) - 0.03, bw / (2 * W), 1 - bw / (2 * W)).toFixed(3),
+    y: +clamp(1 - bh / (2 * H) - 0.04, bh / (2 * H), 1 - bh / (2 * H)).toFixed(3), scale: +(bw / W).toFixed(3), opacity: 1, rotate: 0, volume: 1, track: 0 };
+  fx.broll.push(b); select({ type: "broll", id: b._id }); touch(); renderPanel();
+}
+async function s3Go() {
+  const s = s3State(); const me = E; const { api, toast } = E.ctx; if (s.busy || !E.canEdit) return;
+  if (!s.char) return s3Say(s, "पहले character चुनें", true);
+  const lines = s.text.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 12).map((text) => ({ text, ...(s.voice ? { voice: s.voice } : {}) }));
+  const isGlb = s.char.startsWith("glb:"); const cid = s.char.slice(isGlb ? 4 : 2);
+  const label = isGlb ? (s.models || []).find((m) => m.id === cid)?.name : (s.cat?.profiles || []).find((p) => p.id === cid)?.name;
+  const body = { [isGlb ? "glb" : "profile"]: cid, animation: s.anim, camera: s.cam, lines, name: "3D · " + (label || "character"), width: 720, height: 1080, ...(lines.length ? {} : { seconds: clamp(+s.seconds || 6, 2, 30) }) };
+  s.busy = true; const go = $("#s3-go", E.root); if (go) go.disabled = true; s3Say(s, "render queue में भेज रहे हैं…");
+  try {
+    const r = await api("POST", "/chars3d/render", body); const jid = r.job?.id; if (!jid) throw new Error("job शुरू नहीं हो पाया");
+    let item = null, miss = 0, fail = 0;
+    for (let i = 0; i < 700 && !item; i++) {
+      await s3sleep(3000); if (E !== me) return;
+      let j = null;
+      try { j = ((await api("GET", "/chars3d/jobs")).jobs || []).find((x) => x.id === jid); fail = 0; } catch (e) { if (++fail > 8) throw new Error("server से संपर्क टूट गया: " + e.message); continue; }
+      if (!j) { if (++miss > 5) throw new Error("render job नहीं मिला"); continue; } miss = 0;
+      if (j.status === "failed" || j.status === "cancelled") throw new Error((j.error || (j.status === "cancelled" ? "render रद्द हुआ" : "render नहीं हो पाया")).split("\n").slice(-1)[0].slice(0, 240));
+      if (j.status === "done") { if (!j.item) throw new Error("render हुआ पर clip library में नहीं मिला"); item = j.item; break; }
+      s3Say(s, `🎬 ${j.status === "queued" ? "queue में इंतज़ार…" : (j.progress || 0) + "% · " + (j.message || "बन रहा है…")}`);
+    }
+    if (!item) throw new Error("बहुत देर लग रही है — Library में बाद में देखें");
+    item = await s3Fresh(item); if (E !== me) return;
+    s3Place(item); s3Say(s, "✓ timeline पर लग गया"); toast(`${item.name} timeline पर जुड़ा`);
+  } catch (e) { if (E === me) s3Say(s, e.message || "कुछ गड़बड़ हुई", true); }
+  finally { if (E === me) { s.busy = false; const g = $("#s3-go", E.root); if (g) g.disabled = false; } }
+}
+async function voGo() {
+  const s = s3State(); const vo = s.vo; const me = E; const { api, toast } = E.ctx; if (vo.busy || !E.canEdit) return;
+  const text = vo.text.trim(); if (!text) return s3Say(vo, "पहले text लिखें", true);
+  vo.busy = true; const go = $("#vo-go", E.root); if (go) go.disabled = true; s3Say(vo, "आवाज़ बन रही है… (CPU पर लंबे text में कुछ मिनट लग सकते हैं)");
+  try {
+    const r = await api("POST", "/voiceover", { text, speed: vo.speed, ...(vo.voice ? { voice: vo.voice } : {}) }); let item = null, fail = 0;
+    for (let i = 0; i < 700 && !item; i++) {
+      await s3sleep(2000); if (E !== me) return;
+      let j; try { j = await api("GET", "/voiceover/" + r.job_id); fail = 0; } catch (e) { if (e.status === 404 || ++fail > 8) throw e; continue; }
+      if (j.status === "failed") throw new Error(j.error || "आवाज़ नहीं बन पाई");
+      if (j.status === "done") { item = j.item; break; }
+      s3Say(vo, `🔊 आवाज़ बन रही है… ${j.seconds || 0}s`);
+    }
+    if (!item) throw new Error("बहुत देर लग रही है — Audio → Voice-over में बाद में देखें");
+    item = await s3Fresh(item); if (E !== me) return;
+    libAdd(item); s3Say(vo, "✓ audio lane पर लग गया"); toast("आवाज़ timeline पर जुड़ी");
+  } catch (e) { if (E === me) s3Say(vo, e.message || "कुछ गड़बड़ हुई", true); }
+  finally { if (E === me) { vo.busy = false; const g = $("#vo-go", E.root); if (g) g.disabled = false; } }
+}
 // AI voice-over / dubbing box (Audio tab). dubBox(dis) → HTML; dubBox(null, panel) → binds it.
 function dubBox(dis, panel) {
   const { esc, api, toast } = E.ctx; const fx = E.rs.effects; const D = E.ctx.S.presets?.dub || { voices: [], langs: { hi: "हिन्दी", en: "English" }, modes: {} };
@@ -2346,7 +2491,7 @@ function placeAi(x, item, isImg) {
   fx.broll.push(b); touch(); select({ type: "broll", id: b._id }); renderTimeline(); E.ctx.toast(x.kind === "hook" ? "Hook video शुरुआत में लगा" : "B-roll उस line पर लगा");
 }
 function addAudioClip(x, src, track) {
-  if (!x || !E.canEdit) return; const s = { _id: uid(), id: x.id, at: +outOf(src).toFixed(2), volume: x.kind === "music" ? 0.5 : 0.8, track: track || 0 };
+  if (!x || !E.canEdit) return; const s = { _id: uid(), id: x.id, at: +outOf(src).toFixed(2), volume: x.kind === "music" ? 0.5 : x.kind === "voice" ? 1 : 0.8, track: track || 0 };
   E.rs.effects.sfx.push(s); touch(); select({ type: "sfx", id: s._id }); E.ctx.toast(`${x.name} audio track पर जुड़ा`);
 }
 function libAdd(x, at) {
@@ -2357,6 +2502,7 @@ function libAdd(x, at) {
   else if (x.kind === "frame") fx.frame = { id: x.id, opacity: fx.frame?.opacity ?? 1 };
   else if (x.kind === "sticker" || (x.kind === "image" && at?.free)) { const b = { _id: uid(), id: x.id, start: st, end: +Math.min(outDur(), st + 3).toFixed(2), fit: "free", x: at?.x ?? 0.5, y: at?.y ?? 0.35, scale: (x.tags || "").includes("popup") ? 0.55 : 0.3, opacity: 1, rotate: 0, anim: "pop" }; fx.broll.push(b); select({ type: "broll", id: b._id }); }
   else if (x.kind === "sfx") { const s = { _id: uid(), id: x.id, at: st, volume: 0.8 }; fx.sfx.push(s); select({ type: "sfx", id: s._id }); }
+  else if (x.kind === "voice") { const s = { _id: uid(), id: x.id, at: st, volume: 1 }; fx.sfx.push(s); select({ type: "sfx", id: s._id }); }
   else { const d = x.kind === "image" ? 3 : Math.min(x.meta?.duration || 4, 8); const b = { _id: uid(), id: x.id, start: st, end: +Math.min(outDur(), st + d).toFixed(2), fit: x.kind === "image" ? "pip" : "cover", pos: "tr" }; fx.broll.push(b); select({ type: "broll", id: b._id }); }
   touch(); renderPanel();
   if (["logo", "frame", "lut"].includes(x.kind)) select({ type: "global", id: { logo: "watermark", frame: "frame", lut: "lut" }[x.kind] });
@@ -2383,7 +2529,7 @@ function bindDrops() {
       const body = $("#tl-body", E.root); if (!body) return { ok: false };
       const src = clamp((x - body.getBoundingClientRect().left) / E.pps, 0, E.dur); const laneEl = el.closest("[data-track]"); const lane = laneEl?.dataset.track || ""; const [lk, ln] = lane.split(":");
       if (pl.fx) return { zone: "tl", ok: true, src, lk, ln, laneEl };
-      if (kind === "music" || kind === "sfx") return { zone: "tl", ok: lk === "audio" || !lane, src, lk, ln, laneEl, why: "music/SFX सिर्फ़ audio lane (A1, A2…) पर" };
+      if (kind === "music" || kind === "sfx" || kind === "voice") return { zone: "tl", ok: lk === "audio" || !lane, src, lk, ln, laneEl, why: "music/SFX/voice सिर्फ़ audio lane (A1, A2…) पर" };
       if (lk === "audio") return { zone: "tl", ok: false, why: "video/image को audio lane पर नहीं — V lane या preview पर छोड़ें" };
       return { zone: "tl", ok: true, src, lk, ln, laneEl };
     }
@@ -2393,7 +2539,7 @@ function bindDrops() {
     if (t.zone === "stage") { if (pl.fx) return addFxClip(pl.fx[0], pl.fx[1]); const x = pl.lib; const fb = E.frameBox; if (!x || !fb) return; const r = $("#ovl", E.root).getBoundingClientRect(); libAdd(x, { free: true, x: +clamp((t.x - r.left) / fb.w, 0, 1).toFixed(3), y: +clamp((t.y - r.top) / fb.h, 0, 1).toFixed(3) }); return; }
     const { src, lk, ln } = t; if (pl.fx) { seek(src); return addFxClip(pl.fx[0], pl.fx[1], src, lk === "fx" && ln != null ? +ln : 0); }
     const x = pl.lib; if (!x) return; seek(src);
-    if ((x.kind === "music" || x.kind === "sfx") && lk === "audio" && ln != null) return addAudioClip(x, src, +ln);
+    if ((x.kind === "music" || x.kind === "sfx" || x.kind === "voice") && lk === "audio" && ln != null) return addAudioClip(x, src, +ln);
     const n0 = E.rs.effects.broll.length; libAdd(x, { src, free: x.kind === "image" && lk === "broll" });
     if (lk === "broll" && ln != null && E.rs.effects.broll.length > n0) { E.rs.effects.broll[E.rs.effects.broll.length - 1].track = +ln; touch(); renderTimeline(); }
   };

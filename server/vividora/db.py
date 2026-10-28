@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', payload TEXT NOT NULL DEFAULT '{}',
   result TEXT, error TEXT, progress INTEGER NOT NULL DEFAULT 0, message TEXT,
   attempts INTEGER NOT NULL DEFAULT 0, worker TEXT, created_at TEXT NOT NULL,
-  started_at TEXT, heartbeat_at TEXT, finished_at TEXT);
+  started_at TEXT, heartbeat_at TEXT, finished_at TEXT, run_after TEXT);
 CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status, kind, created_at);
 CREATE INDEX IF NOT EXISTS jobs_project ON jobs(project_id, created_at);
 CREATE INDEX IF NOT EXISTS jobs_run_after ON jobs(run_after) WHERE run_after IS NOT NULL;
