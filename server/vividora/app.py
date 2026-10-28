@@ -209,7 +209,8 @@ def create_app() -> Starlette:
 
             path = scope.get("path", "")
             is_api = path.startswith("/api/") or path.startswith("/pub/")
-            is_hashed = path.startswith("/assets/")
+            # /assets files are NOT content-hashed (app.js, editor.js …): only fonts may be cached for long, code must revalidate
+            is_hashed = path.startswith("/assets/") and path.lower().endswith((".ttf", ".otf", ".woff", ".woff2"))
 
             async def send2(msg):
                 if msg["type"] == "http.response.start":
