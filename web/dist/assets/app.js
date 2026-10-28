@@ -93,7 +93,7 @@ function toast(msg, ms = 2600) {
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|forgot|reset|characters|scenes|characters3d|scenes3d|copilot|yt-shorts|voicestudio|image3d)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|forgot|reset|characters3d|scenes3d|characters|scenes|copilot|yt-shorts|voicestudio|image3d)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
