@@ -72,6 +72,9 @@ async def image_to_3d(image: UploadFile = File(...)):
         scene_codes = model([img], device="cpu")
         meshes = model.extract_mesh(scene_codes, has_vertex_color=True, resolution=MC_RESOLUTION)
     mesh = _clean(meshes[0])
+    import trimesh.transformations as tf  # same upright orientation as the official gradio app
+    mesh.apply_transform(tf.rotation_matrix(-np.pi / 2, [1, 0, 0]))
+    mesh.apply_transform(tf.rotation_matrix(np.pi / 2, [0, 1, 0]))
     print(f"mesh: {len(mesh.vertices)} verts, {len(mesh.faces)} faces")
     mesh.export(glb_path)
     try:
