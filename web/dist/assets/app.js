@@ -732,7 +732,7 @@ function workingView(p, job) {
   const act = (p.jobs || []).find((j) => ["queued", "running"].includes(j.status)) || job;
   return `<div class="section"><h2>${(STATUS[p.status] || [])[0]}</h2>${apStrip(p)}
     <div class="progress"><i style="width:${act ? act.progress : 0}%"></i></div>
-    <p class="muted small row between" style="margin-top:.5rem"><span>${esc(jobSub(act))}${p.status === "transcribing" ? " — इसके लिए GPU worker चाहिए (Status पेज देखें)" : ""}</span>${cancelBtn(act)}</p></div>`;
+    <p class="muted small row between" style="margin-top:.5rem"><span>${esc(jobSub(act))}${p.status === "transcribing" ? " — इसके लिए GPU worker चाहिए (Status पेज देखें)" : ""}</span><span class="row" style="gap:.4rem">${S.user.role !== "viewer" ? `<button class="btn small" id="wk-restart" title="अटका हो तो यह काम दोबारा शुरू करें">🔄 फिर से चालू करें</button>` : ""}${cancelBtn(act)}</span></p></div>`;
 }
 function reviewView(p, proxy, canEdit) {
   const edl = p.edl || { cuts: [], duration: p.meta.duration || 0, stats: {} };
@@ -799,6 +799,8 @@ function bindProject(p) {
   document.querySelectorAll("[data-jcancel]").forEach((b) => (b.onclick = async () => { if (!confirm("यह काम रद्द करें?")) return; b.disabled = true;
     try { await api("POST", `/projects/${p.id}/jobs/${b.dataset.jcancel}/cancel`); toast("रद्द किया"); load().then(render); } catch (e) { toast(e.message); b.disabled = false; } }));
   const apr = $("#ap-resume"); if (apr) apr.onclick = async () => { apr.disabled = true; try { const r = await api("POST", `/projects/${p.id}/autopilot/resume`); toast(`✈ Autopilot step ${r.step || ""} से फिर चला`); load().then(render); } catch (e) { toast(e.message); apr.disabled = false; } };
+  const wkr = $("#wk-restart"); if (wkr) wkr.onclick = async () => { if (!confirm("यह काम दोबारा शुरू करें?")) return; wkr.disabled = true;
+    try { const path = p.status === "preparing" ? "restart" : p.status === "transcribing" ? "retranscribe" : "recut"; await api("POST", `/projects/${p.id}/${path}`, {}); toast("दोबारा शुरू किया"); load().then(render); } catch (e) { toast(e.message); wkr.disabled = false; } };
   const retry = $("#retry-cuts"); if (retry) retry.onclick = () => api("POST", `/projects/${p.id}/recut`, {}).then(() => load().then(render));
   const video = $("#preview"), track = $("#track"), play = $("#play");
   const dur = p.edl?.duration || p.meta.duration || 1;

@@ -758,6 +758,21 @@ async def reopen(request: Request, user: dict):
     return ok()
 
 
+@require("editor")
+async def restart_prepare(request: Request, user: dict):
+    """A project stuck on "जाँच हो रही है" (worker restarted / job lost): drop its open jobs and run the
+    file check again from the uploaded recording."""
+    p = own_project(request, user)
+    if p["status"] != "preparing":
+        raise ApiError(409, "यह project अभी 'जाँच' में नहीं है")
+    with db.tx() as c:
+        c.execute("UPDATE jobs SET status='cancelled', finished_at=? WHERE project_id=? AND kind='prepare' "
+                  "AND status IN ('queued','running')", (db.now(), p["id"]))
+        job = service.start_pipeline(c, db.get("projects", p["id"]) or p)
+        service.log(c, user["workspace_id"], "project.restart_prepare", user_id=user["id"], project_id=p["id"], detail={})
+    return ok({"job": job})
+
+
 @require("viewer")
 async def preview_keep(request: Request, user: dict):
     """The kept segments after cuts — the dashboard uses this for a scrub preview."""
@@ -892,6 +907,7 @@ routes = [
     Route("/projects/{project_id}/restore", restore_now, methods=["POST"]),
     Route("/projects/{project_id}/shorts/render", shorts_render, methods=["POST"]),
     Route("/projects/{project_id}/reopen", reopen, methods=["POST"]),
+    Route("/projects/{project_id}/restart", restart_prepare, methods=["POST"]),
     Route("/projects/{project_id}/keep", preview_keep),
     Route("/media/{asset_id}", media),
     Route("/presets", presets),
