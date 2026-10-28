@@ -87,6 +87,19 @@ async def last_prepared():
     return FileResponse(os.path.join(os.path.dirname(__file__), "last_prepared.png"), media_type="image/png")
 
 
+DEBUG_DIR = os.getenv("TRIPOSR_DEBUG_DIR", "/tmp/tsr_out")
+
+
+@app.get("/debug/{path:path}")
+async def debug_file(path: str):
+    """Download a file produced by a manual run.py test (only inside DEBUG_DIR)."""
+    full = os.path.realpath(os.path.join(DEBUG_DIR, path))
+    if not full.startswith(os.path.realpath(DEBUG_DIR) + os.sep) or not os.path.isfile(full):
+        from fastapi import HTTPException
+        raise HTTPException(404, "not found")
+    return FileResponse(full)
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "model_loaded": model is not None}
