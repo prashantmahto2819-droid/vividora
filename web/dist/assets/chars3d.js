@@ -3,6 +3,7 @@
 // skinned body, a head with morph targets (8 visemes + 5 expressions), outfits/hair/props, 8 scenes.
 // Used by the studio pages (chars3d.js UI below, scenes3d.js) and by the headless renderer (3d.html).
 import * as THREE from "./three.module.min.js";
+import { GLTFLoader } from "./gltf-loader.js";
 
 export { THREE };
 
@@ -41,7 +42,7 @@ export const SCENES = ["classroom", "office", "clinic", "home", "shop", "gym", "
 export const LIGHTING = ["day", "evening", "night"];
 export const CAMERAS = { wide: { pos: [0, 1.6, 5.2], target: [0, 1.0, 0], fov: 40 }, medium: { pos: [0, 1.45, 3.0], target: [0, 1.2, 0], fov: 38 },
   closeup: { pos: [0, 1.55, 1.3], target: [0, 1.5, 0], fov: 34 }, twoshot: { pos: [0, 1.5, 4.2], target: [0, 1.1, 0], fov: 42 },
-  low: { pos: [0.8, 0.9, 3.6], target: [0, 1.1, 0], fov: 40 }, high: { pos: [-1.2, 2.6, 4.0], target: [0, 1.0, 0], fov: 40 } };
+  full: { pos: [0, 1.0, 4.4], target: [0, 0.85, 0], fov: 38 }, low: { pos: [0.8, 0.9, 3.6], target: [0, 1.1, 0], fov: 40 }, high: { pos: [-1.2, 2.6, 4.0], target: [0, 1.0, 0], fov: 40 } };
 
 export const DEFAULT_SPEC = { height: 1.72, build: 1.0, age: "adult", gender: "m", skin: "wheat", hair: "short", hairColor: 0x1a1a1a,
   outfit: "tshirt", colors: {}, props: [], beard: false, expression: "smile", expressionAmount: 0.35 };
@@ -258,6 +259,92 @@ export function buildCharacter(input = {}) {
   return { group, bones, skeleton, body, head, mouth, eyes, mixer, setViseme, setExpression, blink, dims: d, spec, state };
 }
 
+
+// ---------------------------------------------------------------- imported .glb models as characters
+// A .glb (e.g. from Image → 3D) has no skeleton we know, so it is normalised (feet on the floor, centred, 1.7 m tall) and animated by
+// moving its pivot procedurally; lip-sync = mouth morph targets if the model has them, else a speech-driven "pulse".
+const GLB_MOTION = {
+  idle: (t) => ({ y: 0.004 * Math.sin(t * 2), rz: 0.012 * Math.sin(t * 1.1), ry: 0.04 * Math.sin(t * 0.7), sy: 1 + 0.006 * Math.sin(t * 2) }),
+  talk1: (t) => ({ y: 0.01 * Math.abs(Math.sin(t * 3.1)), rz: 0.03 * Math.sin(t * 1.7), ry: 0.12 * Math.sin(t * 1.3), rx: 0.03 * Math.sin(t * 2.6) }),
+  talk2: (t) => ({ y: 0.008 * Math.abs(Math.sin(t * 2.4)), rz: 0.05 * Math.sin(t * 1.4), ry: 0.18 * Math.sin(t * 0.9), rx: 0.02 * Math.sin(t * 3) }),
+  talk3: (t) => ({ y: 0.012 * Math.abs(Math.sin(t * 3.6)), rz: 0.02 * Math.sin(t * 2.2), ry: 0.08 * Math.sin(t * 1.9), rx: 0.04 * Math.sin(t * 2.1) }),
+  wave: (t) => ({ y: 0.01 * Math.abs(Math.sin(t * 4)), rz: 0.14 * Math.sin(t * 6), ry: 0.1 * Math.sin(t * 1.5) }),
+  point: (t) => ({ rx: 0.08, ry: -0.2 + 0.03 * Math.sin(t * 2), rz: 0.02 * Math.sin(t * 3) }),
+  walk: (t) => ({ y: 0.035 * Math.abs(Math.sin(t * 5.7)), rz: 0.05 * Math.sin(t * 5.7), ry: 0.1 * Math.sin(t * 2.85), rx: 0.04 }),
+  run: (t) => ({ y: 0.08 * Math.abs(Math.sin(t * 9)), rz: 0.07 * Math.sin(t * 9), ry: 0.15 * Math.sin(t * 4.5), rx: 0.2 }),
+  sit: (t) => ({ y: -0.05, rx: 0.1, sy: 0.96 + 0.005 * Math.sin(t * 2) }),
+  type: (t) => ({ y: -0.05, rx: 0.2, ry: 0.03 * Math.sin(t * 5), sy: 0.96 }),
+  nod: (t) => ({ rx: 0.12 * Math.sin(t * 5), y: 0.004 * Math.sin(t * 5) }),
+  laugh: (t) => ({ y: 0.03 * Math.abs(Math.sin(t * 9)), rx: -0.1 + 0.05 * Math.sin(t * 9), rz: 0.05 * Math.sin(t * 4.5) }),
+  dance: (t) => ({ y: 0.07 * Math.abs(Math.sin(t * 6.3)), rz: 0.16 * Math.sin(t * 3.15), ry: 0.5 * Math.sin(t * 1.6), sy: 1 + 0.03 * Math.sin(t * 6.3) }),
+  teach: (t) => ({ ry: 0.25 * Math.sin(t * 1.0), rz: 0.03 * Math.sin(t * 1.5), rx: 0.04 }),
+};
+const MORPH_OPEN = ["jawopen", "mouthopen", "viseme_aa", "aa", "a", "mouth_open", "open", "ah"];
+const MORPH_WIDE = ["viseme_e", "ee", "mouthsmile", "smile"];
+const MORPH_O = ["viseme_o", "oh", "o", "mouthfunnel", "mouthpucker", "viseme_u"];
+const MORPH_BLINK = ["eyeblinkleft", "eyeblinkright", "blink", "eyes_closed", "eye_blink"];
+
+/** Load a .glb (ArrayBuffer | base64 string | URL) → a rig with the same interface as buildCharacter().
+ *  fit: { height (m, default 1.7), rx, ry, rz (degrees, to turn a model that lies/faces the wrong way) } */
+export async function loadGlbRig(src, fit = {}) {
+  let buf = src;
+  if (typeof src === "string") {
+    if (/^https?:|^\/|^blob:|^data:/.test(src)) buf = await (await fetch(src)).arrayBuffer();
+    else { const bin = atob(src); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); buf = u.buffer; }
+  }
+  const gltf = await new Promise((res, rej) => new GLTFLoader().parse(buf, "", res, (e) => rej(new Error((e && e.message) || "glb पढ़ा नहीं जा सका"))));
+  const model = gltf.scene;
+  const morphs = []; let hasMesh = false;
+  model.traverse((o) => {
+    if (o.isMesh || o.isSkinnedMesh) {
+      hasMesh = true; o.castShadow = true; o.receiveShadow = false; o.frustumCulled = false;
+      for (const m of [].concat(o.material || [])) { m.side = THREE.DoubleSide; if (m.map) m.map.colorSpace = THREE.SRGBColorSpace; m.needsUpdate = true; }
+      if (o.morphTargetDictionary && o.morphTargetInfluences) morphs.push(o);
+    }
+  });
+  if (!hasMesh) throw new Error("इस .glb में कोई 3D mesh नहीं मिला");
+  const inner = new THREE.Group(); inner.add(model);
+  inner.rotation.set(THREE.MathUtils.degToRad(fit.rx || 0), THREE.MathUtils.degToRad(fit.ry || 0), THREE.MathUtils.degToRad(fit.rz || 0));
+  inner.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(inner); const size = box.getSize(new THREE.Vector3());
+  if (!isFinite(size.y) || size.y <= 0) throw new Error("model का आकार शून्य है");
+  const k = (fit.height || 1.7) / size.y; const ctr = box.getCenter(new THREE.Vector3());
+  const pivot = new THREE.Group(); pivot.add(inner);
+  inner.scale.setScalar(k); inner.position.set(-ctr.x * k, -box.min.y * k, -ctr.z * k);
+  const group = new THREE.Group(); group.add(pivot);
+  const lookup = (names) => { const hits = []; for (const m of morphs) for (const [n, i] of Object.entries(m.morphTargetDictionary)) if (names.includes(n.toLowerCase())) hits.push([m, i]); return hits; };
+  const mOpen = lookup(MORPH_OPEN), mWide = lookup(MORPH_WIDE), mO = lookup(MORPH_O), mBlink = lookup(MORPH_BLINK);
+  const setM = (hits, v) => { for (const [m, i] of hits) m.morphTargetInfluences[i] = v; };
+  const clips = {}; let gmixer = null;
+  if (gltf.animations && gltf.animations.length) { gmixer = new THREE.AnimationMixer(model); for (const c of gltf.animations) clips[c.name.toLowerCase()] = c; }
+  const morphMode = mOpen.length > 0;
+  const st = { t: 0, anim: "idle", open: 0, gaction: null, gfade: 0 };
+  const mixer = {
+    update(dt) {
+      st.t += dt; const mo = (GLB_MOTION[st.anim] || GLB_MOTION.idle)(st.t);
+      pivot.position.y = mo.y || 0; pivot.rotation.set(mo.rx || 0, mo.ry || 0, mo.rz || 0);
+      const pu = morphMode ? 0 : st.open; pivot.scale.set(1 + 0.015 * pu, (mo.sy || 1) * (1 + 0.035 * pu), 1 + 0.015 * pu);
+      if (gmixer) gmixer.update(dt);
+    },
+  };
+  const setViseme = (w) => {
+    const open = Math.min(1, (w[1] || 0) + 0.8 * (w[3] || 0) + 0.25 * (w[2] || 0) + 0.45 * (w[4] || 0));
+    st.open = open;
+    if (mOpen.length) { setM(mOpen, open); setM(mWide, Math.min(1, (w[2] || 0) * 0.6)); setM(mO, Math.min(1, (w[3] || 0) * 0.5 + (w[4] || 0) * 0.5)); }
+  };
+  const blink = (v) => { if (mBlink.length) setM(mBlink, v); };
+  const setExpression = () => {};
+  const playClip = (name) => { // use an embedded animation when one matches (idle / walk / wave …)
+    if (!gmixer) return false;
+    const key = Object.keys(clips).find((n) => n.includes(name)) || (name.startsWith("talk") ? Object.keys(clips).find((n) => n.includes("talk") || n.includes("idle")) : null)
+      || (name === "idle" ? Object.keys(clips)[0] : null);
+    if (!key) { if (st.gaction) { st.gaction.fadeOut(0.3); st.gaction = null; } return false; }
+    const a = gmixer.clipAction(clips[key]); a.reset().fadeIn(0.3).play(); if (st.gaction && st.gaction !== a) st.gaction.fadeOut(0.3); st.gaction = a; return true;
+  };
+  const head = new THREE.Mesh(); head.morphTargetInfluences = [];
+  return { group, bones: {}, skeleton: null, body: pivot, head, mouth: null, eyes: [], mixer, setViseme, setExpression, blink, dims: { hipY: 1 }, spec: { glb: true }, state: st, glb: { st, playClip, morphMode, clips: Object.keys(clips) }, bounds: { w: size.x * k, h: size.y * k, d: size.z * k } };
+}
+
 // ---------------------------------------------------------------- animation clips (procedural keyframes)
 const deg = (a) => (a * Math.PI) / 180;
 const POSE_BONES = ["Spine", "Chest", "Neck", "Head", "UpperArmL", "LowerArmL", "HandL", "UpperArmR", "LowerArmR", "HandR", "UpperLegL", "LowerLegL", "FootL", "UpperLegR", "LowerLegR", "FootR"];
@@ -307,6 +394,7 @@ export function makeClip(name, rig, { fps = 12, travel = 0 } = {}) {
 }
 
 export function playAnimation(rig, name, { fade = 0.3, speed = 1 } = {}) {
+  if (rig.glb) { rig.glb.st.anim = name; rig._action = {}; rig._anim = name; rig.glb.playClip(name); return null; }
   const clip = makeClip(name, rig);
   const action = rig.mixer.clipAction(clip);
   action.setLoop(THREE.LoopRepeat, Infinity); action.timeScale = speed;
@@ -461,7 +549,7 @@ export function buildShot(spec, canvas) {
   const slots = scene.userData.slots || [];
   const rigs = [];
   (spec.characters || []).forEach((c, i) => {
-    const rig = buildCharacter(c.spec || c.profile || {});
+    const rig = c.rig || buildCharacter(c.spec || c.profile || {});
     const slot = c.slot != null ? slots[c.slot % Math.max(1, slots.length)] : null;
     const seated = c.seated ?? (slot ? slot.seated : SEATED.has(c.animation));
     placeRig(rig, { pos: c.pos || (slot ? slot.pos : [i * 1.2 - ((spec.characters.length - 1) * 0.6), 0]), ry: c.ry ?? (slot ? slot.ry : 0), lift: slot ? slot.lift : 0 });

@@ -107,6 +107,33 @@ def _clean_lines(lines) -> list[dict]:
     return out[:60]
 
 
+def _glb_item(c: dict, workspace_id: str | None) -> dict | None:
+    """c["glb"] = library id of a 3d_model (.glb) in this workspace → the item (or a 404)."""
+    gid = str(c.get("glb") or "").strip()
+    if not gid:
+        return None
+    it = db.get("library", gid)
+    if not it or it["kind"] != "3d_model" or (workspace_id and it["workspace_id"] != workspace_id):
+        raise ApiError(404, "यह 3D model (.glb) नहीं मिला")
+    return it
+
+
+def _fit(meta) -> dict:
+    f = (meta or {}).get("fit") if isinstance(meta, dict) else None
+    f = f if isinstance(f, dict) else {}
+    out = {}
+    for k in ("rx", "ry", "rz"):
+        try:
+            out[k] = max(-360.0, min(360.0, float(f.get(k) or 0)))
+        except (TypeError, ValueError):
+            out[k] = 0.0
+    try:
+        out["height"] = max(0.3, min(3.0, float(f.get("height") or 1.7)))
+    except (TypeError, ValueError):
+        out["height"] = 1.7
+    return out
+
+
 def _clean_char(c: dict) -> dict:
     spec = c.get("spec") if isinstance(c.get("spec"), dict) else {}
     keep = {k: v for k, v in spec.items() if k in ("height", "build", "age", "gender", "skin", "hair", "hairColor", "outfit", "colors", "props", "beard", "expression", "expressionAmount")}
@@ -120,9 +147,11 @@ def _clean_char(c: dict) -> dict:
 async def render(request: Request, user: dict):
     d = await body(request)
     ch = _clean_char(d)
-    if not ch["profile"] and not ch["spec"]:
+    glb = _glb_item(d, user["workspace_id"])
+    if not ch["profile"] and not ch["spec"] and not glb:
         raise ApiError(422, "character चुनें")
-    pl = {"user_id": user["id"], **ch, "name": str(d.get("name") or (c3.BY_ID[ch["profile"]]["name"] if ch["profile"] else "3D character"))[:80],
+    pl = {"user_id": user["id"], **ch, "name": str(d.get("name") or (glb["name"] if glb else (c3.BY_ID[ch["profile"]]["name"] if ch["profile"] else "3D character")))[:80],
+          **({"glb_id": glb["id"], "fit": _fit(glb.get("meta"))} if glb else {}),
           "lines": _clean_lines(d.get("lines")), "seconds": min(120.0, max(1.0, float(d.get("seconds") or 5))), "fps": 25,
           "width": int(d.get("width") or 720), "height": int(d.get("height") or 1080), "camera": d.get("camera") if d.get("camera") in c3.CAMERAS else "medium",
           "expression_amount": float(d.get("expression_amount") or 0.5), "speed": float(d.get("speed") or 1.0),

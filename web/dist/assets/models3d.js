@@ -48,11 +48,12 @@ export async function mountModels(el, ctx, opts = {}) {
     let list = [];
     try { list = (await api("GET", "/triposr/models")).models || []; } catch (e) { el.querySelector(".m3-grid").innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
     el.querySelector(".m3-grid").innerHTML = list.length ? list.map((m) => `<div class="m3-card" data-id="${m.id}"><b title="${esc(m.name)}">🧊 ${esc(m.name)}</b><span class="small muted">${(m.size / 1048576).toFixed(1)} MB · ${new Date(m.created_at).toLocaleDateString("hi-IN")}</span>
-      <div class="m3-btns"><button class="btn small" data-act="view">👁 देखें</button><a class="btn small quiet" href="${m.url}" download="${esc(m.name)}.glb">⬇</a>${canEdit ? `<button class="btn small quiet" data-act="ren" title="नाम बदलें">✏</button><button class="btn small danger" data-act="del">🗑 हटाएँ</button>` : ""}</div></div>`).join("")
+      <div class="m3-btns"><button class="btn small" data-act="view">👁 देखें</button><button class="btn small primary" data-act="char">🧍 बोलता character</button><a class="btn small quiet" href="${m.url}" download="${esc(m.name)}.glb">⬇</a>${canEdit ? `<button class="btn small quiet" data-act="ren" title="नाम बदलें">✏</button><button class="btn small danger" data-act="del">🗑 हटाएँ</button>` : ""}</div></div>`).join("")
       : `<p class="small muted">अभी कोई 3D model नहीं — «.glb import» से अपनी फ़ाइल डालें, या «फोटो से बनाएँ» से तस्वीर से बनाएँ।</p>`;
     el.querySelectorAll(".m3-card").forEach((card) => {
       const m = list.find((x) => x.id === card.dataset.id);
       card.querySelector('[data-act="view"]').onclick = () => viewModel(m);
+      card.querySelector('[data-act="char"]').onclick = () => { try { sessionStorage.setItem("c3dGlb", m.id); } catch {} location.hash = "#/characters3d"; if (location.hash === "#/characters3d") window.dispatchEvent(new HashChangeEvent("hashchange")); };
       const ren = card.querySelector('[data-act="ren"]'); if (ren) ren.onclick = async () => { const n = prompt("नया नाम", m.name); if (!n || !n.trim()) return; try { await api("PATCH", `/library/${m.id}`, { name: n.trim() }); draw(); } catch (e) { toast(e.message); } };
       const del = card.querySelector('[data-act="del"]'); if (del) del.onclick = async () => { if (!confirm(`«${m.name}» हमेशा के लिए हटाएँ?`)) return; try { await api("DELETE", `/library/${m.id}`); toast("हटा दिया"); draw(); } catch (e) { toast(e.message); } };
     });

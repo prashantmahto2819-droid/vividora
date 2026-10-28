@@ -386,6 +386,9 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             prog = _progress(client, job["id"])
             page_url = os.getenv("CHARS3D_PAGE_URL") or f"{client.base}/assets/3d.html"
             if kind == "char3d":
+                if pl.get("glb_id"):
+                    prog(0.01, ".glb model ला रहे हैं")
+                    pl = {**pl, "glb_path": str(client.download_library(pl["glb_id"], tmp / "glb" / "model.glb"))}
                 r = c3.character_clip(pl, tmp / "c3d", page_url=page_url, on_progress=prog)
                 prog(0.99, "upload")
                 up = client.upload(job["id"], r["file"], "char3d", "char3d")

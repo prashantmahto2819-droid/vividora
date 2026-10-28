@@ -34,7 +34,7 @@ SCENES = ["classroom", "office", "clinic", "home", "shop", "gym", "park", "stage
 SCENE_LABELS = {"classroom": "Classroom (greenboard)", "office": "Office", "clinic": "Clinic / hospital", "home": "घर (living room)", "shop": "दुकान / store",
                 "gym": "Gym", "park": "सड़क / park", "stage": "Stage / event"}
 LIGHTING = ["day", "evening", "night"]
-CAMERAS = ["wide", "medium", "closeup", "twoshot", "low", "high"]
+CAMERAS = ["wide", "medium", "closeup", "twoshot", "low", "high", "full"]
 EXPRESSIONS = ["smile", "sad", "angry", "surprised", "think"]
 VISEMES = ["sil", "aa", "ee", "oh", "oo", "mm", "ff", "ss"]
 
@@ -113,7 +113,14 @@ def speak(lines: list[dict], work: Path, *, engine: str | None = None, gap: floa
         text = (ln.get("text") or "").strip()
         if not text:
             continue
-        voice = tts.voice_preset(ln.get("voice")) or tts.VOICE_PRESETS[0 if (ln.get("gender") or "m") == "m" else 3]
+        voice = tts.voice_preset(ln.get("voice"))
+        if not voice:  # no voice chosen: first one that can actually run on this box (Parler may not be installed), preferring the speaker's gender
+            try:
+                av = sorted(tts.available_voices(), key=lambda v: v.get("engine") != "voicestudio")
+            except Exception:  # noqa: BLE001
+                av = []
+            g = ln.get("gender") or "m"
+            voice = next((v for v in av if v.get("gender") == g), None) or (av[0] if av else None) or tts.VOICE_PRESETS[0 if g == "m" else 3]
         eng = engine or voice.get("engine") or "parler"
         backend = tts.backend_for(eng)
         lang = ln.get("lang") or voice.get("lang") or "hi"
@@ -235,13 +242,19 @@ def character_clip(pl: dict, work: Path, *, page_url: str, on_progress: Progress
         seconds = float(pl.get("seconds") or 5)
     seconds = min(seconds, 120.0)
     transparent = not pl.get("scene")
+    glb_b64 = None
+    if pl.get("glb_path"):  # an imported / generated .glb replaces the procedural body (see chars3d.js loadGlbRig)
+        glb_b64 = base64.b64encode(Path(pl["glb_path"]).read_bytes()).decode()
     ch = {"spec": spec_c, "animation": pl.get("animation") or "idle", "talkAnimation": pl.get("talk_animation"), "expression": pl.get("expression"),
           "expressionAmount": float(pl.get("expression_amount") or 0.5), "visemes": visemes, "talk": talk, "speed": float(pl.get("speed") or 1)}
+    if glb_b64:
+        ch["glb"] = glb_b64
+        ch["fit"] = pl.get("fit") or {}
     if pl.get("scene"):
         ch["slot"] = int(pl.get("slot") or 0)
     spec = {"width": int(pl.get("width") or (720 if transparent else 1280)), "height": int(pl.get("height") or (1080 if transparent else 720)),
             "fps": fps, "duration": seconds, "transparent": transparent, "characters": [ch],
-            "camera": {"preset": pl.get("camera") or ("medium" if transparent else "wide"), **(pl.get("camera_opts") or {})},
+            "camera": {"preset": ("full" if glb_b64 and (pl.get("camera") or "medium") == "medium" else pl.get("camera")) or ("medium" if transparent else "wide"), **(pl.get("camera_opts") or {})},
             **({"scene": {"name": pl["scene"], "lighting": pl.get("lighting") or "day"}} if pl.get("scene") else {})}
     fr = work / "frames"
     prog(0.2, "3D frames बन रहे हैं")

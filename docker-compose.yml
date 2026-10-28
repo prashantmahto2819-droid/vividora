@@ -38,7 +38,11 @@ services:
     image: vividora/server
     restart: always
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      TRIPOSR_URL: http://host.docker.internal:8090
+      VOICESTUDIO_URL: http://host.docker.internal:3901
       API_URL: http://api:8000
       WORKER_NAME: cpu@docker
       # transcribe on the VM's CPU (no NVIDIA GPU needed). Models: small / medium / large-v3
@@ -82,7 +86,11 @@ services:
     image: vividora/server
     restart: always
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      TRIPOSR_URL: http://host.docker.internal:8090
+      VOICESTUDIO_URL: http://host.docker.internal:3901
       API_URL: http://api:8000
       WORKER_NAME: quick@docker
       WORKER_LANE: quick

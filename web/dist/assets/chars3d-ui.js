@@ -1,6 +1,6 @@
 // 3D Studio — Characters page (#/characters3d): pick one of 60 profiles, customise, animate, write lines → lip-synced
 // transparent clip in the library. Live preview runs in the browser (three.js); the final render runs on the worker.
-import { buildShot, visemeTrack, OUTFITS, HAIR, SKIN, PROPS, EXPRESSIONS } from "./chars3d.js";
+import { buildShot, loadGlbRig, visemeTrack, OUTFITS, HAIR, SKIN, PROPS, EXPRESSIONS } from "./chars3d.js";
 
 export const CSS = `
 .c3d{display:grid;grid-template-columns:260px minmax(0,1fr) 330px;gap:1rem;min-height:70vh}
@@ -66,7 +66,8 @@ export async function mountStudio(root, ctx) {
   injectCss();
   const { api, toast } = ctx;
   const cat = await api("GET", "/chars3d");
-  U = { cat, prof: cat.profiles[0], spec: { ...cat.profiles[0].spec }, anim: "idle", expr: "smile", camera: "medium", lines: "", voice: "", seconds: 5, scene: "", lighting: "day", jobs: [], timer: 0 };
+  let models = []; try { models = (await api("GET", "/triposr/models")).models || []; } catch {}
+  U = { models, glb: null, fit: {}, rigCache: {}, cat, prof: cat.profiles[0], spec: { ...cat.profiles[0].spec }, anim: "idle", expr: "smile", camera: "medium", lines: "", voice: "", seconds: 5, scene: "", lighting: "day", jobs: [], timer: 0 };
   root.innerHTML = `<div class="pghead"><div><h1>3D Studio — Characters</h1><p class="muted">60 तैयार 3D characters: पहनावा, रंग, props, हाव-भाव बदलें, lines लिखें — बोलता हुआ character (lip-sync) library में आता है, फिर editor में किसी भी video पर रखें।</p></div>
     <a class="btn quiet" href="#/scenes3d">🎬 3D Scenes & explainer →</a></div>
     <div class="card" id="c3d-models" style="margin-bottom:1rem"></div>
@@ -77,14 +78,64 @@ export async function mountStudio(root, ctx) {
   const list = root.querySelector("#c3d-list");
   const cats = {};
   for (const p of cat.profiles) (cats[p.category] ||= []).push(p);
-  list.innerHTML = Object.entries(cats).map(([c, ps]) => `<div class="c3d-cat">${esc(cat.categories[c] || c)}</div>` + ps.map((p) => `<div class="c3d-prof ${p.id === U.prof.id ? "on" : ""}" data-p="${p.id}"><img loading="lazy" src="/api/chars3d/preview/${p.id}.png?t=${encodeURIComponent(ctx.S.token)}" alt=""><span>${esc(p.name)}</span></div>`).join("")).join("");
+  const gHtml = () => U.models.length ? `<div class="c3d-cat">🧊 मेरे 3D characters (.glb)</div>` + U.models.map((m) => `<div class="c3d-prof ${U.glb?.id === m.id ? "on" : ""}" data-g="${m.id}"><div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:2rem;background:radial-gradient(#2a3140,#161b25);border-radius:6px">🧊</div><span>${esc(m.name)}</span></div>`).join("") : "";
+  list.innerHTML = gHtml() + Object.entries(cats).map(([c, ps]) => `<div class="c3d-cat">${esc(cat.categories[c] || c)}</div>` + ps.map((p) => `<div class="c3d-prof ${p.id === U.prof.id ? "on" : ""}" data-p="${p.id}"><img loading="lazy" src="/api/chars3d/preview/${p.id}.png?t=${encodeURIComponent(ctx.S.token)}" alt=""><span>${esc(p.name)}</span></div>`).join("")).join("");
   U.pv = livePreview(root.querySelector("#c3d-stage"), { width: 560, height: 630 });
   const shotSpec = () => ({ transparent: false, background: 0x1e2430, characters: [{ spec: U.spec, animation: U.anim, expression: U.expr, expressionAmount: 0.6, talk: [], visemes: U._demoVis || [] }],
     camera: { preset: U.camera }, ...(U.scene ? { scene: { name: U.scene, lighting: U.lighting } } : {}), fps: 25, duration: 10 });
-  const refresh = () => U.pv.set(shotSpec());
-  list.onclick = (e) => { const el = e.target.closest("[data-p]"); if (!el) return; U.prof = cat.profiles.find((p) => p.id === el.dataset.p); U.spec = { ...U.prof.spec }; list.querySelectorAll(".c3d-prof").forEach((x) => x.classList.toggle("on", x === el)); side(); refresh(); };
+  const glbRig = async () => { const k = U.glb.id + JSON.stringify(U.fit); if (!U.rigCache[k]) { U.rigCache = {}; U.rigCache[k] = await loadGlbRig(U.glb.url, U.fit); } return U.rigCache[k]; };
+  const refresh = async () => {
+    if (!U.glb) return U.pv.set(shotSpec());
+    const g = U.glb; let rig;
+    try { rig = await glbRig(); } catch (e) { toast("3D model खुल नहीं पाया: " + e.message); return; }
+    if (!U || U.glb !== g) return;
+    const sp = shotSpec(); sp.characters[0].rig = rig; sp.camera = { preset: U.camera === "medium" ? "full" : U.camera }; U.pv.set(sp);
+  };
+  const pickGlb = (m) => { U.glb = m; U.fit = { ry: 0, rx: 0, rz: 0, height: 1.7, ...(m.meta?.fit || {}) }; list.querySelectorAll(".c3d-prof").forEach((x) => x.classList.toggle("on", x.dataset.g === m.id)); side(); refresh(); };
+  list.onclick = (e) => { const g = e.target.closest("[data-g]"); if (g) return pickGlb(U.models.find((m) => m.id === g.dataset.g)); const el = e.target.closest("[data-p]"); if (!el) return; U.glb = null; U.prof = cat.profiles.find((p) => p.id === el.dataset.p); U.spec = { ...U.prof.spec }; list.querySelectorAll(".c3d-prof").forEach((x) => x.classList.toggle("on", x === el)); side(); refresh(); };
   const jobs = async () => { try { U.jobs = (await api("GET", "/chars3d/jobs")).jobs || []; } catch {} const ul = root.querySelector("#c-jobs"); if (ul) jobsList(ul, U.jobs, api, jobs); clearTimeout(U.timer); if (U.jobs.some((j) => ["queued", "running"].includes(j.status))) U.timer = setTimeout(jobs, 3000); };
+  const sideGlb = () => {
+    const m = U.glb, sideEl = root.querySelector("#c3d-side");
+    const opt = (arr, cur, lab = (x) => x.label ?? x) => arr.map((a) => `<option value="${esc(a.id ?? a)}" ${(a.id ?? a) === cur ? "selected" : ""}>${esc(lab(a))}</option>`).join("");
+    sideEl.innerHTML = `<div class="card"><div class="card-h"><h2>🧊 ${esc(m.name)}</h2><span class="small muted">आपका 3D character</span></div>
+      <p class="small muted">Image→3D के model में skeleton नहीं होता: character हिलता-डुलता है और बोलते समय आवाज़ के साथ मुँह/शरीर धड़कता है (model में mouth morph हों तो सटीक lip-sync)।</p>
+      <div class="field"><label>Model की दिशा (सही सीधा करें)</label><div class="c3d-row"><button class="btn small" data-fit="ry:90">⟲ घुमाएँ 90°</button><button class="btn small" data-fit="ry:180">↻ पीछे से आगे</button><button class="btn small" data-fit="rx:-90">⬆ लेटा हो तो खड़ा करें</button><button class="btn small quiet" data-fit="reset">रीसेट</button></div>
+      <p class="small muted" id="g-fit">घुमाव: Y ${U.fit.ry || 0}° · X ${U.fit.rx || 0}° · Z ${U.fit.rz || 0}°</p></div>
+      <div class="field"><label>कद <b id="g-hv">${(U.fit.height || 1.7).toFixed(2)} m</b></label><input type="range" id="g-height" min="0.5" max="2.2" step="0.05" value="${U.fit.height || 1.7}"></div></div>
+      <div class="card"><div class="card-h"><h2>Animation</h2></div>
+      <div class="c3d-row"><div class="field"><label>Animation</label><select id="c-anim">${opt(cat.animations, U.anim)}</select></div>
+        <div class="field"><label>Camera</label><select id="c-cam">${opt(cat.cameras, U.camera === "medium" ? "full" : U.camera, (x) => x)}</select></div>
+        <div class="field"><label>लंबाई (बिना lines)</label><input type="number" id="c-sec" min="1" max="120" value="${U.seconds}"></div></div>
+      <button class="btn small" id="c-demo">🗣 बोलने का demo</button></div>
+      <div class="card c3d-lines"><div class="card-h"><h2>क्या बोले</h2><span class="small muted">एक line = एक वाक्य</span></div>
+      <textarea id="c-lines" placeholder="नमस्ते, मैं आपका character हूँ।">${esc(U.lines)}</textarea>
+      <div class="field" style="margin-top:.4rem"><label>आवाज़</label><select id="c-voice"><option value="">default</option>${(cat.voices || []).map((v) => `<option value="${v.id}" ${U.voice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select></div>
+      <button class="btn primary" id="c-render" style="width:100%;justify-content:center">🎞 Render → Library</button>
+      <p class="small muted" style="margin-top:.4rem">Editor के «3D & Voice» tab से यही सीधे timeline पर भी लग सकता है।</p></div>
+      <div class="card"><div class="card-h"><h2>3D jobs</h2><button class="btn small quiet" id="c-jobs-r">↻</button></div><ul class="c3d-jobs" id="c-jobs"></ul></div>`;
+    const on = (id, ev, fn) => { const el = sideEl.querySelector(id); if (el) el[ev] = fn; };
+    let saveT = 0; const save = () => { clearTimeout(saveT); saveT = setTimeout(() => api("POST", `/triposr/models/${m.id}/fit`, U.fit).then((r) => { m.meta = { ...(m.meta || {}), fit: r.fit }; }).catch((e) => toast(e.message)), 400); };
+    const fitLabel = () => { const e = sideEl.querySelector("#g-fit"); if (e) e.textContent = `घुमाव: Y ${U.fit.ry || 0}° · X ${U.fit.rx || 0}° · Z ${U.fit.rz || 0}°`; };
+    sideEl.querySelectorAll("[data-fit]").forEach((b) => (b.onclick = () => { const v = b.dataset.fit; if (v === "reset") U.fit = { ...U.fit, rx: 0, ry: 0, rz: 0 }; else { const [k, n] = v.split(":"); U.fit[k] = (((U.fit[k] || 0) + +n) % 360); } fitLabel(); save(); refresh(); }));
+    on("#g-height", "oninput", (e) => { U.fit.height = +e.target.value; sideEl.querySelector("#g-hv").textContent = U.fit.height.toFixed(2) + " m"; });
+    on("#g-height", "onchange", () => { save(); refresh(); });
+    on("#c-anim", "onchange", (e) => { U.anim = e.target.value; refresh(); });
+    on("#c-cam", "onchange", (e) => { U.camera = e.target.value; refresh(); });
+    on("#c-sec", "onchange", (e) => { U.seconds = +e.target.value || 5; });
+    on("#c-lines", "oninput", (e) => { U.lines = e.target.value; });
+    on("#c-voice", "onchange", (e) => { U.voice = e.target.value; });
+    on("#c-demo", "onclick", async () => { const txt = (U.lines || "नमस्ते दोस्तों, आज हम कुछ नया सीखेंगे").split("\n").join(" "); const words = txt.split(/\s+/).filter(Boolean); const per = 0.38;
+      const sp = shotSpec(); sp.characters[0].rig = await glbRig(); sp.camera = { preset: U.camera === "medium" ? "full" : U.camera }; sp.characters[0].talk = [[0, words.length * per]]; sp.characters[0].visemes = visemeTrack(words.map((w, i) => ({ w, start: i * per, end: i * per + per * 0.85 }))); U.pv.set(sp); });
+    on("#c-render", "onclick", async () => {
+      const lines = U.lines.split("\n").map((t) => t.trim()).filter(Boolean).map((text) => ({ text, voice: U.voice || null }));
+      const btn = sideEl.querySelector("#c-render"); btn.disabled = true;
+      try { await api("POST", "/chars3d/render", { glb: m.id, animation: U.anim, camera: U.camera, lines, seconds: U.seconds, name: m.name, width: 720, height: 1080 }); toast("3D render queue में — नीचे progress"); jobs(); } catch (e) { toast(e.message); } finally { btn.disabled = false; }
+    });
+    on("#c-jobs-r", "onclick", jobs);
+    const ul = sideEl.querySelector("#c-jobs"); if (ul) jobsList(ul, U.jobs, api, jobs);
+  };
   const side = () => {
+    if (U.glb) return sideGlb();
     const s = U.spec; const sideEl = root.querySelector("#c3d-side");
     const opt = (arr, cur, lab = (x) => x.label ?? x) => arr.map((a) => `<option value="${esc(a.id ?? a)}" ${(a.id ?? a) === cur ? "selected" : ""}>${esc(lab(a))}</option>`).join("");
     sideEl.innerHTML = `<div class="card"><div class="card-h"><h2>${esc(U.prof.name)}</h2><span class="small muted">${esc(cat.categories[U.prof.category] || "")}</span></div>
@@ -143,7 +194,10 @@ export async function mountStudio(root, ctx) {
     on("#c-jobs-r", "onclick", jobs);
     const ul = sideEl.querySelector("#c-jobs"); if (ul) jobsList(ul, U.jobs, api, jobs);
   };
-  side(); refresh(); jobs();
+  let pre = null; try { pre = sessionStorage.getItem("c3dGlb"); sessionStorage.removeItem("c3dGlb"); } catch {}
+  const pm = pre && U.models.find((m) => m.id === pre);
+  if (pm) pickGlb(pm); else { side(); refresh(); }
+  jobs();
 }
 
 export function unmountStudio() { if (!U) return; clearTimeout(U.timer); U.pv?.destroy(); U = null; }

@@ -3,16 +3,18 @@
 <style>html,body{margin:0;background:transparent}canvas{display:block}</style></head>
 <body><canvas id="c"></canvas>
 <script type="module">
-// Headless frame renderer driven by the worker (engine/chars3d): setup3d(spec) → frame3d(i) → PNG data URL.
-import { buildShot } from "./chars3d.js";
+// Headless frame renderer driven by the worker (engine/chars3d): await setup3d(spec) → frame3d(i) → PNG data URL.
+// A character may carry { glb: "<base64 .glb>", fit } — it is loaded here (async) and replaces the procedural body.
+import { buildShot, loadGlbRig } from "./chars3d.js";
 let shot = null, fps = 25, frames = 0;
-window.setup3d = (spec) => {
+window.setup3d = async (spec) => {
   const c = document.getElementById("c");
   fps = spec.fps || 25; frames = Math.max(1, Math.round((spec.duration || 5) * fps));
+  for (const ch of spec.characters || []) if (ch.glb) { ch.rig = await loadGlbRig(ch.glb, ch.fit || {}); ch.glb = null; }
   shot = buildShot(spec, c);
   shot.update(0); shot.render();
   return { frames, width: shot.W, height: shot.H, rigs: shot.rigs.length, bones: shot.rigs[0] ? Object.keys(shot.rigs[0].bones).length : 0,
-           morphs: shot.rigs[0] ? shot.rigs[0].head.morphTargetInfluences.length : 0 };
+           morphs: shot.rigs[0] && shot.rigs[0].head.morphTargetInfluences ? shot.rigs[0].head.morphTargetInfluences.length : 0, glb: !!(shot.rigs[0] && shot.rigs[0].glb) };
 };
 window.frame3d = (i, quality) => {
   shot.update(i / fps); shot.render();

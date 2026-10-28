@@ -128,6 +128,27 @@ async def models(request: Request, user: dict):
     return ok({"models": [_view(r) for r in rows]})
 
 
+@require("editor")
+async def set_fit(request: Request, user: dict):
+    """Orientation / height of a .glb character: {rx, ry, rz (degrees), height (m)} — saved in the library item's meta."""
+    it = db.get("library", request.path_params["item_id"])
+    if not it or it["kind"] != "3d_model" or it["workspace_id"] != user["workspace_id"]:
+        raise ApiError(404, "model नहीं मिला")
+    d = await body(request)
+    fit = {}
+    for k, lo, hi in (("rx", -360, 360), ("ry", -360, 360), ("rz", -360, 360), ("height", 0.3, 3.0)):
+        try:
+            if d.get(k) is not None:
+                fit[k] = max(lo, min(hi, float(d[k])))
+        except (TypeError, ValueError):
+            raise ApiError(422, f"{k} अंक होना चाहिए")
+    meta = dict(it.get("meta") or {})
+    meta["fit"] = {**(meta.get("fit") or {}), **fit}
+    with db.tx() as c:
+        db.update(c, "library", it["id"], {"meta": meta})
+    return ok({"fit": meta["fit"]})
+
+
 @require("viewer")
 async def jobs(request: Request, user: dict):
     """List image-to-3D jobs for this workspace."""
@@ -170,6 +191,7 @@ routes = [
     Route("/triposr/job/{job_id}", job_status),
     Route("/triposr/models", models),
     Route("/triposr/import", import_glb, methods=["POST"]),
+    Route("/triposr/models/{item_id}/fit", set_fit, methods=["POST"]),
     Route("/triposr/jobs", jobs),
     Route("/triposr/jobs/{job_id}/cancel", cancel, methods=["POST"]),
 ]
