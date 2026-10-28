@@ -28,11 +28,14 @@ def _url(path: str) -> str:
 
 def health() -> dict:
     """Check if TripoSR is reachable and model is loaded."""
-    try:
-        with urllib.request.urlopen(_url("/health"), timeout=5) as r:
-            return json.loads(r.read())
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    err = "offline"
+    for path in ("/api/health", "/health"):  # the TripoSR server on the VM answers on /api/health
+        try:
+            with urllib.request.urlopen(_url(path), timeout=5) as r:
+                return json.loads(r.read())
+        except Exception as e:  # noqa: BLE001
+            err = str(e)
+    return {"status": "error", "error": err}
 
 
 def image_to_3d(image_bytes: bytes, filename: str = "input.png",
