@@ -1,7 +1,7 @@
 """Voice-over API — text → speech (any TTS preset) saved to the library as kind "voice", for the editor's
 "3D & Voice" tab. Synthesis on CPU can take minutes (Cloudflare cuts requests at 100 s) → background thread + polling.
 
-POST /voiceover        {text, voice?, lang?, speed?, name?} → 202 {job_id}
+POST /voiceover        {text, voice?, lang?, speed?, name?, vs_model?, vs_voice?} → 202 {job_id}
 GET  /voiceover/{id}   → {status: running|done|failed, error, item, seconds}
 """
 
@@ -70,11 +70,18 @@ async def create(request: Request, user: dict):
     voice = tts.voice_preset(vid) if vid else _default_voice()
     if not voice:
         raise ApiError(422, "voice नहीं मिली" if vid else "कोई TTS voice उपलब्ध नहीं (VoiceStudio चालू करें)")
+    if voice.get("engine") == "voicestudio":  # Voice Studio page: pick the exact VoiceStudio model / voice
+        voice = dict(voice)
+        for k_in, k_out in (("vs_model", "vs_model"), ("vs_voice", "vs_voice")):
+            if b.get(k_in):
+                voice[k_out] = str(b[k_in])[:120]
     try:
         speed = max(0.5, min(2.0, float(b.get("speed") or 1.0)))
     except (TypeError, ValueError):
         speed = 1.0
     lang = str(b.get("lang") or voice.get("lang") or "hi")[:8]
+    if voice.get("engine") == "voicestudio" and b.get("lang"):
+        voice = {**voice, "vs_language": lang}
     name = (str(b.get("name") or "").strip() or "Voice-over · " + text[:30])[:120]
     ws = user["workspace_id"]
     with _LOCK:

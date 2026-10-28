@@ -55,9 +55,17 @@ export function voiceBind(c) {
     const text = $("#vs-text").value.trim(); if (!text) return st("पहले text लिखें", true);
     const btn = $("#vs-go"); btn.disabled = true; st("आवाज़ बन रही है… (CPU पर लंबे text में 1–2 मिनट लग सकते हैं)");
     try {
-      const blob = await blobPost("/voicestudio/synthesise", { text, language: $("#vs-lang").value, model: $("#vs-model").value || undefined, voice: $("#vs-voice").value || undefined, speed: +$("#vs-speed").value });
-      const url = URL.createObjectURL(blob);
-      $("#vs-out").innerHTML = `<audio controls src="${url}" style="width:100%"></audio><p><a class="btn small" href="${url}" download="voice-${Date.now()}.wav">⬇ WAV download</a></p><p class="small muted">इसे timeline में लगाने के लिए Library → Voice में upload करें।</p>`;
+      const r0 = await ctx.api("POST", "/voiceover", { text, lang: $("#vs-lang").value, vs_model: $("#vs-model").value || undefined, vs_voice: $("#vs-voice").value || undefined, speed: +$("#vs-speed").value, voice: "vs_multi" });
+      let item = null;
+      for (let i = 0; i < 400 && !item; i++) {
+        if (!$("#vs-st")) return; // left the page
+        const s2 = await ctx.api("GET", "/voiceover/" + r0.job_id);
+        if (s2.status === "failed") throw new Error(s2.error || "आवाज़ नहीं बन पाई");
+        if (s2.status === "done") { item = s2.item; break; }
+        st(`आवाज़ बन रही है… ${s2.seconds}s (लंबे text में 1–2 मिनट लगते हैं, page खुला रखें)`); await sleep(2500);
+      }
+      if (!item) throw new Error("बहुत देर लग रही है — बाद में Library → Voice-over में देखें");
+      $("#vs-out").innerHTML = `<audio controls src="${esc(item.url)}" style="width:100%"></audio><p><a class="btn small" href="${esc(item.url)}" download="${esc(item.name)}.wav">⬇ WAV download</a></p><p class="small muted">✓ Library → Voice-over में save है। Editor के «3D &amp; Voice» tab से सीधे timeline पर लग सकती है।</p>`;
       st("तैयार ✓");
     } catch (e) { st(e.message, true); } finally { btn.disabled = false; }
   };
