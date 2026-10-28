@@ -98,7 +98,7 @@ def synthesise(text: str, model: str | None = None, voice: str | None = None,
         try:
             audio = _post({**payload, "language": language})
         except urllib.error.HTTPError as e:
-            if e.code != 422:
+            if e.code not in (400, 422):  # this build rejects the extra "language" field
                 raise
             audio = _post(payload)  # this build rejects the extra "language" field
     except urllib.error.HTTPError as e:
