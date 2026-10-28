@@ -29,84 +29,85 @@ def _url(path: str) -> str:
     return f"{settings.voicestudio_url.rstrip('/')}{path}"
 
 
+def _get(path: str, timeout: int = 10):
+    with urllib.request.urlopen(_url(path), timeout=timeout) as r:
+        return json.loads(r.read())
+
+
 def health() -> dict:
-    """Check if VoiceStudio is reachable."""
+    """Check if VoiceStudio is reachable and its models are loaded."""
     try:
-        with urllib.request.urlopen(_url("/api/health"), timeout=5) as r:
-            return json.loads(r.read())
-    except Exception as e:
+        h = _get("/health", 5)
+    except urllib.error.HTTPError as e:  # 503 while the ML runtime is still loading
+        try:
+            d = json.loads(e.read())
+        except Exception:  # noqa: BLE001
+            d = {}
+        return {"status": "error", "error": str(d.get("detail") or f"HTTP {e.code}")[:200]}
+    except Exception as e:  # noqa: BLE001
         return {"status": "error", "error": str(e)}
+    return h if isinstance(h, dict) and h.get("status") else {"status": "ok", **(h if isinstance(h, dict) else {})}
 
 
 def models() -> list[dict]:
-    """List available TTS models."""
+    """TTS models (OpenAI-style /v1/models)."""
     try:
-        with urllib.request.urlopen(_url("/api/models"), timeout=10) as r:
-            data = json.loads(r.read())
-            return data if isinstance(data, list) else data.get("models", [])
-    except Exception as e:
+        data = _get("/v1/models")
+        items = data.get("data", data) if isinstance(data, dict) else data
+        return [{"id": m.get("id"), "name": m.get("id")} if isinstance(m, dict) else {"id": m, "name": m} for m in items]
+    except Exception as e:  # noqa: BLE001
         log.warning("VoiceStudio models list failed: %s", e)
         return []
 
 
 def voices(model: str | None = None) -> list[dict]:
-    """List available voices, optionally filtered by model."""
+    """Voice profiles (OpenAI-style /v1/audio/voices)."""
     try:
-        url = _url("/api/voices")
-        if model:
-            url += f"?model={urllib.request.quote(model)}"
-        with urllib.request.urlopen(url, timeout=10) as r:
-            data = json.loads(r.read())
-            return data if isinstance(data, list) else data.get("voices", [])
-    except Exception as e:
+        data = _get("/v1/audio/voices")
+        items = data.get("voices", data.get("data", data)) if isinstance(data, dict) else data
+        out = []
+        for v in items:
+            if isinstance(v, dict):
+                vid = v.get("id") or v.get("name")
+                out.append({"id": vid, "name": v.get("name") or vid})
+            else:
+                out.append({"id": v, "name": v})
+        return out
+    except Exception as e:  # noqa: BLE001
         log.warning("VoiceStudio voices list failed: %s", e)
         return []
 
 
 def synthesise(text: str, model: str | None = None, voice: str | None = None,
                language: str = "hi", speed: float = 1.0, out: Path | None = None) -> Path:
-    """Synthesise text → WAV file via VoiceStudio API.
-
-    Args:
-        text:     The text to speak.
-        model:    TTS model name (e.g. "coqui/XTTS-v2").  None = server default.
-        voice:    Voice / speaker name.  None = server default.
-        language: BCP-47 or ISO-639 language code.
-        speed:    Speech speed multiplier (0.5 – 2.0).
-        out:      Output .wav path.  Required.
-
-    Returns the path to the generated WAV file.
-    """
+    """Text → WAV via VoiceStudio's OpenAI-compatible POST /v1/audio/speech."""
     if out is None:
         raise ValueError("out path is required")
-
-    payload: dict = {"text": text, "language": language}
-    if model:
-        payload["model"] = model
-    if voice:
-        payload["voice"] = voice
+    payload: dict = {"model": model or "omnivoice", "input": text, "voice": voice or "default",
+                     "response_format": "wav"}
     if speed and abs(speed - 1.0) > 0.01:
-        payload["speed"] = round(max(0.5, min(2.0, speed)), 2)
+        payload["speed"] = round(max(0.25, min(4.0, speed)), 2)
 
-    body = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        _url("/api/tts"),
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
+    def _post(pl: dict) -> bytes:
+        req = urllib.request.Request(_url("/v1/audio/speech"), data=json.dumps(pl).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
-            audio = r.read()
+            return r.read()
+
+    try:
+        try:
+            audio = _post({**payload, "language": language})
+        except urllib.error.HTTPError as e:
+            if e.code != 422:
+                raise
+            audio = _post(payload)  # this build rejects the extra "language" field
     except urllib.error.HTTPError as e:
         err = e.read().decode(errors="replace")[:500]
         raise RuntimeError(f"VoiceStudio TTS error ({e.code}): {err}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"VoiceStudio unreachable: {e.reason}") from e
-
     if not audio:
         raise RuntimeError("VoiceStudio returned empty audio")
-
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(audio)
     return out
