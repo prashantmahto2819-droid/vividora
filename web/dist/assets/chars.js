@@ -32,12 +32,13 @@ const css = `
 export function view() {
   return `<div class="pghead"><div><h1>Characters</h1><p class="muted">200 तैयार पात्र — डॉक्टर, दुकानदार, शिक्षक, जिम ट्रेनर, त्योहार के कपड़े… किसी को चुनकर रंग-रूप बदलें, बोलते हुए देखें, फिर Scene में भेजें।</p></div>
     <div class="row"><a class="btn" href="#/scenes">🎬 Scenes / Storyboard</a></div></div>
-    <div class="ch-wrap"><div id="ch-left"><p class="small muted">लोड हो रहा है…</p></div><div class="ch-side" id="ch-side"><p class="small muted">बाएँ से कोई character चुनें।</p></div></div>`;
+    <div class="card" id="ch-models" style="margin-bottom:1rem"></div><div class="ch-wrap"><div id="ch-left"><p class="small muted">लोड हो रहा है…</p></div><div class="ch-side" id="ch-side"><p class="small muted">बाएँ से कोई character चुनें।</p></div></div>`;
 }
 
 export function bind(c) {
   ctx = c;
   if (!$("#ch-css")) { const st = document.createElement("style"); st.id = "ch-css"; st.textContent = css; document.head.appendChild(st); }
+  import("./models3d.js").then((M) => M.mountModels($("#ch-models"), ctx)).catch(() => {});
   load();
 }
 

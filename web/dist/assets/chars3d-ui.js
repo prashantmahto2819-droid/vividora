@@ -69,9 +69,11 @@ export async function mountStudio(root, ctx) {
   U = { cat, prof: cat.profiles[0], spec: { ...cat.profiles[0].spec }, anim: "idle", expr: "smile", camera: "medium", lines: "", voice: "", seconds: 5, scene: "", lighting: "day", jobs: [], timer: 0 };
   root.innerHTML = `<div class="pghead"><div><h1>3D Studio — Characters</h1><p class="muted">60 तैयार 3D characters: पहनावा, रंग, props, हाव-भाव बदलें, lines लिखें — बोलता हुआ character (lip-sync) library में आता है, फिर editor में किसी भी video पर रखें।</p></div>
     <a class="btn quiet" href="#/scenes3d">🎬 3D Scenes & explainer →</a></div>
+    <div class="card" id="c3d-models" style="margin-bottom:1rem"></div>
     <div class="c3d"><div class="c3d-list" id="c3d-list"></div>
       <div><div class="c3d-stage" id="c3d-stage"></div><p class="small muted" style="margin-top:.4rem">खींचकर घुमाएँ · scroll से zoom · preview browser में चलता है, render server पर</p></div>
       <div class="c3d-side" id="c3d-side"></div></div>`;
+  import("./models3d.js").then((M) => M.mountModels(root.querySelector("#c3d-models"), ctx)).catch(() => {});
   const list = root.querySelector("#c3d-list");
   const cats = {};
   for (const p of cat.profiles) (cats[p.category] ||= []).push(p);

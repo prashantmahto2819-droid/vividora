@@ -86,6 +86,31 @@ async def generate(request: Request, user: dict):
     return ok({"job_id": job_id}, 202)
 
 
+@require("editor")
+async def import_glb(request: Request, user: dict):
+    """POST multipart (file=.glb, name?) — put a ready-made 3D model into the library (kind 3d_model)."""
+    import tempfile
+    form = await request.form()
+    up = form.get("file")
+    if not up or not hasattr(up, "read"):
+        raise ApiError(422, ".glb फ़ाइल चुनें")
+    data = await up.read()
+    if len(data) > 150 * 1024 * 1024:
+        raise ApiError(413, "फ़ाइल बहुत बड़ी (max 150 MB)")
+    if data[:4] != b"glTF":
+        raise ApiError(422, "यह .glb (binary glTF) फ़ाइल नहीं लगती")
+    name = str(form.get("name") or getattr(up, "filename", "") or "3D model").rsplit(".glb", 1)[0][:120] or "3D model"
+    from .library import _add_file
+    with tempfile.TemporaryDirectory(prefix="glb_") as td:
+        src = Path(td) / "model.glb"
+        src.write_bytes(data)
+        item = _add_file(user["workspace_id"], user["id"], "3d_model", src, name=name, tags="3d,glb", source="import",
+                         license="", analyse=False)
+    with db.tx() as c:
+        service.log(c, user["workspace_id"], "model3d.import", user_id=user["id"], detail={"item_id": item["id"], "name": name})
+    return ok({"item": _view(item)}, 201)
+
+
 @require("viewer")
 async def job_status(request: Request, user: dict):
     st = _JOBS.get(request.path_params["job_id"])
@@ -144,6 +169,7 @@ routes = [
     Route("/triposr/generate", generate, methods=["POST"]),
     Route("/triposr/job/{job_id}", job_status),
     Route("/triposr/models", models),
+    Route("/triposr/import", import_glb, methods=["POST"]),
     Route("/triposr/jobs", jobs),
     Route("/triposr/jobs/{job_id}/cancel", cancel, methods=["POST"]),
 ]

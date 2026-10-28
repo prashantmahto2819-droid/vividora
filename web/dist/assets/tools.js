@@ -71,7 +71,7 @@ export function glbView() {
     <div class="field"><label>Model का नाम</label><input id="g3-title" placeholder="जैसे: Sunil character"></div>
     <button class="btn primary" id="g3-go" disabled>🧊 3D बनाएँ</button>
     <div class="tl-st" id="g3-st"></div>
-  </div><div class="tl-box"><h3 style="margin:0">मेरे 3D models</h3><div id="g3-list" class="tl-list"><p class="small muted">लोड हो रहा है…</p></div></div></div>`;
+  </div><div class="tl-box" id="g3-models"></div></div>`;
 }
 export function glbBind(c) {
   ctx = c; ensureCss();
@@ -82,13 +82,8 @@ export function glbBind(c) {
   drop.onclick = () => inp.click(); inp.onchange = () => pick(inp.files[0]);
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); }; drop.ondragleave = () => drop.classList.remove("over");
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); pick(e.dataTransfer.files[0]); };
-  const list = async () => {
-    try {
-      const r = await ctx.api("GET", "/triposr/models"); const el = $("#g3-list"); if (!el) return;
-      el.innerHTML = r.models.length ? r.models.map((m) => `<div class="tl-item"><b title="${esc(m.name)}">🧊 ${esc(m.name)}</b><span class="small muted">${(m.size / 1048576).toFixed(1)} MB · ${new Date(m.created_at).toLocaleDateString("hi-IN")}</span><a class="btn small" href="${m.url}" download="${esc(m.name)}.glb">⬇ .glb download</a></div>`).join("") : `<p class="small muted">अभी कोई model नहीं — बाईं तरफ़ से बनाएँ।</p>`;
-    } catch (e) { const el = $("#g3-list"); if (el) el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; }
-  };
-  list();
+  let panel = null; const list = () => panel?.refresh();
+  import("./models3d.js").then((M) => M.mountModels($("#g3-models"), ctx)).then((p) => { panel = p; }).catch(() => {});
   ctx.api("GET", "/triposr/health").then((h) => { if (h.status !== "ok") st("⚠ TripoSR service बंद है (port 8090) — server पर `systemctl status triposr` देखें", true); }).catch(() => {});
   $("#g3-go").onclick = async () => {
     if (!file) return; const btn = $("#g3-go"); btn.disabled = true; st("भेज रहे हैं…");
