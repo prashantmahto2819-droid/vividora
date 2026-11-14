@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .. import db
-from ..security import ROLE_RANK, read_token, worker_token_ok
+from ..security import API_KEY_PREFIX, ROLE_RANK, api_key_allows, hash_api_key, read_token, worker_token_ok
 
 
 class ApiError(HTTPException):
@@ -56,8 +56,30 @@ def _bearer(request: Request) -> str | None:
     return request.cookies.get("vividora_token")
 
 
+def _api_key_user(request: Request, tok: str) -> dict:
+    """Machine access (another platform calling Vividora). Limited to the key's scopes and never above 'editor'."""
+    key = db.row(db.conn().execute("SELECT * FROM api_keys WHERE key_hash = ?", (hash_api_key(tok),)).fetchone())
+    if not key or key["revoked_at"]:
+        raise ApiError(401, "API key galat ya band hai")
+    path = request.url.path
+    path = path[4:] if path.startswith("/api/") else path
+    if not api_key_allows(key["scopes"], request.method, path):
+        raise ApiError(403, "is API key ko yeh kaam karne ki anumati nahi")
+    user = db.get("users", key["user_id"])
+    if not user or not user["active"]:
+        raise ApiError(401, "key ka account band hai")
+    rate_limit(request, "apikey:" + key["id"][:8], 60, 60)
+    with db.tx() as c:
+        db.update(c, "api_keys", key["id"], {"last_used_at": db.now()})
+    if ROLE_RANK[user["role"]] > ROLE_RANK["editor"]:
+        user = {**user, "role": "editor"}
+    return user
+
+
 def current_user(request: Request) -> dict:
     tok = _bearer(request)
+    if tok and tok.startswith(API_KEY_PREFIX):
+        return _api_key_user(request, tok)
     data = read_token(tok, kind="access") if tok else None
     if not data:
         raise ApiError(401, "login required")

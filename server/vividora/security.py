@@ -58,6 +58,34 @@ def access_token(user_id: str, version: int = 0) -> str:
     return make_token(user_id, kind="access", hours=settings.access_token_hours, extra={"tv": int(version or 0)})
 
 
+API_KEY_PREFIX = "vvk_"
+# What an API key may call (method, path after /api). Everything else (login, billing, library delete, keys…) is closed.
+API_SCOPES = {
+    "tts": [("POST", r"/voiceover"), ("GET", r"/voiceover/[0-9a-f]{8,32}"), ("GET", r"/voicestudio/(health|models|voices)")],
+    "3d": [("POST", r"/triposr/generate"), ("GET", r"/triposr/(health|job/[0-9a-f]{8,32})")],
+}
+
+
+def new_api_key() -> tuple[str, str, str]:
+    """(full key — shown once, prefix for display, sha256 hash stored). Keys are 256-bit random, so a plain hash is enough."""
+    import secrets
+    key = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    return key, key[:10], hash_api_key(key)
+
+
+def hash_api_key(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def api_key_allows(scopes: str, method: str, path: str) -> bool:
+    import re
+    for sc in (scopes or "").split(","):
+        for m, pat in API_SCOPES.get(sc.strip(), []):
+            if m == method and re.fullmatch(pat, path):
+                return True
+    return False
+
+
 PASSWORD_MIN = 8
 
 
