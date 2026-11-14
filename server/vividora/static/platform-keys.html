@@ -1,0 +1,16 @@
+<!doctype html><html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Platform API keys</title>
+<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #ddd;padding:.5rem;text-align:left}button{padding:.4rem .8rem}code{background:#f3f3f3;padding:.2rem .4rem;word-break:break-all}.err{color:#b00}.new{background:#fffbe0;padding:.8rem;border-radius:8px;margin:1rem 0}</style></head>
+<body><h1>Platform API keys</h1><p>Doosre platform (jaise AI App Builder) Vividora ki awaaz (TTS) aur image→3D chala sakein. Sirf admin. Key sirf ek baar dikhti hai.</p>
+<form id="f"><input id="n" placeholder="Key ka naam (jaise builder)" maxlength="60" required> <label><input type="checkbox" id="tts" checked> tts</label> <label><input type="checkbox" id="d3" checked> 3d</label> <button>Key banao</button></form>
+<div id="msg" class="err"></div><div id="new"></div>
+<table><thead><tr><th>Naam</th><th>Shuruaat</th><th>Scopes</th><th>Aakhri use</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+var $=function(i){return document.getElementById(i)};
+function api(m,u,b){return fetch('/api'+u,{method:m,credentials:'same-origin',headers:{'content-type':'application/json'},body:b?JSON.stringify(b):undefined}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||j.detail||('HTTP '+r.status));return j})})}
+function cell(tr,t){var td=document.createElement('td');td.textContent=t;tr.appendChild(td);return td}
+function load(){api('GET','/keys').then(function(d){var tb=$('rows');tb.textContent='';(d.keys||[]).forEach(function(k){var tr=document.createElement('tr');cell(tr,k.name+(k.revoked_at?' (band)':''));cell(tr,k.prefix+'…');cell(tr,k.scopes.join(', '));cell(tr,k.last_used_at||'-');var td=cell(tr,'');if(!k.revoked_at){var b=document.createElement('button');b.textContent='Band karo';b.onclick=function(){if(confirm('Ye key hamesha ke liye band ho jayegi. Pakka?'))api('DELETE','/keys/'+encodeURIComponent(k.id)).then(load).catch(show)};td.appendChild(b)}tb.appendChild(tr)})}).catch(show)}
+function show(e){$('msg').textContent=e.message==='Failed to fetch'?'Server nahi mila':e.message+' (admin login karke aayein)'}
+$('f').onsubmit=function(ev){ev.preventDefault();$('msg').textContent='';var s=[];if($('tts').checked)s.push('tts');if($('d3').checked)s.push('3d');
+api('POST','/keys',{name:$('n').value,scopes:s}).then(function(d){var box=$('new');box.textContent='';var w=document.createElement('div');w.className='new';var p=document.createElement('p');p.textContent='Nayi key (abhi copy karein, dobara nahi dikhegi):';var c=document.createElement('code');c.textContent=d.key;w.appendChild(p);w.appendChild(c);box.appendChild(w);$('n').value='';load()}).catch(show)};
+load();
+</script></body></html>

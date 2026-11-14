@@ -11,6 +11,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
+from pathlib import Path
 from starlette.staticfiles import StaticFiles
 
 from . import __version__, db
@@ -173,7 +174,13 @@ def create_app() -> Starlette:
     api_routes += voicestudio_api.routes  # VoiceStudio: 41-model TTS (self-hosted, localhost:3900)
     from .api import voiceover_api
     api_routes += voiceover_api.routes  # editor voice-over: text → library 'voice' item (async)
-    routes = [Mount("/api", routes=api_routes), *publish.public_routes]
+    def _keys_page(_request):
+        # standalone admin page (no build step); the data calls need the admin's normal login cookie
+        from starlette.responses import HTMLResponse
+        html = (Path(__file__).parent / "static" / "platform-keys.html").read_text(encoding="utf-8")
+        return HTMLResponse(html, headers={"cache-control": "no-store", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"})
+    api_routes_top = [Route("/platform-keys", _keys_page)]
+    routes = [Mount("/api", routes=api_routes), *api_routes_top, *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))
         for extra in ("manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png"):

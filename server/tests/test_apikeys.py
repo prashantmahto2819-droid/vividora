@@ -38,6 +38,13 @@ class KeyTests(unittest.TestCase):
     def setUp(self):
         saas.reset_limits()
 
+    def test_keys_page(self):
+        r = client.get("/platform-keys")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("default-src 'none'", r.headers["content-security-policy"])
+        self.assertIn("Platform API keys", r.text)
+        self.assertNotIn("innerHTML", r.text)  # keys/names are rendered with textContent only
+
     def test_keys(self):
         admin = signup("k1@example.com")
         # no login → no key
