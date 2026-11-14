@@ -156,6 +156,12 @@ CREATE TABLE IF NOT EXISTS characters (
 CREATE TABLE IF NOT EXISTS storyboards (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', project_id TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'editor', created_at TEXT NOT NULL,
+  last_used_at TEXT, revoked INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS api_keys_ws ON api_keys(workspace_id);
 """
 
 _lock = threading.Lock()

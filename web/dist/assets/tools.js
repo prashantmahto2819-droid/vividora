@@ -140,3 +140,61 @@ export function glbBind(c) {
     } catch (e) { st(e.message, true); } finally { const b = $("#g3-go"); if (b) b.disabled = false; }
   };
 }
+
+// ---------------------------------------------------------------- API & Integrations (API keys for other software)
+let apiNewKey = null;
+export function apiView() {
+  const base = location.origin;
+  const k = apiNewKey || "YOUR_API_KEY";
+  const cu = `curl -X POST ${base}/api/v1/text-to-speech \\\n  -H "Authorization: Bearer ${k}" -H "Content-Type: application/json" \\\n  -d '{"text":"नमस्ते दोस्तों","lang":"hi"}'`;
+  return `<div class="pghead"><div><h1>🔌 API & Integrations</h1><p class="muted">अपने दूसरे software (n8n, Zapier, Make, अपनी app, script) से Vividora चलाएँ — Image→3D, Text→Voice, 3D character video। Key सिर्फ़ आपके workspace तक सीमित है।</p></div></div>
+  <div class="tl-wrap"><div class="tl-box">
+    <h3 style="margin:0 0 .4rem">नई API key</h3>
+    <div class="tl-row"><div class="field"><label>नाम (जैसे n8n, my-app)</label><input id="ak-name" maxlength="60" placeholder="n8n"></div>
+      <div class="field"><label>अनुमति</label><select id="ak-role"><option value="editor">editor — बना भी सकती है</option><option value="viewer">viewer — सिर्फ़ देख/download</option></select></div></div>
+    <button class="btn primary" id="ak-go">🔑 Key बनाएँ</button>
+    <div id="ak-new"></div>
+    <h3 style="margin:1rem 0 .4rem">आपकी keys</h3><div id="ak-list"><p class="small muted">लोड हो रहा है…</p></div>
+  </div><div class="tl-box">
+    <h3 style="margin:0 0 .4rem">इस्तेमाल कैसे करें</h3>
+    <p class="small">Base URL: <code>${esc(base)}/api/v1</code></p>
+    <p class="small">हर request में header: <code>Authorization: Bearer vk_…</code></p>
+    <pre id="ak-curl" style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.6rem;font-size:.78rem">${esc(cu)}</pre>
+    <button class="btn small quiet" id="ak-copycurl">📋 Example copy</button>
+    <p class="small" style="margin-top:.8rem">काम में 1–3 मिनट लग सकते हैं: response में <code>job_id</code> मिलता है → <code>GET /v1/jobs/{job_id}</code> से देखें → <code>done</code> होने पर <code>file.download</code> से फ़ाइल लें। या <code>callback_url</code> दें, तो खत्म होते ही आपके URL पर खबर आएगी।</p>
+    <p class="small"><a href="/api/v1/docs" target="_blank" rel="noopener">📖 पूरा API docs</a> · <a href="/api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a> (Postman / n8n में import करें)</p>
+    <p class="small muted">⚠ Key password जैसी है — किसी को दिखाएँ नहीं, screenshot में न आने दें। लीक हो जाए तो यहीं से हटा दें।</p>
+  </div></div>`;
+}
+export function apiBind(c) {
+  ctx = c; ensureCss();
+  const fmt = (t) => t ? new Date(t).toLocaleString() : "अभी तक नहीं";
+  const copy = async (txt, msg) => { try { await navigator.clipboard.writeText(txt); ctx.toast(msg || "Copy हो गया"); } catch { ctx.toast("Copy नहीं हुआ — खुद select करके copy करें"); } };
+  const loadList = async () => {
+    const box = $("#ak-list"); if (!box) return;
+    try {
+      const r = await ctx.api("GET", "/keys");
+      box.innerHTML = r.keys.length ? r.keys.map((k) => `<div class="tl-item" style="margin-bottom:.4rem"><b>${esc(k.name)}</b><span class="small muted"><code>${esc(k.prefix)}…</code> · ${esc(k.role)} · आख़िरी इस्तेमाल: ${esc(fmt(k.last_used_at))}</span><button class="btn small quiet" data-rev="${esc(k.id)}">🗑 हटाएँ</button></div>`).join("") : `<p class="small muted">अभी कोई key नहीं।</p>`;
+      box.querySelectorAll("[data-rev]").forEach((b) => (b.onclick = async () => {
+        if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "पक्का हटाएँ? (दोबारा दबाएँ)"; return; }
+        try { await ctx.api("DELETE", "/keys/" + b.dataset.rev); ctx.toast("Key हट गई"); loadList(); } catch (e) { ctx.toast(e.message); }
+      }));
+    } catch (e) { box.innerHTML = `<p class="small err">${esc(e.message)}</p>`; }
+  };
+  loadList();
+  const cc = $("#ak-copycurl"); if (cc) cc.onclick = () => copy($("#ak-curl").textContent, "Example copy हो गया");
+  const go = $("#ak-go");
+  if (go) go.onclick = async () => {
+    const name = $("#ak-name").value.trim();
+    if (!name) { ctx.toast("पहले key का नाम लिखें"); return; }
+    go.disabled = true;
+    try {
+      const r = await ctx.api("POST", "/keys", { name, role: $("#ak-role").value });
+      apiNewKey = r.key;
+      $("#ak-new").innerHTML = `<div class="tl-item" style="margin-top:.6rem;border-color:#ffb020"><b>✅ आपकी key — अभी copy कर लें, दोबारा नहीं दिखेगी</b><code id="ak-key" style="word-break:break-all;user-select:all">${esc(r.key)}</code><button class="btn small" id="ak-copy">📋 Key copy करें</button></div>`;
+      $("#ak-copy").onclick = () => copy(r.key, "Key copy हो गई");
+      $("#ak-curl").textContent = `curl -X POST ${location.origin}/api/v1/text-to-speech \\\n  -H "Authorization: Bearer ${r.key}" -H "Content-Type: application/json" \\\n  -d '{"text":"नमस्ते दोस्तों","lang":"hi"}'`;
+      $("#ak-name").value = ""; loadList();
+    } catch (e) { ctx.toast(e.message); } finally { go.disabled = false; }
+  };
+}

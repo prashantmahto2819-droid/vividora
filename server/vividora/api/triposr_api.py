@@ -53,6 +53,8 @@ def _run(job_id: str, ws: str, user_id: str, image_bytes: bytes, filename: str, 
     except Exception as e:  # noqa: BLE001 — reported to the browser
         log.warning("image→3D failed: %s", e)
         st.update(status="failed", error=str(e)[:300], finished=time.time())
+    from .. import webhooks
+    webhooks.notify(st, job_id, "image_to_3d")
 
 
 @require("editor")
@@ -80,7 +82,14 @@ async def generate(request: Request, user: dict):
         _JOBS.pop(k, None)
     name = str(form.get("name") or filename.rsplit(".", 1)[0] or "3D Model")[:120]
     job_id = uuid.uuid4().hex[:16]
-    _JOBS[job_id] = {"status": "running", "ws": user["workspace_id"], "started": time.time()}
+    cb = None
+    if form.get("callback_url"):
+        from .. import webhooks
+        try:
+            cb = webhooks.check_url(str(form.get("callback_url")))
+        except ValueError as e:
+            raise ApiError(422, str(e))
+    _JOBS[job_id] = {"status": "running", "ws": user["workspace_id"], "started": time.time(), "callback": cb}
     threading.Thread(target=_run, args=(job_id, user["workspace_id"], user["id"], image_bytes, filename, content_type, name),
                      daemon=True).start()
     return ok({"job_id": job_id}, 202)

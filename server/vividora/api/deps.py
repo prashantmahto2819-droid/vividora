@@ -56,8 +56,30 @@ def _bearer(request: Request) -> str | None:
     return request.cookies.get("vividora_token")
 
 
+def _key_user(request: Request, tok: str) -> dict:
+    """`vk_…` API key (Authorization: Bearer vk_… or X-API-Key) → the key's user, role capped at the key's role."""
+    from .. import apikeys
+    from ..saas import rate_ok
+    k = apikeys.lookup(tok)
+    if not k:
+        raise ApiError(401, "API key गलत है या हटा दी गई")
+    if not rate_ok(f"apikey:{k['id']}", 120, 40):
+        raise ApiError(429, "इस API key से बहुत ज़्यादा requests — थोड़ा रुककर कोशिश करें")
+    user = db.get("users", k["user_id"])
+    if not user or not user["active"]:
+        raise ApiError(401, "API key के मालिक का account बंद है")
+    apikeys.touch(k)
+    role = k["role"] if ROLE_RANK.get(k["role"], 0) <= ROLE_RANK[user["role"]] else user["role"]
+    return {**user, "role": role, "_api_key": k["id"]}
+
+
 def current_user(request: Request) -> dict:
+    xk = request.headers.get("x-api-key")
+    if xk:
+        return _key_user(request, xk.strip())
     tok = _bearer(request)
+    if tok and tok.startswith("vk_"):
+        return _key_user(request, tok)
     data = read_token(tok, kind="access") if tok else None
     if not data:
         raise ApiError(401, "login required")

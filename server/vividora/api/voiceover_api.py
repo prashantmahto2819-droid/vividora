@@ -55,6 +55,8 @@ def _run(job_id: str, ws: str, user_id: str, text: str, voice: dict, lang: str, 
     except Exception as e:  # noqa: BLE001 — shown to the user
         log.warning("voice-over failed: %s", e)
         st.update(status="failed", error=(str(e) or e.__class__.__name__)[:300], finished=time.time())
+    from .. import webhooks
+    webhooks.notify(st, job_id, "voiceover")
 
 
 @require("editor")
@@ -84,13 +86,20 @@ async def create(request: Request, user: dict):
         voice = {**voice, "vs_language": lang}
     name = (str(b.get("name") or "").strip() or "Voice-over · " + text[:30])[:120]
     ws = user["workspace_id"]
+    cb = None
+    if b.get("callback_url"):
+        from .. import webhooks
+        try:
+            cb = webhooks.check_url(str(b["callback_url"]))
+        except ValueError as e:
+            raise ApiError(422, str(e))
     with _LOCK:
         for k in [k for k, j in _JOBS.items() if j.get("finished") and time.time() - j["finished"] > 3600]:
             _JOBS.pop(k, None)
         if any(j["status"] == "running" and j["ws"] == ws for j in _JOBS.values()):
             raise ApiError(429, "एक आवाज़ अभी बन रही है — ख़त्म होने दें")
         job_id = uuid.uuid4().hex[:16]
-        _JOBS[job_id] = {"status": "running", "ws": ws, "started": time.time()}
+        _JOBS[job_id] = {"status": "running", "ws": ws, "started": time.time(), "callback": cb}
     threading.Thread(target=_run, args=(job_id, ws, user["id"], text, voice, lang, speed, name), daemon=True).start()
     return ok({"job_id": job_id}, 202)
 
