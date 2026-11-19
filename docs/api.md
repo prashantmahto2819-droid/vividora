@@ -24,6 +24,7 @@ n8n, Zapier, Make, अपनी app या script से Vividora के 3 क�
 | POST | `/image-to-3d` | multipart `file`, `name?`, `callback_url?` → `202 {job_id}` (1–3 मिनट) |
 | GET / POST | `/models3d` | 3D models की list / तैयार `.glb` upload (multipart `file`, `name`) |
 | POST | `/character-video` | JSON `{glb \| profile, lines:[{text,voice?}], animation?, camera?, seconds?, width?, height?, scene?, lighting?}` → `202 {job_id}` |
+| POST | `/auto-sfx` | JSON `{project_id \| (effects + duration), cut_times?, density?: low/normal/high, level?: 0.3–1.5}` → `200 {sfx:[…], added}` — timeline (title / B-roll / sticker / cut) देखकर whoosh, pop, tick अपने-आप; सेव नहीं करता, editor `effects.sfx` में डालना आपके हाथ में |
 | GET | `/jobs/{job_id}` | `status`: `queued/running/done/failed` (+ `file` जब done) |
 | GET | `/files/{file_id}` | नतीजा download (key चाहिए, link expire नहीं होता) |
 
@@ -82,3 +83,9 @@ let j; do { await new Promise(r => setTimeout(r, 4000)); j = await (await fetch(
 - Key सिर्फ़ SHA-256 hash के रूप में सेव होती है; दोबारा नहीं देखी जा सकती — खो जाए तो नई बनाएँ।
 - हर key अपने workspace तक सीमित; दूसरी workspace का data नहीं दिखता।
 - Key को code repo, screenshot या chat में न डालें।
+
+## Sound effects (Auto SFX)
+* Editor → inspector → **🔊 Auto SFX** (कम / सामान्य / ज़्यादा) — B-roll पर whoosh (तस्वीर से थोड़ा *पहले*), title/sticker पर pop (ठीक उसी frame), ज़्यादा density पर jump-cut पर हल्की tick। हर आवाज़ narration के नीचे अपने-आप दबती है (`duck`), अपने हाथ से रखी आवाज़ें नहीं छूती — दोबारा दबाने पर सिर्फ़ `asfx_` वाली बदलती हैं।
+* Starter pack में अब 29 SFX हैं (`server/tools/make_sfx.py` से numpy में बने, CC0)। नए जोड़ने: Settings → Library → Starter pack फिर से।
+* **Earshot / अपनी WAV files:** `MEDIA_ROOT/incoming/sfx/<tag>/file.wav` में डालें, फिर `POST /api/library/import-sfx-dir` (admin)। folder का नाम tag बन जाता है।
+* **Openverse SFX:** Library → वेब खोज → "Sound effects — Openverse"। सिर्फ़ commercial-safe CC (CC0 / PDM / BY / BY-SA) दिखते हैं; credit/licence हर item में सेव रहता है (BY/BY-SA में video description में credit देना होगा)।

@@ -171,8 +171,8 @@ def create_app() -> Starlette:
     api_routes += voicestudio_api.routes  # VoiceStudio: 41-model TTS (self-hosted, localhost:3900)
     from .api import voiceover_api
     api_routes += voiceover_api.routes  # editor voice-over: text → library 'voice' item (async)
-    from .api import keys_api, v1_api
-    api_routes += keys_api.routes + v1_api.routes  # API keys + public /api/v1 integration API (n8n, Zapier, your own apps)
+    from .api import keys_api, sfx_api, v1_api
+    api_routes += keys_api.routes + sfx_api.routes + v1_api.routes  # API keys + public /api/v1 integration API (n8n, Zapier, your own apps)
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]
     if (settings.web_dist / "assets").exists():
         routes.append(Mount("/assets", StaticFiles(directory=settings.web_dist / "assets"), name="assets"))

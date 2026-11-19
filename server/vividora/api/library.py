@@ -193,6 +193,43 @@ def install_starter(workspace_id: str, user_id: str | None = None, only_new_sinc
     return n
 
 
+INCOMING_SFX = "incoming/sfx"
+
+
+def import_dir(workspace_id: str, user_id: str | None, *, move: bool = False) -> dict:
+    """Import every audio file from MEDIA_ROOT/incoming/sfx into the library as SFX (e.g. WAVs rendered offline with Earshot).
+    Tags come from sub-folder names (incoming/sfx/whoosh/x.wav → tag "whoosh"); a licence note goes with each file."""
+    from ..config import settings
+    root = (settings.media_root / INCOMING_SFX).resolve()
+    if not root.is_dir():
+        return {"added": 0, "skipped": 0, "dir": INCOMING_SFX, "note": "folder नहीं है — बनाकर उसमें .wav/.mp3 डालें"}
+    have = {r["name"] for r in db.rows(db.conn().execute(
+        "SELECT name FROM library WHERE workspace_id = ? AND kind = 'sfx' AND source = 'import-dir'", (workspace_id,)))}
+    added = skipped = 0
+    for f in sorted(root.rglob("*")):
+        if not f.is_file() or f.is_symlink() or f.suffix.lower() not in KINDS["sfx"]:
+            continue
+        nice = f.stem.replace("_", " ").strip()[:120]
+        if nice in have:
+            skipped += 1
+            continue
+        rel = f.relative_to(root)
+        tags = ",".join(["sfx", "imported", *[p.lower() for p in rel.parts[:-1]]])
+        _add_file(workspace_id, user_id, "sfx", f, name=nice, tags=tags, source="import-dir",
+                  license="own / generated offline (e.g. Earshot, MIT code — output is yours)", move=move)
+        have.add(nice)
+        added += 1
+    return {"added": added, "skipped": skipped, "dir": INCOMING_SFX}
+
+
+@require("admin")
+async def import_sfx_dir(request: Request, user: dict):
+    res = await run_in_threadpool(import_dir, user["workspace_id"], user["id"])
+    with db.tx() as c:
+        service.log(c, user["workspace_id"], "library.import_dir", user_id=user["id"], detail=res)
+    return ok(res)
+
+
 @require("admin")
 async def starter(request: Request, user: dict):
     from starlette.concurrency import run_in_threadpool
@@ -495,7 +532,7 @@ def _fetch_trending() -> list[dict]:
 
 @require("viewer")
 async def search_free(request: Request, user: dict):
-    """Search free libraries. source: openverse-audio | openverse-image | pixabay-video | pixabay-image | jamendo | youtube-audio | freesound | tenor | tenor-gif | tenor-trending"""
+    """Search free libraries. source: openverse-audio | openverse-sfx | openverse-image | pixabay-video | pixabay-image | jamendo | youtube-audio | freesound | tenor | tenor-gif | tenor-trending"""
     src = request.query_params.get("source", "openverse-audio")
     q = (request.query_params.get("q") or "").strip()[:100]
     if not q:
@@ -504,8 +541,10 @@ async def search_free(request: Request, user: dict):
     def work() -> list[dict]:
         out: list[dict] = []
         if src.startswith("openverse"):
-            kind = "audio" if src.endswith("audio") else "images"
-            data = _http_json(f"https://api.openverse.org/v1/{kind}/?q={urllib.parse.quote(q)}&license_type=commercial&page_size=30")
+            kind = "audio" if src.endswith(("audio", "sfx")) else "images"
+            as_sfx = src.endswith("sfx")
+            extra = "&category=sound_effect" if as_sfx else ""
+            data = _http_json(f"https://api.openverse.org/v1/{kind}/?q={urllib.parse.quote(q)}&license_type=commercial{extra}&page_size=30")
             for r in data.get("results", []):
                 lic = (r.get("license") or "").lower()
                 if lic not in SAFE_CC:
@@ -514,7 +553,7 @@ async def search_free(request: Request, user: dict):
                             "duration": (r.get("duration") or 0) / 1000 if kind == "audio" else None,
                             "license": f"CC {lic.upper()} {r.get('license_version') or ''}".strip(), "creator": r.get("creator"),
                             "attribution": r.get("attribution"), "page": r.get("foreign_landing_url"),
-                            "kind": "music" if kind == "audio" else "image", "source": "openverse"})
+                            "kind": ("sfx" if as_sfx else "music") if kind == "audio" else "image", "source": "openverse"})
         elif src.startswith("pixabay"):
             key = os.getenv("PIXABAY_API_KEY")
             if not key:
@@ -940,6 +979,7 @@ async def worker_file(request: Request):
 
 routes = [
     Route("/library/starter", starter, methods=["POST"]),
+    Route("/library/import-sfx-dir", import_sfx_dir, methods=["POST"]),
     Route("/library/search", search_free),
     Route("/library/import", import_free, methods=["POST"]),
     Route("/library/trending", trending),

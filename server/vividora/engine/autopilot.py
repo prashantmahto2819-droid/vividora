@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 import re
 
-from . import analyze, autoedit, metadata, shorts
+from . import analyze, autoedit, autosfx, metadata, shorts
 from .catalog import GRADE_PRESETS
 
 HOOK_MAX_WORDS = 8
@@ -303,6 +303,11 @@ def plan(project: dict, workspace_settings: dict, library: list[dict], clip: dic
     for b in effects["broll"]:
         if b.get("fit") != "free" and not b.get("layout"):
             b["layout"] = default_layout
+    if ap["sfx"] and any(m.get("kind") == "sfx" for m in library):
+        try:  # whoosh on B-roll, pop on titles — placed from what is on the timeline (see engine/autosfx.py)
+            effects = autosfx.apply(effects, library, out_dur=out_dur, density="low")
+        except Exception:  # noqa: BLE001 — sound effects are a bonus; never break the plan
+            pass
     presets = (["yt-short"] if clip else ["yt-short", "ig-reel", "fb-reel"]) if is_short_source else ["yt-long"]
     return {
         "presets": presets,

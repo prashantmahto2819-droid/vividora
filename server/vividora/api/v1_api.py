@@ -15,7 +15,7 @@ from starlette.routing import Route
 
 from .. import __version__, db, storage
 from ..config import settings
-from . import chars3d_api, triposr_api, voiceover_api
+from . import chars3d_api, sfx_api, triposr_api, voiceover_api
 from .deps import ApiError, ok, require
 
 
@@ -128,6 +128,17 @@ def spec() -> dict:
                         "animation": {"type": "string"}, "camera": {"type": "string", "enum": ["full", "medium", "close", "wide"]},
                         "seconds": {"type": "number"}, "width": {"type": "integer"}, "height": {"type": "integer"}}}}}},
                 "responses": {"202": _JOB_REF}}},
+            "/v1/auto-sfx": {"post": {
+                "summary": "Auto sound effects: places whoosh/pop/tick sounds from the timeline events (titles, B-roll, stickers, cuts)",
+                "requestBody": {"required": True, "content": {"application/json": {"schema": {
+                    "type": "object", "properties": {
+                        "project_id": {"type": "string", "description": "use this project's saved effects + cuts"},
+                        "effects": {"type": "object", "description": "editor effects (alternative to project_id)"},
+                        "duration": {"type": "number", "description": "output length in seconds (needed with effects)"},
+                        "cut_times": {"type": "array", "items": {"type": "number"}},
+                        "density": {"type": "string", "enum": ["low", "normal", "high"]},
+                        "level": {"type": "number", "minimum": 0.3, "maximum": 1.5}}}}}},
+                "responses": {"200": {"description": "{sfx:[...], added:n}"}}}},
             "/v1/jobs/{job_id}": {"get": {"summary": "Job status: running | done | failed (+ file when done)",
                                           "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
                                           "responses": {"200": {"description": "OK"}}}},
@@ -193,6 +204,7 @@ routes = [
     Route("/v1/models3d", triposr_api.models),
     Route("/v1/models3d", triposr_api.import_glb, methods=["POST"]),
     Route("/v1/character-video", character_video, methods=["POST"]),
+    Route("/v1/auto-sfx", sfx_api.auto, methods=["POST"]),
     Route("/v1/jobs/{job_id}", job),
     Route("/v1/files/{file_id}", files),
     Route("/v1/openapi.json", openapi),
