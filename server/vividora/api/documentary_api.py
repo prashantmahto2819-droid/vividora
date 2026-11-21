@@ -487,6 +487,86 @@ def _reserve_upload(ws: str) -> str:
     return uid
 
 
+def _ig_run(uid: str, conn_id: str, item_id: str, caption: str):
+    from ..config import settings
+    from ..publish import meta
+    from ..security import make_token
+    st = _JOBS[uid]
+    try:
+        if settings.publish_dry_run:
+            st.update(status="done", progress=100, message="dry-run: Instagram पर कुछ नहीं गया", url="(dry-run)", finished=time.time())
+            return
+        conn = db.get("connections", conn_id)
+        sec = conn["secrets"]
+        url = f"{settings.public_url.rstrip('/')}/publib/{make_token(item_id, kind='publib', hours=48)}"
+        st.update(progress=10, message="Instagram वीडियो उठा रहा है और process कर रहा है (कुछ मिनट)…")
+        res = meta.ig_publish_reel(sec["ig_id"], sec["page_token"], url, caption, on_progress=lambda f: st.update(progress=int(10 + 85 * max(0.0, min(1.0, float(f or 0))))))
+        st.update(status="done", progress=100, message="Instagram पर live हो गया", url=res["url"], remote_id=res["remote_id"], finished=time.time())
+    except Exception as e:  # noqa: BLE001 — shown to the user
+        log.warning("instagram publish failed: %s", e)
+        st.update(status="failed", error=(str(e) or e.__class__.__name__)[:300], finished=time.time())
+
+
+def _ig_conn(user: dict, cid) -> dict:
+    conn = db.get("connections", str(cid or ""))
+    if not conn or conn["workspace_id"] != user["workspace_id"] or conn["platform"] != "instagram" or not (conn["secrets"] or {}).get("ig_id"):
+        raise ApiError(404, "Instagram account connect नहीं है — Dashboard → Connections (Meta)")
+    return conn
+
+
+@require("editor")
+async def instagram_publish(request: Request, user: dict):
+    """Post a finished documentary / Short (Library video) as an Instagram Reel on YOUR connected account.
+    Instagram has no private-draft mode: this goes LIVE immediately, so the request must carry confirm:true."""
+    from ..config import settings
+    b = await body(request)
+    if b.get("confirm") is not True:
+        raise ApiError(422, "Instagram पर यह तुरंत live होगा — confirm:true भेजें (UI में टिक करें)")
+    if not settings.public_url and not settings.publish_dry_run:
+        raise ApiError(409, "PUBLIC_URL सेट नहीं है — Instagram को वीडियो का public link चाहिए (.env में PUBLIC_URL=https://studio…)")
+    item = db.get("library", str(b.get("library_id") or ""))
+    if not item or item["workspace_id"] != user["workspace_id"] or item["kind"] not in ("broll", "video"):
+        raise ApiError(404, "वीडियो Library में नहीं मिला")
+    conn = _ig_conn(user, b.get("connection_id"))
+    caption = str(b.get("caption") or item["name"]).strip()[:2200]
+    if not caption:
+        raise ApiError(422, "caption चाहिए")
+    m = item.get("meta") or {}
+    warn = []
+    if m.get("width") and m.get("height") and m["width"] >= m["height"]:
+        warn.append("यह वीडियो landscape है — Reels के लिए 9:16 (Portrait/Shorts) सबसे अच्छा रहता है")
+    uid = _reserve_upload(user["workspace_id"])
+    _JOBS[uid]["warnings"] = warn
+    threading.Thread(target=_ig_run, args=(uid, conn["id"], item["id"], caption), daemon=True).start()
+    return ok({"job_id": uid, "warnings": warn}, 202)
+
+
+@require("viewer")
+async def instagram_insights(request: Request, user: dict):
+    """Latest reels of the connected Instagram account with views / reach / saves / shares / avg watch time + simple takeaways."""
+    from ..engine import analytics
+    cid = request.query_params.get("connection_id")
+    conn = _ig_conn(user, cid)
+    sec = conn["secrets"]
+    try:
+        rows = await run_in_threadpool(lambda: analytics.ig_recent(sec["ig_id"], sec["page_token"], 12))
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(502, f"Instagram से data नहीं आया: {str(e)[:200]}")
+    reels = [r for r in rows if r.get("views") or r.get("reach")]
+    tips = []
+    if reels:
+        best = max(reels, key=lambda r: r["views"] or 0)
+        tips.append(f"सबसे ज़्यादा views: «{best['caption'][:50] or best['id']}» ({best['views']})")
+        sv = [r for r in reels if r["save_rate"] is not None]
+        if sv:
+            bs = max(sv, key=lambda r: r["save_rate"])
+            tips.append(f"सबसे ज़्यादा saves/reach: «{bs['caption'][:50] or bs['id']}» ({bs['save_rate'] * 100:.1f}%) — ऐसे ही content और बनाएँ")
+        w = [r["avg_watch_s"] for r in reels if r["avg_watch_s"]]
+        if w:
+            tips.append(f"औसत watch time {sum(w) / len(w):.1f} सेकंड — शुरुआती 3 सेकंड में hook रखें")
+    return ok({"reels": rows, "tips": tips})
+
+
 @require("editor")
 async def preview(request: Request, user: dict):
     """Which Library picture each scene would get (no rendering): [{index, library_id, name}|null]."""
@@ -526,6 +606,8 @@ routes = [
     Route("/documentary/shorts", shorts, methods=["POST"]),
     Route("/documentary/series", series, methods=["POST"]),
     Route("/documentary/youtube", youtube_upload, methods=["POST"]),
+    Route("/documentary/instagram", instagram_publish, methods=["POST"]),
+    Route("/documentary/instagram/insights", instagram_insights),
     Route("/documentary/drafts", drafts_list),
     Route("/documentary/drafts", draft_save, methods=["POST"]),
     Route("/documentary/drafts/{draft_id}", draft_get),

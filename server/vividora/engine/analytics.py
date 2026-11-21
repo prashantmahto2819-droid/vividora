@@ -44,19 +44,46 @@ def yt_stats(video_ids: list[str], secrets: dict | None) -> dict[str, dict]:
     return out
 
 
+_IG_MAP = {"views": "views", "plays": "views", "reach": "reach", "shares": "shares", "saved": "saves",
+           "total_interactions": "interactions", "ig_reels_avg_watch_time": "avg_watch_ms"}
+
+
 def ig_stats(media_id: str, page_token: str) -> dict:
     base = request("GET", f"https://graph.facebook.com/v21.0/{media_id}",
                    params={"fields": "like_count,comments_count,timestamp", "access_token": page_token})
     out = {"likes": int(base.get("like_count", 0) or 0), "comments": int(base.get("comments_count", 0) or 0),
            "published": base.get("timestamp")}
-    try:
-        ins = request("GET", f"https://graph.facebook.com/v21.0/{media_id}/insights",
-                      params={"metric": "plays,reach,shares,saved", "access_token": page_token})
+    # Meta renamed reels "plays" → "views" (2025): try the new metric set first, fall back to the old one
+    for metrics in ("views,reach,shares,saved,total_interactions,ig_reels_avg_watch_time", "plays,reach,shares,saved"):
+        try:
+            ins = request("GET", f"https://graph.facebook.com/v21.0/{media_id}/insights",
+                          params={"metric": metrics, "access_token": page_token})
+        except PublishError:
+            continue
         for m in ins.get("data", []):
-            val = (m.get("values") or [{}])[0].get("value", 0)
-            out[{"plays": "views", "reach": "reach", "shares": "shares", "saved": "saves"}.get(m["name"], m["name"])] = int(val or 0)
-    except PublishError:
-        pass
+            val = (m.get("values") or [{}])[0].get("value", m.get("total_value", {}).get("value", 0))
+            out[_IG_MAP.get(m["name"], m["name"])] = int(val or 0)
+        break
+    return out
+
+
+def ig_recent(ig_id: str, page_token: str, limit: int = 12) -> list[dict]:
+    """The account's latest media with per-reel numbers: [{id, caption, permalink, timestamp, type, views, reach, saves, shares, likes, comments,
+    avg_watch_s, save_rate, share_rate}] (rates are per reach). One Graph call per media → keep limit small."""
+    lst = request("GET", f"https://graph.facebook.com/v21.0/{ig_id}/media",
+                  params={"fields": "id,caption,media_type,media_product_type,permalink,timestamp", "limit": max(1, min(25, limit)), "access_token": page_token})
+    out = []
+    for m in lst.get("data", [])[:limit]:
+        try:
+            st = ig_stats(m["id"], page_token)
+        except PublishError:
+            st = {}
+        reach = st.get("reach") or 0
+        out.append({"id": m["id"], "caption": (m.get("caption") or "")[:100], "permalink": m.get("permalink"), "timestamp": m.get("timestamp"),
+                    "type": m.get("media_product_type") or m.get("media_type"), "views": st.get("views", 0), "reach": reach, "saves": st.get("saves", 0),
+                    "shares": st.get("shares", 0), "likes": st.get("likes", 0), "comments": st.get("comments", 0),
+                    "avg_watch_s": round((st.get("avg_watch_ms") or 0) / 1000, 1),
+                    "save_rate": round(st.get("saves", 0) / reach, 4) if reach else None, "share_rate": round(st.get("shares", 0) / reach, 4) if reach else None})
     return out
 
 

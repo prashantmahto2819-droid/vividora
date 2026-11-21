@@ -231,6 +231,7 @@ export function docView() {
     </div>
     <div id="dc-status"></div>
     <div id="dc-yt"></div>
+    <div id="dc-ig"></div>
   </div><div class="tl-box">
     <h3 style="margin:0 0 .4rem">3. Series (कई episodes एक साथ)</h3>
     <div class="field"><label>Series का topic (AI key चाहिए)</label><input id="sr-topic" maxlength="200" placeholder="जैसे: हिमालय की पूरी कहानी"></div>
@@ -238,6 +239,12 @@ export function docView() {
     <button class="btn" id="sr-plan">📺 Episodes की list बनाओ</button>
     <div id="sr-eps"></div>
     <div id="sr-status"></div>
+  </div><div class="tl-box">
+    <h3 style="margin:0 0 .4rem">4. Instagram analysis</h3>
+    <p class="small muted">आपके connected Instagram account की पिछली 12 posts: views, reach, saves, shares, औसत watch time — और क्या बेहतर चला।</p>
+    <div class="tl-row"><div class="field"><label>Account</label><select id="ia-conn"><option value="">— connection नहीं मिला —</option></select></div></div>
+    <button class="btn" id="ia-go">📊 Analyse करो</button>
+    <div id="ia-out"></div>
   </div></div>`;
 }
 export function docBind(c) {
@@ -351,10 +358,34 @@ export function docBind(c) {
       };
     } catch (er) { $("#sr-status").innerHTML = `<p class="small err">${esc(er.message)}</p>`; } finally { e.target.disabled = false; }
   };
+  const igBox = (j, ig) => {
+    const box = $("#dc-ig"); if (!box) return;
+    if (!ig.length) { box.innerHTML = ""; return; }
+    const cap = `${docState.title || (j.item && j.item.name) || ""}\n\n#documentary #facts${j.ai_used ? "\n(AI-generated visuals)" : ""}`;
+    box.innerHTML = `<div class="tl-item" style="display:block;margin-top:.6rem"><b>📸 Instagram Reel</b> <span class="small muted">(Instagram में private draft नहीं होता — यह <b>तुरंत live</b> होता है; 9:16 Short सबसे अच्छा)</span>
+      <select id="ig-conn" style="width:100%;margin:.3rem 0">${ig.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>
+      <textarea id="ig-cap" rows="4" style="width:100%" maxlength="2200">${esc(cap)}</textarea>
+      <label class="small" style="display:block"><input type="checkbox" id="ig-ok"> मैं समझता हूँ कि यह Instagram पर अभी live हो जाएगा</label>
+      <button class="btn small primary" id="ig-go">📸 Reel के रूप में post करें</button><div id="ig-st" class="small" style="margin-top:.3rem"></div></div>`;
+    $("#ig-go").onclick = async (ev) => {
+      if (!$("#ig-ok").checked) { ctx.toast("पहले टिक करें कि यह live होगा"); return; }
+      ev.target.disabled = true; const o = (h, er) => ($("#ig-st").innerHTML = `<span class="${er ? "err" : ""}">${h}</span>`);
+      try {
+        const b = await ctx.api("POST", "/documentary/instagram", { library_id: j.item.id, connection_id: $("#ig-conn").value, caption: $("#ig-cap").value, confirm: true });
+        if ((b.warnings || []).length) o("⚠ " + b.warnings.map(esc).join("<br>⚠ "));
+        const tick = async () => { const u = await ctx.api("GET", "/documentary/" + b.job_id);
+          if (u.status === "running") { o(`⏳ ${u.progress || 0}% ${esc(u.message || "")}`); setTimeout(tick, 4000); return; }
+          o(u.status === "done" ? `✅ ${esc(u.message || "")} ${u.url && u.url.startsWith("http") ? `<a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(u.url)}</a>` : ""}` : "❌ " + esc(u.error || "नहीं हुआ"), u.status !== "done");
+          ev.target.disabled = false; };
+        tick();
+      } catch (er) { o(esc(er.message), true); ev.target.disabled = false; }
+    };
+  };
   const ytBox = async (j) => {
     const box = $("#dc-yt"); if (!box || !j.item) return;
     const r = await ctx.api("GET", "/connections").catch(() => ({ connections: [] }));
     const yt = (r.connections || []).filter((c) => c.platform === "youtube");
+    igBox(j, (r.connections || []).filter((c) => c.platform === "instagram"));
     if (!yt.length) { box.innerHTML = `<p class="small muted">YouTube पर भेजने के लिए पहले Dashboard → Connections में channel जोड़ें।</p>`; return; }
     box.innerHTML = `<div class="tl-item" style="display:block;margin-top:.6rem"><b>▶ YouTube पर private draft</b> <span class="small muted">(public नहीं होता — YouTube Studio में देखकर आप ख़ुद publish करें)</span>
       <select id="yt-conn" style="width:100%;margin:.3rem 0">${yt.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>
@@ -371,6 +402,18 @@ export function docBind(c) {
         tick();
       } catch (er) { o(esc(er.message), true); ev.target.disabled = false; }
     };
+  };
+  ctx.api("GET", "/connections").then((r) => { const ig = (r.connections || []).filter((c) => c.platform === "instagram"); const sel = $("#ia-conn"); if (sel && ig.length) sel.innerHTML = ig.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join(""); }).catch(() => {});
+  $("#ia-go").onclick = async (e) => {
+    const id = $("#ia-conn").value; if (!id) { ctx.toast("पहले Dashboard → Connections में Instagram (Meta) जोड़ें"); return; }
+    e.target.disabled = true; $("#ia-out").innerHTML = `<p class="small muted">Instagram से data आ रहा है…</p>`;
+    try {
+      const r = await ctx.api("GET", "/documentary/instagram/insights?connection_id=" + encodeURIComponent(id));
+      const pct = (x) => (x == null ? "–" : (x * 100).toFixed(1) + "%");
+      $("#ia-out").innerHTML = (r.tips.length ? `<ul class="small" style="padding-left:1.1rem">${r.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : "") +
+        `<div style="overflow-x:auto"><table class="small" style="border-collapse:collapse;width:100%"><tr><th align="left">Post</th><th>Views</th><th>Reach</th><th>Saves</th><th>Shares</th><th>Likes</th><th>Watch s</th><th>Save%</th></tr>` +
+        r.reels.map((x) => `<tr><td><a href="${esc(x.permalink || "#")}" target="_blank" rel="noopener">${esc(x.caption || x.id)}</a></td><td align="right">${x.views}</td><td align="right">${x.reach}</td><td align="right">${x.saves}</td><td align="right">${x.shares}</td><td align="right">${x.likes}</td><td align="right">${x.avg_watch_s || "–"}</td><td align="right">${pct(x.save_rate)}</td></tr>`).join("") + `</table></div>`;
+    } catch (er) { $("#ia-out").innerHTML = `<p class="small err">${esc(er.message)}</p>`; } finally { e.target.disabled = false; }
   };
   const poll = async (id) => {
     try {

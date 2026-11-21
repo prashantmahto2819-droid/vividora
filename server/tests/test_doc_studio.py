@@ -57,6 +57,35 @@ def units():
         llm.available, llm.ask_json = old_av, old_ask
 
 
+def ig_units():
+    from vividora.engine import analytics
+    from vividora.publish.http import PublishError
+    calls = []
+
+    def fake(method, url, params=None, **k):
+        calls.append((url.rsplit("/", 1)[-1], (params or {}).get("metric")))
+        if url.endswith("/ig1/media"):
+            return {"data": [{"id": "m1", "caption": "पहली reel", "media_product_type": "REELS", "permalink": "https://ig/1", "timestamp": "t"},
+                             {"id": "m2", "caption": "old", "media_product_type": "REELS"}]}
+        if url.endswith("/insights"):
+            if params["metric"].startswith("views") and "m2" in url:
+                raise PublishError("unsupported metric")
+            names = params["metric"].split(",")
+            vals = {"views": 1000, "plays": 800, "reach": 500, "shares": 20, "saved": 50, "total_interactions": 90, "ig_reels_avg_watch_time": 4200}
+            return {"data": [{"name": n, "values": [{"value": vals[n]}]} for n in names]}
+        return {"like_count": 70, "comments_count": 5, "timestamp": "t"}
+    old = analytics.request
+    analytics.request = fake
+    try:
+        rows = analytics.ig_recent("ig1", "tok", 5)
+        r0, r1 = rows
+        check("ig insights: new metric set → views, saves, avg watch seconds, per-reach rates",
+              r0["views"] == 1000 and r0["saves"] == 50 and r0["avg_watch_s"] == 4.2 and r0["save_rate"] == 0.1 and r0["share_rate"] == 0.04, r0)
+        check("ig insights: old 'plays' set is the fallback when 'views' is rejected", r1["views"] == 800 and r1["reach"] == 500, r1)
+    finally:
+        analytics.request = old
+
+
 def ai_video_units():
     from vividora.engine import aivideo
     tmp = Path(tempfile.mkdtemp(prefix="vivi_av_"))
@@ -255,6 +284,33 @@ def e2e():
             check("dry-run upload finishes without touching YouTube", j2 and j2["status"] == "done" and j2["url"] == "(dry-run)", j2)
             st, r = call("POST", "/documentary/youtube", {"library_id": it["id"], "connection_id": "nope", "title": "x"}, tok)
             check("unknown connection → 404", st == 404, (st, r))
+        # ---- instagram (dry run) + guards
+            code2 = code.replace("'platform':'youtube'", "'platform':'instagram'").replace("{'refresh_token':'r'}", "{'ig_id':'123','page_token':'pt'}")
+            icid = subprocess.run([sys.executable, "-c", code2], env=env, capture_output=True, text=True, cwd=str(HERE)).stdout.strip().splitlines()[-1]
+            st, r = call("POST", "/documentary/instagram", {"library_id": it["id"], "connection_id": icid, "caption": "hi"}, tok)
+            check("instagram without confirm:true → 422 (it goes live)", st == 422, (st, r))
+            st, r = call("POST", "/documentary/instagram", {"library_id": it["id"], "connection_id": cid, "caption": "hi", "confirm": True}, tok)
+            check("a YouTube connection is not accepted for Instagram → 404", st == 404, (st, r))
+            st, r = call("POST", "/documentary/instagram", {"library_id": it["id"], "connection_id": icid, "caption": "नया reel #documentary", "confirm": True}, tok)
+            check("instagram publish accepted (dry run)", st == 202 and r.get("job_id"), (st, r))
+            j3 = wait(r["job_id"], tok, 60)
+            check("instagram dry-run finishes without calling Meta", j3 and j3["status"] == "done" and j3["url"] == "(dry-run)", j3)
+            tcode = "import sys;sys.path.insert(0,%r);from vividora.security import make_token;print(make_token(%r, kind='publib', hours=1))" % (str(HERE), it["id"])
+            ptok = subprocess.run([sys.executable, "-c", tcode], env=env, capture_output=True, text=True, cwd=str(HERE)).stdout.strip().splitlines()[-1]
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/publib/{ptok}", timeout=30) as resp:
+                    pub_ok, head = resp.status == 200, resp.read(12)
+            except urllib.error.HTTPError as e:
+                pub_ok, head = False, e.code
+            check("signed /publib link serves the library video (Instagram fetches it)", pub_ok and head[4:8] == b"ftyp", head)
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/publib/garbage", timeout=30)
+                bad = 200
+            except urllib.error.HTTPError as e:
+                bad = e.code
+            check("bad /publib token → 404", bad == 404, bad)
+            st, r = call("GET", f"/documentary/instagram/insights?connection_id={cid}", None, tok)
+            check("insights refuse a non-instagram connection", st == 404, (st, r))
         # ---- series
         st, r = call("POST", "/documentary/series", {"topic": "हिमालय", "episodes": 2}, tok)
         check("series outline from the LLM", st == 200 and len(r["episodes"]) == 2 and r["series"] == "हिमालय", (st, r))
@@ -296,6 +352,7 @@ def e2e():
 
 if __name__ == "__main__":
     units()
+    ig_units()
     ai_video_units()
     e2e()
     print("\nALL PASS" if not fails else f"\n{fails} FAILED")

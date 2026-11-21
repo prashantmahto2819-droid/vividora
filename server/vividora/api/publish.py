@@ -473,4 +473,18 @@ routes = [
     Route("/projects/{project_id}/metadata", suggest_metadata, methods=["POST"]),
     Route("/projects/{project_id}/publish-plan", publish_plan_run, methods=["POST"]),
 ]
-public_routes = [Route("/pub/{token}", public_file)]
+async def public_lib_file(request: Request):
+    """Signed public link (48 h) for a Library video — Instagram fetches Documentary reels from here."""
+    data = read_token(request.path_params["token"], kind="publib")
+    if not data:
+        raise ApiError(404, "link expired")
+    it = db.get("library", data["sub"])
+    if not it or it["kind"] not in ("broll", "video"):
+        raise ApiError(404, "not found")
+    path = storage.abs_path(it["path"])
+    if not path.exists():
+        raise ApiError(404, "file missing")
+    return FileResponse(path, media_type=it.get("mime") or "video/mp4", filename=Path(it["path"]).name)
+
+
+public_routes = [Route("/pub/{token}", public_file), Route("/publib/{token}", public_lib_file)]

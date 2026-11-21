@@ -134,6 +134,10 @@ def t_rig(a):
     return _finish(_wait(j["job_id"]), a.get("save_to"))
 
 
+def t_ig_insights(a):
+    return _req("GET", "/documentary/instagram/insights?connection_id=" + str(a["connection_id"]))
+
+
 def t_models(a):
     return _req("GET", "/v1/models3d")
 
@@ -238,6 +242,8 @@ TOOLS = {
         "build": {"type": "boolean"}, "language": {"type": "string"}, "minutes": {"type": "number"}, "voice": {"type": "string"}, "ai_images": {"type": "boolean"}, **_WAIT})),
     "vividora_rig_model": (t_rig, "3D model (Library id) को cloud GPU (UniRig) पर auto-rig करता है → rigged .glb; पैसे वाला, 1–5 मिनट", _obj({
         "library_id": {"type": "string"}, "template": {"type": "string", "enum": ["mixamo", "vroid", "articulationxl"]}, "name": {"type": "string"}, **_WAIT}, ["library_id"])),
+    "vividora_instagram_insights": (t_ig_insights, "Connected Instagram की पिछली 12 posts के views/reach/saves/shares/watch time + tips (publish यहाँ से नहीं होता — वह UI में confirm के साथ)", _obj({
+        "connection_id": {"type": "string"}}, ["connection_id"])),
     "vividora_job_status": (t_job, "किसी job की स्थिति (running/done/failed + file)", _obj({"job_id": {"type": "string"}}, ["job_id"])),
     "vividora_download_file": (t_download, "Library की file (wav/glb/webm/mp4) local path पर सेव करें", _obj({
         "file_id": {"type": "string"}, "save_to": {"type": "string"}}, ["file_id", "save_to"])),
