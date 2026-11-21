@@ -161,6 +161,33 @@ def t_doc_build(a):
         WAIT_SECONDS = old
 
 
+def _batch(j: dict, save_to: str | None) -> dict:
+    global WAIT_SECONDS
+    old, WAIT_SECONDS = WAIT_SECONDS, 3600
+    try:
+        return _wait(j["job_id"])
+    finally:
+        WAIT_SECONDS = old
+
+
+def t_doc_shorts(a):
+    body = {k: a[k] for k in ("scenes", "title", "count", "pick", "voice", "lang", "orientation", "music_id", "ai_images", "stock") if a.get(k) is not None}
+    body["build"] = bool(a.get("build"))
+    j = _req("POST", "/v1/documentary/shorts", body)
+    if not body["build"] or a.get("wait", True) is False:
+        return j
+    return _batch(j, None)
+
+
+def t_doc_series(a):
+    body = {k: a[k] for k in ("topic", "episodes", "series", "language", "minutes", "voice", "lang", "orientation", "music_id", "ai_images", "stock", "ground") if a.get(k) is not None}
+    body["build"] = bool(a.get("build"))
+    j = _req("POST", "/v1/documentary/series", body, timeout=180)
+    if not body["build"] or a.get("wait", True) is False:
+        return j
+    return _batch(j, None)
+
+
 _WAIT = {"wait": {"type": "boolean", "description": "true (default): काम पूरा होने तक रुकें; false: सिर्फ़ job_id लौटाएँ"},
          "save_to": {"type": "string", "description": "नतीजा इस local path पर सेव करें (वैकल्पिक)"}}
 
@@ -195,6 +222,12 @@ TOOLS = {
         "voice": {"type": "string"}, "lang": {"type": "string"}, "speed": {"type": "number"},
         "orientation": {"type": "string", "enum": ["landscape", "portrait", "square"]}, "music_id": {"type": "string"},
         "stock": {"type": "boolean"}, "ai_images": {"type": "boolean", "description": "AI-generated pictures via the configured GPU API (default true)"}, **_WAIT}, ["scenes"])),
+    "vividora_documentary_shorts": (t_doc_shorts, "Documentary scenes → best 20–58 s Shorts/Reels (build=false: सिर्फ़ plan; build=true: portrait videos बनाता है)", _obj({
+        "scenes": {"type": "array", "items": {"type": "object"}}, "title": {"type": "string"}, "count": {"type": "integer"}, "build": {"type": "boolean"},
+        "pick": {"type": "array", "items": {"type": "integer"}}, "voice": {"type": "string"}, "ai_images": {"type": "boolean"}, "stock": {"type": "boolean"}, **_WAIT}, ["scenes"])),
+    "vividora_documentary_series": (t_doc_series, "Topic → series outline (build=false), या episodes देकर build=true से पूरी series बनती है (हर episode की scenes AI लिखता है)", _obj({
+        "topic": {"type": "string"}, "episodes": {"description": "outline के लिए संख्या; build के लिए [{title, summary}]"}, "series": {"type": "string"},
+        "build": {"type": "boolean"}, "language": {"type": "string"}, "minutes": {"type": "number"}, "voice": {"type": "string"}, "ai_images": {"type": "boolean"}, **_WAIT})),
     "vividora_job_status": (t_job, "किसी job की स्थिति (running/done/failed + file)", _obj({"job_id": {"type": "string"}}, ["job_id"])),
     "vividora_download_file": (t_download, "Library की file (wav/glb/webm/mp4) local path पर सेव करें", _obj({
         "file_id": {"type": "string"}, "save_to": {"type": "string"}}, ["file_id", "save_to"])),

@@ -116,7 +116,7 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                 if not src or not Path(src).exists():
                     src, kind = doc.title_card(sc.get("on_screen") or sc["narration"][:90], work / f"card{i}.png", size, i), "image"
                 visuals.append((Path(src), kind))
-            durs = doc.scene_durations(narr)
+            durs = doc.scene_durations(narr, [sc.get("hold", 0) for sc in scenes])
             clips = []
             for i, ((src, kind), d) in enumerate(zip(visuals, durs)):
                 st.update(progress=int(60 + 25 * i / n), message=f"scene {i + 1}/{n}: वीडियो बन रहा है")
@@ -134,9 +134,9 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                 if mrow and mrow["workspace_id"] == ws and mrow["kind"] == "music":
                     music_path = storage.abs_path(mrow["path"])
             ass = doc.build_captions([sc["narration"] for sc in scenes], narr, durs, size, work / "captions.ass") if p.get("captions") else None
-            out = doc.assemble(clips, durs, track, work / "documentary.mp4", sfx=sfx_path, music=music_path, work=work, captions=ass)
+            out = doc.assemble(clips, durs, track, work / "documentary.mp4", sfx=sfx_path, music=music_path, work=work, captions=ass, music_volume=p.get("music_volume", 0.14))
             chaps = doc.chapters(scenes, durs)
-            desc = doc.description(p["title"] or "Documentary", chaps, credits, p.get("sources"))
+            desc = doc.description(p["title"] or "Documentary", chaps, credits, p.get("sources"), p.get("series"))
             lic = "own narration; visuals: library + " + ("; ".join(credits) if credits else "title cards")
             item = _add_file(ws, user_id, "broll", out, name=(p["title"] or "Documentary")[:100], tags="documentary,auto", source="documentary",
                              license=lic[:900], analyse=False)
@@ -149,7 +149,7 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                 log.info("thumbnail failed: %s", e)
         with db.tx() as c:
             service.log(c, ws, "documentary.build", user_id=user_id, detail={"item_id": item["id"], "scenes": n})
-        st.update(status="done", progress=100, message="तैयार", item=_view(item), credits=credits, description=desc, thumbnail=thumb, finished=time.time())
+        st.update(status="done", progress=100, message="तैयार", item=_view(item), credits=credits, description=desc, thumbnail=thumb, ai_used=any("AI-generated" in c for c in credits), finished=time.time())
     except Exception as e:  # noqa: BLE001 — shown to the user
         log.warning("documentary failed: %s", e)
         st.update(status="failed", error=(str(e) or e.__class__.__name__)[:300], finished=time.time())
@@ -182,10 +182,9 @@ async def plan(request: Request, user: dict):
                 "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider()})
 
 
-@require("editor")
-async def build(request: Request, user: dict):
+def _params(b: dict, user: dict) -> tuple[dict, list[str]]:
+    """Validate a build request → (job params, warnings). Raises ApiError."""
     from ..engine import documentary as doc
-    b = await body(request)
     res = doc.normalize({"title": b.get("title"), "scenes": b.get("scenes")})
     if not res:
         raise ApiError(422, "scenes चाहिए (हर scene में narration)")
@@ -204,27 +203,277 @@ async def build(request: Request, user: dict):
         speed = max(0.7, min(1.4, float(b.get("speed") or 1.0)))
     except (TypeError, ValueError):
         speed = 1.0
-    cb = None
-    if b.get("callback_url"):
-        from .. import webhooks
-        try:
-            cb = webhooks.check_url(str(b["callback_url"]))
-        except ValueError as e:
-            raise ApiError(422, str(e))
-    ws = user["workspace_id"]
+    try:
+        mv = max(0.02, min(0.6, float(b.get("music_volume") if b.get("music_volume") is not None else 0.14)))
+    except (TypeError, ValueError):
+        mv = 0.14
+    ser = b.get("series") if isinstance(b.get("series"), dict) else None
+    p = {"scenes": res["scenes"], "title": res["title"], "voice": voice, "lang": lang, "orientation": orient, "speed": speed,
+         "music_id": b.get("music_id"), "music_volume": mv, "stock": b.get("stock", True) is not False,
+         "captions": b.get("captions", True) is not False, "ai_images": b.get("ai_images", True) is not False,
+         "series": ({"name": str(ser.get("name", ""))[:100], "i": int(ser.get("i") or 1), "titles": [str(t)[:100] for t in (ser.get("titles") or [])[:12]]} if ser else None),
+         "sources": [{"title": str(x.get("title", ""))[:120], "url": str(x.get("url", ""))[:300]} for x in (b.get("sources") or [])[:6] if isinstance(x, dict)]}
+    return p, warn
+
+
+def _callback(b: dict):
+    if not b.get("callback_url"):
+        return None
+    from .. import webhooks
+    try:
+        return webhooks.check_url(str(b["callback_url"]))
+    except ValueError as e:
+        raise ApiError(422, str(e))
+
+
+def _reserve(ws: str, extra: dict) -> str:
     with _LOCK:
         for k in [k for k, j in _JOBS.items() if j.get("finished") and time.time() - j["finished"] > 3600]:
             _JOBS.pop(k, None)
-        if any(j["status"] == "running" and j["ws"] == ws for j in _JOBS.values()):
+        if any(j["status"] == "running" and j["ws"] == ws and not j.get("child") for j in _JOBS.values()):
             raise ApiError(429, "एक documentary अभी बन रही है — ख़त्म होने दें")
         job_id = uuid.uuid4().hex[:16]
-        _JOBS[job_id] = {"status": "running", "ws": ws, "started": time.time(), "callback": cb, "progress": 1, "message": "शुरू", "warnings": warn}
-    p = {"scenes": res["scenes"], "title": res["title"], "voice": voice, "lang": lang, "orientation": orient, "speed": speed,
-         "music_id": b.get("music_id"), "stock": b.get("stock", True) is not False, "captions": b.get("captions", True) is not False,
-         "ai_images": b.get("ai_images", True) is not False,
-         "sources": [{"title": str(x.get("title", ""))[:120], "url": str(x.get("url", ""))[:300]} for x in (b.get("sources") or [])[:6] if isinstance(x, dict)]}
-    threading.Thread(target=_run, args=(job_id, ws, user["id"], p), daemon=True).start()
+        _JOBS[job_id] = {"status": "running", "ws": ws, "started": time.time(), "progress": 1, "message": "शुरू", **extra}
+    return job_id
+
+
+@require("editor")
+async def build(request: Request, user: dict):
+    b = await body(request)
+    p, warn = _params(b, user)
+    cb = _callback(b)
+    job_id = _reserve(user["workspace_id"], {"callback": cb, "warnings": warn})
+    threading.Thread(target=_run, args=(job_id, user["workspace_id"], user["id"], p), daemon=True).start()
     return ok({"job_id": job_id, "warnings": warn}, 202)
+
+
+MAX_BATCH = 12
+
+
+def _batch_run(batch_id: str, ws: str, user_id: str, items: list[dict], common: dict, user: dict):
+    """Build items one after another (each = one documentary job). An item is either ready scenes or {topic} to plan first."""
+    from ..engine import documentary as doc
+    st = _JOBS[batch_id]
+    n = len(items)
+    for k, it in enumerate(items):
+        row = st["items"][k]
+        try:
+            row["status"] = "running"
+            st.update(progress=int(100 * k / n), message=f"{k + 1}/{n}: {it.get('title') or it.get('topic') or ''}"[:120])
+            if not it.get("scenes"):
+                st.update(message=f"{k + 1}/{n}: scenes लिखे जा रहे हैं")
+                res = doc.plan(it["topic"], minutes=float(it.get("minutes") or common.get("minutes") or 3), language=str(common.get("language") or "hi"),
+                               ground=common.get("ground", True) is not False)
+                if not res:
+                    raise RuntimeError("AI से scenes नहीं बन पाए")
+                it = {**it, "scenes": res["scenes"], "sources": res.get("sources"), "title": it.get("title") or res["title"]}
+                row["title"] = it["title"]
+            p, _ = _params({**common, **it}, user)
+            cid = uuid.uuid4().hex[:16]
+            with _LOCK:
+                _JOBS[cid] = {"status": "running", "ws": ws, "started": time.time(), "progress": 1, "message": "शुरू", "child": True, "warnings": []}
+            _run(cid, ws, user_id, p)
+            ch = _JOBS[cid]
+            row.update(status=ch["status"], error=ch.get("error"), item=ch.get("item"), thumbnail=ch.get("thumbnail"), description=ch.get("description"),
+                       ai_used=ch.get("ai_used"), job_id=cid, scenes=len(p["scenes"]))
+        except Exception as e:  # noqa: BLE001 — one failed item must not stop the rest
+            log.warning("batch item %d failed: %s", k, e)
+            row.update(status="failed", error=(str(e) or e.__class__.__name__)[:300])
+    done = sum(1 for r in st["items"] if r["status"] == "done")
+    st.update(status="done" if done else "failed", progress=100, message=f"{done}/{n} तैयार", finished=time.time(),
+              error=None if done else "कोई भी नहीं बन पाई")
+
+
+def _start_batch(user: dict, items: list[dict], common: dict, label: str) -> str:
+    ws = user["workspace_id"]
+    rows = [{"title": str(it.get("title") or it.get("topic") or f"#{k + 1}")[:120], "status": "waiting"} for k, it in enumerate(items)]
+    bid = _reserve(ws, {"batch": True, "label": label, "items": rows, "warnings": []})
+    threading.Thread(target=_batch_run, args=(bid, ws, user["id"], items, common, user), daemon=True).start()
+    return bid
+
+
+_COMMON_KEYS = ("voice", "lang", "language", "speed", "orientation", "music_id", "music_volume", "stock", "captions", "ai_images", "minutes", "ground")
+
+
+def _common(b: dict) -> dict:
+    return {k: b[k] for k in _COMMON_KEYS if k in b}
+
+
+@require("editor")
+async def shorts(request: Request, user: dict):
+    """Pick the best 20–58 s runs of scenes for Shorts/Reels. build=true renders them (portrait) one after another."""
+    from ..engine import documentary as doc
+    b = await body(request)
+    res = doc.normalize({"title": b.get("title"), "scenes": b.get("scenes")})
+    if not res:
+        raise ApiError(422, "scenes चाहिए")
+    plan_ = doc.shorts_plan(res["scenes"], count=int(b.get("count") or 3))
+    if not plan_:
+        raise ApiError(422, "इन scenes से 20 सेकंड का Short नहीं बनता — और scenes जोड़ें")
+    if not b.get("build"):
+        return ok({"shorts": plan_})
+    chosen = b.get("pick")
+    if isinstance(chosen, list):
+        plan_ = [plan_[i] for i in chosen if isinstance(i, int) and 0 <= i < len(plan_)] or plan_
+    items = [{"title": (c["title"] + " #Shorts")[:100], "scenes": [res["scenes"][i] for i in c["indices"]]} for c in plan_]
+    common = {**_common(b), "orientation": "portrait"}
+    _params({**common, **items[0]}, user)  # fail fast on a bad voice etc.
+    return ok({"job_id": _start_batch(user, items, common, "shorts"), "shorts": plan_}, 202)
+
+
+@require("editor")
+async def series(request: Request, user: dict):
+    """Series: without build → episode outline (LLM). With build + episodes → plan and render every episode in order."""
+    from ..engine import documentary as doc
+    from ..engine import llm
+    b = await body(request)
+    if not b.get("build"):
+        topic = str(b.get("topic") or "").strip()
+        if len(topic) < 3:
+            raise ApiError(422, "series का topic चाहिए")
+        if not llm.available():
+            raise ApiError(409, ".env में GEMINI_API_KEY (या ANTHROPIC_API_KEY / Ollama) डालें — series के episodes AI से बनते हैं")
+        res = await run_in_threadpool(lambda: doc.series_plan(topic, int(b.get("episodes") or 4), str(b.get("language") or "hi")))
+        if not res:
+            raise ApiError(502, "AI से episodes नहीं बन पाए — दोबारा कोशिश करें")
+        return ok(res)
+    eps = [e for e in (b.get("episodes") or []) if isinstance(e, dict) and str(e.get("title") or "").strip()][:10]
+    name = str(b.get("series") or b.get("topic") or "Series")[:100]
+    if len(eps) < 2:
+        raise ApiError(422, "कम से कम 2 episodes चाहिए")
+    if not llm.available():
+        raise ApiError(409, "AI key चाहिए — हर episode की scenes AI लिखता है")
+    titles = [e["title"] for e in eps]
+    items = [{"topic": f"{name} — Episode {k + 1}: {e['title']}. {e.get('summary', '')} (Other episodes in this series: {'; '.join(t for t in titles if t != e['title'])}. "
+                       f"Do NOT repeat their content.)",
+              "title": f"{name} — Ep {k + 1}: {e['title']}"[:100], "series": {"name": name, "i": k + 1, "titles": titles}} for k, e in enumerate(eps)]
+    common = _common(b)
+    _params({**common, "scenes": [{"narration": "test narration"}]}, user)
+    return ok({"job_id": _start_batch(user, items, common, "series")}, 202)
+
+
+@require("viewer")
+async def drafts_list(request: Request, user: dict):
+    cur = db.conn().execute("SELECT id, name, updated_at, meta FROM doc_drafts WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT 100", (user["workspace_id"],))
+    out = []
+    for x in db.rows(cur):
+        m = x.get("meta") or {}
+        out.append({"id": x["id"], "name": x["name"], "updated_at": x["updated_at"], "scenes": len(m.get("scenes") or [])})
+    return ok({"drafts": out})
+
+
+@require("editor")
+async def draft_save(request: Request, user: dict):
+    """Save the editor state (title, scenes with hold/library_id, voice/music/… options) so you can come back later."""
+    import json
+
+    from ..engine import documentary as doc
+    b = await body(request)
+    res = doc.normalize({"title": b.get("title"), "scenes": b.get("scenes")})
+    if not res:
+        raise ApiError(422, "सेव करने के लिए scenes चाहिए")
+    opts = {k: b[k] for k in ("voice", "lang", "speed", "orientation", "music_id", "music_volume", "stock", "captions", "ai_images", "sources") if k in b}
+    meta = {"title": res["title"], "scenes": res["scenes"], "options": opts}
+    if len(json.dumps(meta, ensure_ascii=False)) > 200_000:
+        raise ApiError(413, "draft बहुत बड़ा")
+    name = str(b.get("name") or res["title"])[:100]
+    ws, did = user["workspace_id"], str(b.get("id") or "")
+    with db.tx() as c:
+        cur = db.get("doc_drafts", did) if did else None
+        if cur and cur["workspace_id"] == ws:
+            db.update(c, "doc_drafts", did, {"name": name, "meta": meta, "updated_at": db.now()})
+        else:
+            did = db.new_id()
+            db.insert(c, "doc_drafts", {"id": did, "workspace_id": ws, "name": name, "meta": meta, "created_by": user["id"], "created_at": db.now(), "updated_at": db.now()})
+    return ok({"id": did, "name": name})
+
+
+@require("viewer")
+async def draft_get(request: Request, user: dict):
+    d = db.get("doc_drafts", request.path_params["draft_id"])
+    if not d or d["workspace_id"] != user["workspace_id"]:
+        raise ApiError(404, "draft नहीं मिला")
+    return ok({"id": d["id"], "name": d["name"], **d["meta"]})
+
+
+@require("editor")
+async def draft_delete(request: Request, user: dict):
+    d = db.get("doc_drafts", request.path_params["draft_id"])
+    if not d or d["workspace_id"] != user["workspace_id"]:
+        raise ApiError(404, "draft नहीं मिला")
+    with db.tx() as c:
+        c.execute("DELETE FROM doc_drafts WHERE id = ?", (d["id"],))
+    return ok({"deleted": True})
+
+
+def _upload_run(uid: str, ws: str, conn_id: str, path: Path, thumb: Path | None, meta: dict):
+    from ..config import settings
+    from ..publish import youtube
+    st = _JOBS[uid]
+    try:
+        if settings.publish_dry_run:
+            st.update(status="done", progress=100, message="dry-run: upload नहीं हुआ", url="(dry-run)", finished=time.time())
+            return
+        conn = db.get("connections", conn_id)
+        token, sec = youtube.access_token(conn["secrets"])
+        if sec != conn["secrets"]:
+            with db.tx() as c:
+                db.update(c, "connections", conn_id, {"secrets": sec, "updated_at": db.now()})
+        st.update(progress=5, message="YouTube पर upload हो रहा है…")
+        res = youtube.upload_video(token, path, title=meta["title"], description=meta["description"], tags=meta["tags"], privacy=meta["privacy"],
+                                   category="27" if meta.get("education") else "22", language=meta.get("language"), synthetic=meta["synthetic"],
+                                   on_progress=lambda f: st.update(progress=int(5 + 90 * max(0.0, min(1.0, float(f or 0))))))
+        if thumb:
+            try:
+                youtube.set_thumbnail(token, res["remote_id"], thumb)
+            except Exception as e:  # noqa: BLE001 — channel may not be verified for custom thumbnails
+                st["warnings"].append(f"thumbnail नहीं लगा: {str(e)[:120]}")
+        st.update(status="done", progress=100, message="private draft तैयार", url=res["url"], remote_id=res["remote_id"], finished=time.time())
+    except Exception as e:  # noqa: BLE001 — shown to the user
+        log.warning("youtube upload failed: %s", e)
+        st.update(status="failed", error=(str(e) or e.__class__.__name__)[:300], finished=time.time())
+
+
+@require("editor")
+async def youtube_upload(request: Request, user: dict):
+    """Upload a finished documentary (Library item) to YOUR connected YouTube channel as a PRIVATE video (never public)
+    with the title/description/thumbnail from the build and the "synthetic content" flag when AI pictures were used.
+    You review and publish it in YouTube Studio yourself."""
+    from PIL import Image
+    b = await body(request)
+    ws = user["workspace_id"]
+    item = db.get("library", str(b.get("library_id") or ""))
+    if not item or item["workspace_id"] != ws or item["kind"] not in ("broll", "video"):
+        raise ApiError(404, "वीडियो Library में नहीं मिला")
+    conn = db.get("connections", str(b.get("connection_id") or ""))
+    if not conn or conn["workspace_id"] != ws or conn["platform"] != "youtube":
+        raise ApiError(404, "YouTube channel connect नहीं है — Dashboard → Connections")
+    title = str(b.get("title") or item["name"]).strip()[:100]
+    if not title:
+        raise ApiError(422, "title चाहिए")
+    privacy = "unlisted" if b.get("privacy") == "unlisted" else "private"
+    thumb = None
+    if b.get("thumbnail_id"):
+        t = db.get("library", str(b["thumbnail_id"]))
+        if t and t["workspace_id"] == ws and t["kind"] == "image":
+            tmpd = Path(tempfile.mkdtemp(prefix="docyt_"))
+            thumb = tmpd / "thumb.jpg"
+            Image.open(storage.abs_path(t["path"])).convert("RGB").save(thumb, quality=90)
+    meta = {"title": title, "description": str(b.get("description") or "")[:5000], "privacy": privacy,
+            "tags": [str(t)[:40] for t in (b.get("tags") or [])][:30], "synthetic": bool(b.get("synthetic")),
+            "language": b.get("language") if b.get("language") in ("hi", "en") else None, "education": True}
+    uid = _reserve_upload(ws)
+    threading.Thread(target=_upload_run, args=(uid, ws, conn["id"], storage.abs_path(item["path"]), thumb, meta), daemon=True).start()
+    return ok({"job_id": uid, "privacy": privacy}, 202)
+
+
+def _reserve_upload(ws: str) -> str:
+    with _LOCK:
+        if any(j["status"] == "running" and j["ws"] == ws and j.get("upload") for j in _JOBS.values()):
+            raise ApiError(429, "एक upload अभी चल रहा है")
+        uid = uuid.uuid4().hex[:16]
+        _JOBS[uid] = {"status": "running", "ws": ws, "started": time.time(), "progress": 1, "message": "शुरू", "upload": True, "warnings": [], "child": True}
+    return uid
 
 
 @require("editor")
@@ -251,7 +500,7 @@ async def status(request: Request, user: dict):
     if not st or st["ws"] != user["workspace_id"]:
         raise ApiError(404, "job नहीं मिला (server restart हुआ हो तो Library देखें)")
     return ok({"status": st["status"], "progress": st.get("progress"), "message": st.get("message"), "error": st.get("error"),
-               "item": st.get("item"), "credits": st.get("credits"), "description": st.get("description"), "thumbnail": st.get("thumbnail"), "warnings": st.get("warnings"),
+               "item": st.get("item"), "credits": st.get("credits"), "description": st.get("description"), "thumbnail": st.get("thumbnail"), "warnings": st.get("warnings"), "ai_used": st.get("ai_used"), "items": st.get("items"), "url": st.get("url"),
                "seconds": int((st.get("finished") or time.time()) - st["started"])})
 
 
@@ -259,5 +508,12 @@ routes = [
     Route("/documentary/plan", plan, methods=["POST"]),
     Route("/documentary/build", build, methods=["POST"]),
     Route("/documentary/preview", preview, methods=["POST"]),
+    Route("/documentary/shorts", shorts, methods=["POST"]),
+    Route("/documentary/series", series, methods=["POST"]),
+    Route("/documentary/youtube", youtube_upload, methods=["POST"]),
+    Route("/documentary/drafts", drafts_list),
+    Route("/documentary/drafts", draft_save, methods=["POST"]),
+    Route("/documentary/drafts/{draft_id}", draft_get),
+    Route("/documentary/drafts/{draft_id}", draft_delete, methods=["DELETE"]),
     Route("/documentary/{job_id}", status),
 ]

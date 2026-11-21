@@ -50,3 +50,11 @@ POST /api/v1/documentary/plan   {"topic":"हिमालय कैसे बन
 POST /api/v1/documentary/build  {"title":"…","scenes":[{"narration":"…","visual":"aerial himalaya"}],"voice":"hi_kokoro_alpha","orientation":"landscape"}  → 202 {job_id}
 GET  /api/v1/jobs/{job_id}      → status, file (डाउनलोड: GET /api/v1/files/{id})
 ```
+
+
+## Studio extras
+- **Timeline editing:** हर scene ▲▼ से ऊपर/नीचे, ⧉ से copy, 🗑 से हटाना; "कम से कम इतने सेकंड" (`hold`, 0–30) से scene लंबा रखें; Music की आवाज़ का slider (`music_volume`)। काम अधूरा हो तो **💾 Draft** सेव करें और बाद में 📂 से खोलें (`/documentary/drafts`)।
+- **Shorts/Reels:** "✂ Shorts निकालो" scenes में से 20–58 सेकंड के सबसे अच्छे लगातार हिस्से चुनता है (hook/सवाल/संख्या वाले पहले); चुने हुए हिस्से 9:16 में captions के साथ एक-एक करके बनते हैं, titles में `#Shorts`। API: `POST /api/v1/documentary/shorts {scenes, count, build, pick}`।
+- **Series:** topic → AI episodes की list → आप नाम बदलें → "पूरी series बनाओ": हर episode की scenes AI लिखता है (बाक़ी episodes के नाम देकर, ताकि दोहराव न हो), एक के बाद एक बनती हैं, description में पूरी series की list आती है। API: `POST /api/v1/documentary/series` (`build:false` outline, `build:true` + `episodes[]`)। Batch का नतीजा `/v1/jobs/{id}` के `items[]` में।
+- **YouTube private draft:** फ़िल्म बनने पर "⬆ Private draft के रूप में upload" — आपके connected channel पर **हमेशा private** (public नहीं होता), title/description/thumbnail के साथ; AI तस्वीरें लगी हों तो YouTube का "synthetic content" flag अपने-आप लगता है। देखकर publish आप YouTube Studio में ख़ुद करें। `PUBLISH_DRY_RUN=1` हो तो असल upload नहीं होता।
+- सीमाएँ: एक workspace में एक समय एक ही job/batch; Shorts हर बार नए सिरे से (TTS + तस्वीरें) बनते हैं, इसलिए ज़्यादा Shorts = ज़्यादा समय।

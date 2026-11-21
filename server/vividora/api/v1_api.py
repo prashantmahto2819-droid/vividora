@@ -61,7 +61,11 @@ async def job(request: Request, user: dict):
             item = st.get("item")
             return ok({"job_id": jid, "kind": kind, "status": st["status"], "error": st.get("error"),
                        "seconds": int((st.get("finished") or time.time()) - st["started"]),
-                       "file": _file(item) if item else None})
+                       "file": _file(item) if item else None,
+                       **({"progress": st.get("progress"), "message": st.get("message"), "url": st.get("url"),
+                           "items": [{**{k: v for k, v in r.items() if k not in ("item", "thumbnail", "description", "scenes")},
+                                      "file": _file(r["item"]) if r.get("item") else None, "description": r.get("description")} for r in st["items"]]}
+                          if st.get("items") is not None or st.get("url") else {})})
     j = db.get("jobs", jid)
     pr = db.get("projects", j["project_id"]) if j else None
     if not j or not pr or pr["workspace_id"] != ws or j["kind"] not in ("char3d", "storyboard3d", "image_to_3d"):
@@ -145,6 +149,18 @@ def spec() -> dict:
                     "topic": {"type": "string"}, "script": {"type": "string"}, "minutes": {"type": "number"}, "language": {"type": "string"},
                     "ground": {"type": "boolean", "description": "default true: ground facts in Wikipedia extracts"}}}}}},
                 "responses": {"200": {"description": "{title, scenes, sources:[{title,url}]}"}}}},
+            "/v1/documentary/shorts": {"post": {
+                "summary": "Best 20–58 s runs of scenes for Shorts/Reels. build=true renders them (portrait) one after another → job with items[]",
+                "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["scenes"], "properties": {
+                    "scenes": {"type": "array", "items": {"type": "object"}}, "title": {"type": "string"}, "count": {"type": "integer"},
+                    "build": {"type": "boolean"}, "pick": {"type": "array", "items": {"type": "integer"}}}}}}},
+                "responses": {"200": {"description": "{shorts:[{title,indices,seconds,score}]}"}, "202": {"description": "{job_id, shorts}"}}}},
+            "/v1/documentary/series": {"post": {
+                "summary": "Series: {topic, episodes} → outline; with build=true + episodes[] → plans and renders every episode in order (job with items[])",
+                "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "properties": {
+                    "topic": {"type": "string"}, "episodes": {"description": "integer for the outline, array of {title,summary} for build"},
+                    "series": {"type": "string"}, "build": {"type": "boolean"}, "language": {"type": "string"}}}}}},
+                "responses": {"200": {"description": "{series, episodes:[{title,summary}]}"}, "202": {"description": "{job_id}"}}}},
             "/v1/documentary/build": {"post": {
                 "summary": "Scenes → narrated documentary MP4 in the Library (job; poll /v1/jobs/{id}). Pictures: library keyword match, Pixabay, else title cards",
                 "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["scenes"], "properties": {
@@ -222,6 +238,8 @@ routes = [
     Route("/v1/auto-sfx", sfx_api.auto, methods=["POST"]),
     Route("/v1/documentary/plan", documentary_api.plan, methods=["POST"]),
     Route("/v1/documentary/build", documentary_api.build, methods=["POST"]),
+    Route("/v1/documentary/shorts", documentary_api.shorts, methods=["POST"]),
+    Route("/v1/documentary/series", documentary_api.series, methods=["POST"]),
     Route("/v1/jobs/{job_id}", job),
     Route("/v1/files/{file_id}", files),
     Route("/v1/openapi.json", openapi),

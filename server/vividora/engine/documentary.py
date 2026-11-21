@@ -86,6 +86,13 @@ def plan(topic: str, *, minutes: float = 3.0, language: str = "hi", ground: bool
     return res
 
 
+def _num(v, lo: float, hi: float) -> float:
+    try:
+        return round(max(lo, min(hi, float(v))), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def normalize(out) -> dict | None:
     if not isinstance(out, dict) or not isinstance(out.get("scenes"), list):
         return None
@@ -97,7 +104,8 @@ def normalize(out) -> dict | None:
         if len(text) < 3:
             continue
         scenes.append({"narration": text, "visual": str(s.get("visual") or "")[:120].strip(),
-                       "on_screen": str(s.get("on_screen") or "")[:60].strip(), **({"library_id": str(s["library_id"])} if s.get("library_id") else {})})
+                       "on_screen": str(s.get("on_screen") or "")[:60].strip(), **({"library_id": str(s["library_id"])} if s.get("library_id") else {}),
+                       **({"hold": hold} if (hold := _num(s.get("hold"), 0, 30)) else {})})
     if not scenes:
         return None
     return {"title": str(out.get("title") or "Documentary")[:120], "scenes": scenes}
@@ -256,7 +264,7 @@ def narration_track(wavs: list[Path], durations: list[float], out: Path) -> Path
 
 
 def assemble(clips: list[Path], durations: list[float], narration: Path, out: Path, *, sfx: Path | None = None,
-             music: Path | None = None, work: Path | None = None, captions: Path | None = None) -> Path:
+             music: Path | None = None, work: Path | None = None, captions: Path | None = None, music_volume: float = 0.14) -> Path:
     """clips (concat) + narration; whoosh at every scene change; music at ~12% ducked under the voice; loudness normalised."""
     work = work or out.parent
     lst = work / "clips.txt"
@@ -277,7 +285,7 @@ def assemble(clips: list[Path], durations: list[float], narration: Path, out: Pa
             n += 1
     if music:
         ins += ["-stream_loop", "-1", "-i", str(music)]
-        chain.append(f"[{n}:a]volume=0.14[m];[m][sc]sidechaincompress=threshold=0.04:ratio=8:attack=20:release=400[md]")
+        chain.append(f"[{n}:a]volume={max(0.02, min(0.6, float(music_volume))):.3f}[m];[m][sc]sidechaincompress=threshold=0.04:ratio=8:attack=20:release=400[md]")
         mix.append("[md]")
         n += 1
     total = sum(durations)
@@ -346,8 +354,12 @@ def chapters(scenes: list[dict], durations: list[float], min_len: float = 10.0) 
     return out if len(out) >= 3 else []
 
 
-def description(title: str, chaps: list[tuple[float, str]], credits: list[str], sources: list[dict] | None = None) -> str:
+def description(title: str, chaps: list[tuple[float, str]], credits: list[str], sources: list[dict] | None = None,
+                series: dict | None = None) -> str:
     lines = [title, ""]
+    if series and series.get("titles"):
+        lines += [f"Series: {series.get('name', '')} — part {series.get('i', 1)} of {len(series['titles'])}"] + \
+                 [f"{k + 1}. {t}" for k, t in enumerate(series["titles"])] + [""]
     if chaps:
         lines += [f"{_clock(t)} {name}" for t, name in chaps] + [""]
     if sources:
@@ -356,6 +368,72 @@ def description(title: str, chaps: list[tuple[float, str]], credits: list[str], 
         lines += ["Footage credits:"] + credits + [""]
     lines.append("Narration: AI voice. Facts compiled by the creator — please verify before relying on them.")
     return "\n".join(lines)
+
+
+def est_seconds(narration: str) -> float:
+    """Rough spoken length before TTS exists (≈2.3 words/s) — only used to plan Shorts."""
+    return max(MIN_SCENE, len(narration.split()) / 2.3 + PAD)
+
+
+def _scene_score(sc: dict, i: int) -> float:
+    from .shorts import HOOK_WORDS
+    words = re.findall(r"[\w']+", sc["narration"].lower())
+    sc_ = sum(1 for w in words if w in HOOK_WORDS) / max(1, len(words)) * 10
+    sc_ += 1.5 if "?" in sc["narration"] or "?" in (sc.get("on_screen") or "") else 0
+    sc_ += 1.0 if re.search(r"\d", sc["narration"]) else 0
+    sc_ += 0.8 if sc.get("on_screen") else 0
+    sc_ += 1.0 if i == 0 else 0
+    return sc_
+
+
+def shorts_plan(scenes: list[dict], *, count: int = 3, min_s: float = 20.0, max_s: float = 58.0) -> list[dict]:
+    """Best self-contained runs of consecutive scenes (20–58 s) → [{title, indices, seconds, score}], best first, non-overlapping.
+    A run starts at a strong scene (a hook comes first), then grows until it is long enough to be a Short."""
+    n = len(scenes)
+    est = [est_seconds(sc["narration"]) for sc in scenes]
+    sco = [_scene_score(sc, i) for i, sc in enumerate(scenes)]
+    cands = []
+    for i in range(n):
+        tot, j = 0.0, i
+        while j < n and tot + est[j] <= max_s:
+            tot += est[j]
+            j += 1
+            if tot >= min_s:
+                break
+        if tot < min_s:
+            continue
+        idx = list(range(i, j))
+        cands.append({"indices": idx, "seconds": round(tot, 1), "score": round(sco[i] * 1.6 + sum(sco[k] for k in idx) / len(idx), 2)})
+    cands.sort(key=lambda c: -c["score"])
+    out, used = [], set()
+    for c in cands:
+        if used & set(c["indices"]):
+            continue
+        used |= set(c["indices"])
+        first = scenes[c["indices"][0]]
+        title = (first.get("on_screen") or first["narration"]).strip()
+        title = (title[:57] + "…") if len(title) > 58 else title
+        out.append({**c, "title": title})
+        if len(out) >= max(1, min(8, count)):
+            break
+    return out
+
+
+_SERIES = """You plan a documentary series. Topic: {topic}. Write {n} episodes in {lang}, each a different angle, in watching order,
+no overlap. Reply ONLY with JSON: {{"series": "<series title>", "episodes": [{{"title": "<short episode title>", "summary": "<one sentence>"}}]}}"""
+
+
+def series_plan(topic: str, episodes: int = 4, language: str = "hi") -> dict | None:
+    topic = (topic or "").strip()
+    if not topic or not llm.available():
+        return None
+    n = max(2, min(10, int(episodes)))
+    out = llm.ask_json(_SERIES.format(topic=topic[:300], n=n, lang=_LANG.get(language, language)), max_tokens=2048, timeout=90)
+    if not isinstance(out, dict) or not isinstance(out.get("episodes"), list):
+        return None
+    eps = [{"title": str(e.get("title") or "").strip()[:100], "summary": str(e.get("summary") or "").strip()[:300]}
+           for e in out["episodes"][:n] if isinstance(e, dict) and str(e.get("title") or "").strip()]
+    return {"series": str(out.get("series") or topic)[:100], "episodes": eps} if len(eps) >= 2 else None
 
 
 def make_thumbnail(video: Path, title: str, out: Path, at: float = 2.0) -> Path:
@@ -391,5 +469,7 @@ def make_thumbnail(video: Path, title: str, out: Path, at: float = 2.0) -> Path:
     return out
 
 
-def scene_durations(narr_seconds: list[float]) -> list[float]:
-    return [round(max(MIN_SCENE, s + PAD), 3) for s in narr_seconds]
+def scene_durations(narr_seconds: list[float], holds: list[float] | None = None) -> list[float]:
+    """Scene length = narration + pad, never below MIN_SCENE, and never below the creator's own `hold` (seconds)."""
+    holds = holds or [0.0] * len(narr_seconds)
+    return [round(max(MIN_SCENE, s + PAD, h or 0.0), 3) for s, h in zip(narr_seconds, holds)]

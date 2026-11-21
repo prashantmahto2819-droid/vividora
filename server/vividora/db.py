@@ -153,6 +153,10 @@ CREATE INDEX IF NOT EXISTS trend_templates_ws ON trend_templates(workspace_id, f
 CREATE TABLE IF NOT EXISTS characters (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL, base TEXT, meta TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS doc_drafts (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS doc_drafts_ws ON doc_drafts(workspace_id, updated_at);
 CREATE TABLE IF NOT EXISTS storyboards (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}', project_id TEXT, created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
