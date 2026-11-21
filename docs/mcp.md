@@ -32,3 +32,9 @@ Claude (Claude Code / Claude Desktop) इससे आपके Vividora मे�
 - Key `viewer`/`editor` role तक सीमित रखें; admin key MCP में न डालें।
 - Key लीक हो तो Dashboard से revoke करें। Config फ़ाइल किसी को न भेजें।
 - Claude के हर tool call पर 120 requests/min की limit लागू है।
+
+## Agent skill (pipeline for Claude Code and similar)
+`agents/claude-code/vividora-documentary/SKILL.md` is a ready skill: copy the folder to `~/.claude/skills/` (or a project's `.claude/skills/`) and the agent
+runs topic → scenes → build → Shorts/Series with approval gates, using the tools above. Tools like
+[OpenMontage](https://github.com/OpenMontageInc/OpenMontage) (AGPL-3.0, an agentic video studio for coding assistants) work the same way — an agent
+following stage skills — so Vividora can be the "render backend" they call over MCP. No OpenMontage code is copied here (licence differs).
