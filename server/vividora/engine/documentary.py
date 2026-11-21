@@ -108,14 +108,24 @@ def pick_visual(scene: dict, library: list[dict], used: set[str]) -> dict | None
 
 
 def stock_candidates(query: str, key: str, http_json) -> list[dict]:
-    """Pixabay videos for a query (safe-search on). Returns [{url, kind, license, creator, page, id}]."""
+    """Pixabay for a query (safe-search on): videos first, photos when there are no videos.
+    Returns [{url, kind: broll|image, license, creator, page, id}]."""
     import urllib.parse
+    q = urllib.parse.quote(query)
     out = []
-    data = http_json(f"https://pixabay.com/api/videos/?key={key}&q={urllib.parse.quote(query)}&per_page=5&safesearch=true")
+    data = http_json(f"https://pixabay.com/api/videos/?key={key}&q={q}&per_page=5&safesearch=true")
     for r in data.get("hits", []):
         v = (r.get("videos") or {}).get("medium") or (r.get("videos") or {}).get("small") or {}
         if v.get("url"):
             out.append({"url": v["url"], "kind": "broll", "license": "Pixabay Content License", "creator": r.get("user"),
+                        "page": r.get("pageURL"), "id": str(r.get("id"))})
+    if out:
+        return out
+    data = http_json(f"https://pixabay.com/api/?key={key}&q={q}&per_page=5&safesearch=true&image_type=photo&orientation=horizontal")
+    for r in data.get("hits", []):
+        u = r.get("largeImageURL") or r.get("webformatURL")
+        if u:
+            out.append({"url": u, "kind": "image", "license": "Pixabay Content License", "creator": r.get("user"),
                         "page": r.get("pageURL"), "id": str(r.get("id"))})
     return out
 
@@ -274,6 +284,35 @@ def build_captions(scenes: list[str], narr: list[float], durations: list[float],
         t0 += total
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
+
+
+def _clock(t: float) -> str:
+    t = int(t)
+    return f"{t // 3600}:{t // 60 % 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
+
+
+def chapters(scenes: list[dict], durations: list[float], min_len: float = 10.0) -> list[tuple[float, str]]:
+    """YouTube chapters: starts at 0:00, every chapter ≥ min_len s (scenes are merged), at least 3 or none."""
+    out: list[tuple[float, str]] = []
+    t, acc = 0.0, min_len
+    for sc, d in zip(scenes, durations):
+        if acc >= min_len:
+            title = (sc.get("on_screen") or " ".join(sc["narration"].split()[:6])).strip(" ।.,")
+            out.append((t, title[:60] or "Part"))
+            acc = 0.0
+        acc += d
+        t += d
+    return out if len(out) >= 3 else []
+
+
+def description(title: str, chaps: list[tuple[float, str]], credits: list[str]) -> str:
+    lines = [title, ""]
+    if chaps:
+        lines += [f"{_clock(t)} {name}" for t, name in chaps] + [""]
+    if credits:
+        lines += ["Footage credits:"] + credits + [""]
+    lines.append("Narration: AI voice. Facts compiled by the creator — please verify before relying on them.")
+    return "\n".join(lines)
 
 
 def scene_durations(narr_seconds: list[float]) -> list[float]:

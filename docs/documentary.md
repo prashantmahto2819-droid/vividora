@@ -11,7 +11,8 @@ Dashboard → **Auto Documentary** (`#/documentary`), या API `/api/v1/docume
    2. नहीं तो **Pixabay** video (अगर `PIXABAY_API_KEY` है; free key: https://pixabay.com/api/docs/),
    3. नहीं तो एक सादा **title card** — scene कभी खाली नहीं रहता।
    फिर Ken-Burns zoom (image) / loop-crop (video), हर scene change पर हल्की whoosh, वैकल्पिक music (आवाज़ के नीचे दबकर), loudness -16 LUFS।
-4. नतीजा Library में; Pixabay के credits job result में आते हैं (license field में भी सेव)।
+4. नतीजा Library में। साथ में **YouTube description** मिलती है: chapters (0:00 से, हर chapter ≥10 s — scenes जुड़कर), footage credits, और "AI voice" का नोट — copy करके सीधे डालें।
+5. हर scene के लिए आप Library से **ख़ुद तस्वीर चुन** सकते हैं (dropdown); बाकी scenes अपने-आप भरते हैं। Pixabay पर video न मिले तो photo लगती है।
 
 ## आवाज़ और licence
 - Default आवाज़ **commercial-safe** engine की चुनी जाती है (Kokoro / Parler)। Voice Studio (OmniVoice) की आवाज़ पर ⚠ दिखता है — वह **सिर्फ़ निजी/non-commercial** है, public/monetised वीडियो में न लगाएँ।

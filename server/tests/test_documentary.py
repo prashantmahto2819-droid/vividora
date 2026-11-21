@@ -56,6 +56,23 @@ def units():
     check("no overlap → None (title card)", doc.pick_visual({"visual": "ocean whales"}, lib, set()) is None)
     check("explicit library_id wins", doc.pick_visual({"visual": "x", "library_id": "b"}, lib, set())["id"] == "b")
     check("durations have a floor", doc.scene_durations([0.5, 10.0]) == [doc.MIN_SCENE, 10.45], doc.scene_durations([0.5, 10.0]))
+    sc = [{"narration": f"scene number {i} with some words", "on_screen": ("Intro" if i == 0 else "")} for i in range(8)]
+    ch = doc.chapters(sc, [6.0] * 8)
+    check("chapters start at 0:00, ≥10 s apart, titles from on_screen/narration", ch and ch[0] == (0.0, "Intro") and all(b[0] - a[0] >= 10 for a, b in zip(ch, ch[1:])), ch)
+    check("too short for 3 chapters → none", doc.chapters(sc[:3], [3.0] * 3) == [])
+    text = doc.description("My Film", ch, ["scene 2: someone (Pixabay) https://x"])
+    check("description has 0:00 line, credits and the AI note", "0:00 Intro" in text and "Footage credits:" in text and "AI voice" in text, text)
+    calls = []
+
+    def fake(url):
+        calls.append(url)
+        if "/videos/" in url:
+            return {"hits": []}
+        return {"hits": [{"largeImageURL": "https://cdn.pixabay.com/x.jpg", "user": "bob", "pageURL": "https://pixabay.com/p/1", "id": 1}]}
+    cands = doc.stock_candidates("snow peaks", "KEY", fake)
+    check("no videos → falls back to a photo", len(cands) == 1 and cands[0]["kind"] == "image" and len(calls) == 2, (cands, calls))
+    cands = doc.stock_candidates("snow", "KEY", lambda u: {"hits": [{"videos": {"medium": {"url": "https://cdn.pixabay.com/v.mp4"}}, "user": "a", "id": 2}]})
+    check("videos found → videos only", len(cands) == 1 and cands[0]["kind"] == "broll", cands)
     tmp = Path(tempfile.mkdtemp(prefix="doc_u_"))
     try:
         size = (640, 360)
@@ -200,6 +217,7 @@ def e2e():
             check("length = sum of scene lengths (≥ 3×2.8 s)", d >= 8.3, d)
             st, jj = call("GET", f"/documentary/{jid}", None, tok)
             check("editor status route agrees", st == 200 and jj["status"] == "done" and jj["progress"] == 100, jj)
+            check("job result carries the YouTube description (title + AI note)", "Test डॉक्यूमेंट्री" in (jj.get("description") or "") and "AI voice" in jj["description"], jj.get("description"))
         st, lib = call("GET", "/library?kind=broll", None, tok)
         items = lib if isinstance(lib, list) else lib.get("items", [])
         check("saved in Library with tags", any("documentary" in (i.get("tags") or "") for i in items), items[:2])

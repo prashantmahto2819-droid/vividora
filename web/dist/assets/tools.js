@@ -236,9 +236,11 @@ export function docBind(c) {
       <b>Scene ${i + 1}</b> <button class="btn small quiet" data-del="${i}" style="float:right">🗑</button>
       <textarea data-n="${i}" rows="3" style="width:100%">${esc(s.narration)}</textarea>
       <input data-v="${i}" value="${esc(s.visual || "")}" placeholder="तस्वीर के English keywords (जैसे aerial himalaya mountains)" style="width:100%;margin-top:.3rem">
+      <select data-l="${i}" style="width:100%;margin-top:.3rem"><option value="">तस्वीर: अपने-आप (Library → Pixabay → title card)</option>${(docState.lib || []).map((m) => `<option value="${esc(m.id)}" ${s.library_id === m.id ? "selected" : ""}>${m.kind === "image" ? "🖼" : "🎞"} ${esc(m.name)}</option>`).join("")}</select>
     </div>`).join("");
     box.querySelectorAll("[data-n]").forEach((t) => (t.oninput = () => (docState.scenes[+t.dataset.n].narration = t.value)));
     box.querySelectorAll("[data-v]").forEach((t) => (t.oninput = () => (docState.scenes[+t.dataset.v].visual = t.value)));
+    box.querySelectorAll("[data-l]").forEach((t) => (t.onchange = () => { const sc = docState.scenes[+t.dataset.l]; if (t.value) sc.library_id = t.value; else delete sc.library_id; }));
     box.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { docState.scenes.splice(+b.dataset.del, 1); draw(); }));
     const ti = $("#dc-title"); if (ti) ti.oninput = () => (docState.title = ti.value);
   };
@@ -250,6 +252,8 @@ export function docBind(c) {
   }).catch(() => {});
   ctx.api("GET", "/library?kind=music").then((r) => { const sel = $("#dc-music"); if (!sel) return; const items = Array.isArray(r) ? r : (r.items || []);
     sel.innerHTML += items.slice(0, 60).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join(""); }).catch(() => {});
+  Promise.all(["image", "broll"].map((k) => ctx.api("GET", "/library?kind=" + k).catch(() => []))).then((rs) => {
+    docState.lib = rs.flatMap((r) => (Array.isArray(r) ? r : (r.items || []))).filter((m) => !(m.meta && m.meta.alpha)).slice(0, 150); if (docState.scenes.length) draw(); });
   const plan = async (body, btn) => {
     btn.disabled = true; st("scenes बन रहे हैं… (AI 20–60 सेकंड ले सकता है)");
     try { const r = await ctx.api("POST", "/documentary/plan", body); docState = { title: r.title, scenes: r.scenes, job: null }; draw(); st(`${r.scenes.length} scenes तैयार — जाँचकर नीचे से बनाएँ`); }
@@ -262,8 +266,9 @@ export function docBind(c) {
       const j = await ctx.api("GET", "/documentary/" + id);
       if (j.status === "running") { st(`⏳ ${j.progress || 0}% — ${esc(j.message || "")}`); setTimeout(() => poll(id), 2500); return; }
       $("#dc-build").disabled = false;
-      if (j.status === "done") { st(`✅ तैयार! <a href="#/library">Library</a> में "${esc(j.item?.name || "")}" देखें।${(j.credits || []).length ? "<br>Credits (description में डालें):<br>" + j.credits.map(esc).join("<br>") : ""}${(j.warnings || []).length ? "<br>⚠ " + j.warnings.map(esc).join("<br>⚠ ") : ""}`); }
+      if (j.status === "done") { st(`✅ तैयार! <a href="#/library">Library</a> में "${esc(j.item?.name || "")}" देखें।${j.description ? `<br><b>YouTube description (chapters + credits):</b><textarea id="dc-desc" rows="8" style="width:100%" readonly>${esc(j.description)}</textarea><button class="btn small quiet" id="dc-copy">📋 Copy</button>` : ""}${(j.warnings || []).length ? "<br>⚠ " + j.warnings.map(esc).join("<br>⚠ ") : ""}`); }
       else st("❌ " + esc(j.error || "नहीं बन पाया"), true);
+      const cp = $("#dc-copy"); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText($("#dc-desc").value); ctx.toast("Copy हो गया"); } catch { $("#dc-desc").select(); ctx.toast("Ctrl+C दबाएँ"); } };
     } catch (e) { st(esc(e.message), true); $("#dc-build").disabled = false; }
   };
   $("#dc-build").onclick = async (e) => {

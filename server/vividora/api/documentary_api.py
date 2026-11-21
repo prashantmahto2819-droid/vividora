@@ -97,8 +97,9 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                 elif key and sc.get("visual"):
                     try:
                         for c in doc.stock_candidates(sc["visual"], key, _http_json):
-                            src = _download(c["url"], work / f"stock{i}.mp4")
-                            kind = "video"
+                            is_img = c["kind"] == "image"
+                            src = _download(c["url"], work / (f"stock{i}.jpg" if is_img else f"stock{i}.mp4"))
+                            kind = "image" if is_img else "video"
                             credits.append(f'scene {i + 1}: {c["creator"] or "?"} (Pixabay) {c["page"] or ""}'.strip())
                             break
                     except Exception as e:  # noqa: BLE001 — stock is a bonus; a title card is the fallback
@@ -125,12 +126,14 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                     music_path = storage.abs_path(mrow["path"])
             ass = doc.build_captions([sc["narration"] for sc in scenes], narr, durs, size, work / "captions.ass") if p.get("captions") else None
             out = doc.assemble(clips, durs, track, work / "documentary.mp4", sfx=sfx_path, music=music_path, work=work, captions=ass)
+            chaps = doc.chapters(scenes, durs)
+            desc = doc.description(p["title"] or "Documentary", chaps, credits)
             lic = "own narration; visuals: library + " + ("; ".join(credits) if credits else "title cards")
             item = _add_file(ws, user_id, "broll", out, name=(p["title"] or "Documentary")[:100], tags="documentary,auto", source="documentary",
                              license=lic[:900], analyse=False)
         with db.tx() as c:
             service.log(c, ws, "documentary.build", user_id=user_id, detail={"item_id": item["id"], "scenes": n})
-        st.update(status="done", progress=100, message="तैयार", item=_view(item), credits=credits, finished=time.time())
+        st.update(status="done", progress=100, message="तैयार", item=_view(item), credits=credits, description=desc, finished=time.time())
     except Exception as e:  # noqa: BLE001 — shown to the user
         log.warning("documentary failed: %s", e)
         st.update(status="failed", error=(str(e) or e.__class__.__name__)[:300], finished=time.time())
@@ -210,7 +213,7 @@ async def status(request: Request, user: dict):
     if not st or st["ws"] != user["workspace_id"]:
         raise ApiError(404, "job नहीं मिला (server restart हुआ हो तो Library देखें)")
     return ok({"status": st["status"], "progress": st.get("progress"), "message": st.get("message"), "error": st.get("error"),
-               "item": st.get("item"), "credits": st.get("credits"), "warnings": st.get("warnings"),
+               "item": st.get("item"), "credits": st.get("credits"), "description": st.get("description"), "warnings": st.get("warnings"),
                "seconds": int((st.get("finished") or time.time()) - st["started"])})
 
 
