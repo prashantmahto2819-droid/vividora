@@ -36,13 +36,16 @@ Setup (VM पर):
 
 ## अभी की सीमाएँ (Phase 1)
 - Scene-by-scene timeline editing UI नहीं — वीडियो सीधा MP4 बनता है (Captions burned-in आते हैं; बंद करने का checkbox है)।
+- Topic से plan करते समय Wikipedia के intro extracts prompt में जाते हैं और AI को कहा जाता है कि संख्या/तारीख़/नाम सिर्फ़ उन्हीं से लें; इस्तेमाल हुए pages YouTube description में "Sources (Wikipedia, CC BY-SA 4.0)" बनकर जुड़ते हैं। बंद करने के लिए `"ground": false` या UI का checkbox।
+- Build के बाद एक **thumbnail** (फ़िल्म का frame + title) Library में image (`documentary,thumbnail`) की तरह सेव होता है।
+- UI में हर scene के नीचे दिखता है कि Library से कौन-सी तस्वीर मिलेगी (`POST /documentary/preview`)।
 - AI जो facts लिखे उन्हें **publish से पहले ख़ुद जाँचें**; script में वही नाम/तारीख़ें रखें जिन पर भरोसा हो।
 - तस्वीरें Pixabay/आपकी Library से हैं — AI-generated या aerial footage अपने-आप नहीं बनती (अगला phase: GPU image/video model)।
 - एक workspace में एक साथ एक ही documentary बनती है; ज़्यादा से ज़्यादा 24 scenes, 9000 अक्षर।
 
 ## API
 ```
-POST /api/v1/documentary/plan   {"topic":"हिमालय कैसे बना","minutes":3,"language":"hi"}   (या {"script":"…"})
+POST /api/v1/documentary/plan   {"topic":"हिमालय कैसे बना","minutes":3,"language":"hi","ground":true}   (या {"script":"…"}) → {title, scenes, sources}
 POST /api/v1/documentary/build  {"title":"…","scenes":[{"narration":"…","visual":"aerial himalaya"}],"voice":"hi_kokoro_alpha","orientation":"landscape"}  → 202 {job_id}
 GET  /api/v1/jobs/{job_id}      → status, file (डाउनलोड: GET /api/v1/files/{id})
 ```

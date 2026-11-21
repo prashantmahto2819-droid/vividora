@@ -208,6 +208,7 @@ export function docView() {
     <div class="field"><label>Topic (AI scenes बनाएगा — .env में GEMINI_API_KEY / ANTHROPIC_API_KEY चाहिए)</label><input id="dc-topic" maxlength="300" placeholder="जैसे: हिमालय कैसे बना"></div>
     <div class="tl-row"><div class="field"><label>कितने मिनट</label><select id="dc-min"><option>2</option><option selected>3</option><option>5</option><option>8</option></select></div>
       <div class="field"><label>भाषा</label><select id="dc-lang"><option value="hi">हिन्दी</option><option value="en">English</option><option value="hinglish">Hinglish</option></select></div></div>
+    <div class="field"><label><input type="checkbox" id="dc-ground" checked> Wikipedia से facts लेकर लिखो (नाम/तारीख़ें सही रहें; sources description में जुड़ेंगे)</label></div>
     <button class="btn primary" id="dc-plan">✨ Scenes बनाओ</button>
     <div class="field" style="margin-top:.8rem"><label>या अपनी script (खाली लाइन = नया scene)</label><textarea id="dc-script" rows="5" placeholder="पहला scene…\n\nदूसरा scene…"></textarea></div>
     <button class="btn" id="dc-plan2">📝 Script से scenes</button>
@@ -236,7 +237,7 @@ export function docBind(c) {
       <b>Scene ${i + 1}</b> <button class="btn small quiet" data-del="${i}" style="float:right">🗑</button>
       <textarea data-n="${i}" rows="3" style="width:100%">${esc(s.narration)}</textarea>
       <input data-v="${i}" value="${esc(s.visual || "")}" placeholder="तस्वीर के English keywords (जैसे aerial himalaya mountains)" style="width:100%;margin-top:.3rem">
-      <select data-l="${i}" style="width:100%;margin-top:.3rem"><option value="">तस्वीर: अपने-आप (Library → Pixabay → title card)</option>${(docState.lib || []).map((m) => `<option value="${esc(m.id)}" ${s.library_id === m.id ? "selected" : ""}>${m.kind === "image" ? "🖼" : "🎞"} ${esc(m.name)}</option>`).join("")}</select>
+      <select data-l="${i}" style="width:100%;margin-top:.3rem"><option value="">तस्वीर: अपने-आप (Library → Pixabay → title card)</option>${(docState.lib || []).map((m) => `<option value="${esc(m.id)}" ${s.library_id === m.id ? "selected" : ""}>${m.kind === "image" ? "🖼" : "🎞"} ${esc(m.name)}</option>`).join("")}</select>${!s.library_id && docState.pv && docState.pv[i] ? `<div class="small muted">${docState.pv[i].library_id ? "✓ Library से मिलेगी: " + esc(docState.pv[i].name) : "Library में match नहीं — Pixabay या title card"}</div>` : ""}
     </div>`).join("");
     box.querySelectorAll("[data-n]").forEach((t) => (t.oninput = () => (docState.scenes[+t.dataset.n].narration = t.value)));
     box.querySelectorAll("[data-v]").forEach((t) => (t.oninput = () => (docState.scenes[+t.dataset.v].visual = t.value)));
@@ -254,19 +255,25 @@ export function docBind(c) {
     sel.innerHTML += items.slice(0, 60).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join(""); }).catch(() => {});
   Promise.all(["image", "broll"].map((k) => ctx.api("GET", "/library?kind=" + k).catch(() => []))).then((rs) => {
     docState.lib = rs.flatMap((r) => (Array.isArray(r) ? r : (r.items || []))).filter((m) => !(m.meta && m.meta.alpha)).slice(0, 150); if (docState.scenes.length) draw(); });
+  const preview = async () => {
+    try {
+      const r = await ctx.api("POST", "/documentary/preview", { scenes: docState.scenes });
+      docState.pv = r.matches; draw();
+    } catch { /* preview is optional */ }
+  };
   const plan = async (body, btn) => {
     btn.disabled = true; st("scenes बन रहे हैं… (AI 20–60 सेकंड ले सकता है)");
-    try { const r = await ctx.api("POST", "/documentary/plan", body); docState = { title: r.title, scenes: r.scenes, job: null }; draw(); st(`${r.scenes.length} scenes तैयार — जाँचकर नीचे से बनाएँ`); }
+    try { const r = await ctx.api("POST", "/documentary/plan", body); docState = { title: r.title, scenes: r.scenes, sources: r.sources || [], job: null }; draw(); st(`${r.scenes.length} scenes तैयार${(r.sources || []).length ? ` (Wikipedia: ${r.sources.map((x) => esc(x.title)).join(", ")})` : ""} — जाँचकर नीचे से बनाएँ`); preview(); }
     catch (e) { st(esc(e.message), true); } finally { btn.disabled = false; }
   };
-  $("#dc-plan").onclick = (e) => { const t = $("#dc-topic").value.trim(); if (t.length < 3) { ctx.toast("पहले topic लिखें"); return; } plan({ topic: t, minutes: +$("#dc-min").value, language: $("#dc-lang").value }, e.target); };
+  $("#dc-plan").onclick = (e) => { const t = $("#dc-topic").value.trim(); if (t.length < 3) { ctx.toast("पहले topic लिखें"); return; } plan({ topic: t, minutes: +$("#dc-min").value, language: $("#dc-lang").value, ground: $("#dc-ground").checked }, e.target); };
   $("#dc-plan2").onclick = (e) => { const t = $("#dc-script").value.trim(); if (!t) { ctx.toast("पहले script लिखें"); return; } plan({ script: t }, e.target); };
   const poll = async (id) => {
     try {
       const j = await ctx.api("GET", "/documentary/" + id);
       if (j.status === "running") { st(`⏳ ${j.progress || 0}% — ${esc(j.message || "")}`); setTimeout(() => poll(id), 2500); return; }
       $("#dc-build").disabled = false;
-      if (j.status === "done") { st(`✅ तैयार! <a href="#/library">Library</a> में "${esc(j.item?.name || "")}" देखें।${j.description ? `<br><b>YouTube description (chapters + credits):</b><textarea id="dc-desc" rows="8" style="width:100%" readonly>${esc(j.description)}</textarea><button class="btn small quiet" id="dc-copy">📋 Copy</button>` : ""}${(j.warnings || []).length ? "<br>⚠ " + j.warnings.map(esc).join("<br>⚠ ") : ""}`); }
+      if (j.status === "done") { st(`✅ तैयार! <a href="#/library">Library</a> में "${esc(j.item?.name || "")}" देखें।${j.thumbnail ? ` Thumbnail भी बना है: "${esc(j.thumbnail.name || "")}".` : ""}${j.description ? `<br><b>YouTube description (chapters + credits):</b><textarea id="dc-desc" rows="8" style="width:100%" readonly>${esc(j.description)}</textarea><button class="btn small quiet" id="dc-copy">📋 Copy</button>` : ""}${(j.warnings || []).length ? "<br>⚠ " + j.warnings.map(esc).join("<br>⚠ ") : ""}`); }
       else st("❌ " + esc(j.error || "नहीं बन पाया"), true);
       const cp = $("#dc-copy"); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText($("#dc-desc").value); ctx.toast("Copy हो गया"); } catch { $("#dc-desc").select(); ctx.toast("Ctrl+C दबाएँ"); } };
     } catch (e) { st(esc(e.message), true); $("#dc-build").disabled = false; }
@@ -274,7 +281,7 @@ export function docBind(c) {
   $("#dc-build").onclick = async (e) => {
     const b = e.target; b.disabled = true; st("शुरू हो रहा है…");
     try {
-      const r = await ctx.api("POST", "/documentary/build", { title: docState.title, scenes: docState.scenes, voice: $("#dc-voice").value, orientation: $("#dc-or").value, lang: $("#dc-lang").value === "en" ? "en" : "hi", music_id: $("#dc-music").value || undefined, captions: $("#dc-cap").checked });
+      const r = await ctx.api("POST", "/documentary/build", { title: docState.title, scenes: docState.scenes, voice: $("#dc-voice").value, orientation: $("#dc-or").value, lang: $("#dc-lang").value === "en" ? "en" : "hi", music_id: $("#dc-music").value || undefined, captions: $("#dc-cap").checked, sources: docState.sources || [] });
       docState.job = r.job_id; poll(r.job_id);
     } catch (er) { st(esc(er.message), true); b.disabled = false; }
   };

@@ -127,13 +127,20 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
             ass = doc.build_captions([sc["narration"] for sc in scenes], narr, durs, size, work / "captions.ass") if p.get("captions") else None
             out = doc.assemble(clips, durs, track, work / "documentary.mp4", sfx=sfx_path, music=music_path, work=work, captions=ass)
             chaps = doc.chapters(scenes, durs)
-            desc = doc.description(p["title"] or "Documentary", chaps, credits)
+            desc = doc.description(p["title"] or "Documentary", chaps, credits, p.get("sources"))
             lic = "own narration; visuals: library + " + ("; ".join(credits) if credits else "title cards")
             item = _add_file(ws, user_id, "broll", out, name=(p["title"] or "Documentary")[:100], tags="documentary,auto", source="documentary",
                              license=lic[:900], analyse=False)
+            thumb = None
+            try:
+                tp = doc.make_thumbnail(out, p["title"] or "Documentary", work / "thumbnail.png", at=min(2.0, sum(durs) / 3))
+                thumb = _view(_add_file(ws, user_id, "image", tp, name=((p["title"] or "Documentary") + " · thumbnail")[:100], tags="documentary,thumbnail",
+                                        source="documentary", license="own", analyse=False))
+            except Exception as e:  # noqa: BLE001 — the film is the product; the thumbnail is a bonus
+                log.info("thumbnail failed: %s", e)
         with db.tx() as c:
             service.log(c, ws, "documentary.build", user_id=user_id, detail={"item_id": item["id"], "scenes": n})
-        st.update(status="done", progress=100, message="तैयार", item=_view(item), credits=credits, description=desc, finished=time.time())
+        st.update(status="done", progress=100, message="तैयार", item=_view(item), credits=credits, description=desc, thumbnail=thumb, finished=time.time())
     except Exception as e:  # noqa: BLE001 — shown to the user
         log.warning("documentary failed: %s", e)
         st.update(status="failed", error=(str(e) or e.__class__.__name__)[:300], finished=time.time())
@@ -152,7 +159,8 @@ async def plan(request: Request, user: dict):
         topic = str(b.get("topic") or "").strip()
         if len(topic) < 3:
             raise ApiError(422, "topic (या अपनी script) चाहिए")
-        res = await run_in_threadpool(doc.plan, topic, minutes=float(b.get("minutes") or 3), language=str(b.get("language") or "hi"))
+        res = await run_in_threadpool(lambda: doc.plan(topic, minutes=float(b.get("minutes") or 3), language=str(b.get("language") or "hi"),
+                                                       ground=b.get("ground", True) is not False))
         source = "llm"
         if res is None:
             from ..engine import llm
@@ -202,9 +210,27 @@ async def build(request: Request, user: dict):
         job_id = uuid.uuid4().hex[:16]
         _JOBS[job_id] = {"status": "running", "ws": ws, "started": time.time(), "callback": cb, "progress": 1, "message": "शुरू", "warnings": warn}
     p = {"scenes": res["scenes"], "title": res["title"], "voice": voice, "lang": lang, "orientation": orient, "speed": speed,
-         "music_id": b.get("music_id"), "stock": b.get("stock", True) is not False, "captions": b.get("captions", True) is not False}
+         "music_id": b.get("music_id"), "stock": b.get("stock", True) is not False, "captions": b.get("captions", True) is not False,
+         "sources": [{"title": str(x.get("title", ""))[:120], "url": str(x.get("url", ""))[:300]} for x in (b.get("sources") or [])[:6] if isinstance(x, dict)]}
     threading.Thread(target=_run, args=(job_id, ws, user["id"], p), daemon=True).start()
     return ok({"job_id": job_id, "warnings": warn}, 202)
+
+
+@require("editor")
+async def preview(request: Request, user: dict):
+    """Which Library picture each scene would get (no rendering): [{index, library_id, name}|null]."""
+    from ..engine import documentary as doc
+    b = await body(request)
+    res = doc.normalize({"scenes": b.get("scenes")})
+    if not res:
+        raise ApiError(422, "scenes चाहिए")
+    lib, used, out = _library(user["workspace_id"]), set(), []
+    for i, sc in enumerate(res["scenes"]):
+        m = doc.pick_visual(sc, lib, used)
+        if m:
+            used.add(m["id"])
+        out.append({"index": i, "library_id": m["id"] if m else None, "name": m["name"] if m else None})
+    return ok({"matches": out, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY"))})
 
 
 @require("viewer")
@@ -213,12 +239,13 @@ async def status(request: Request, user: dict):
     if not st or st["ws"] != user["workspace_id"]:
         raise ApiError(404, "job नहीं मिला (server restart हुआ हो तो Library देखें)")
     return ok({"status": st["status"], "progress": st.get("progress"), "message": st.get("message"), "error": st.get("error"),
-               "item": st.get("item"), "credits": st.get("credits"), "description": st.get("description"), "warnings": st.get("warnings"),
+               "item": st.get("item"), "credits": st.get("credits"), "description": st.get("description"), "thumbnail": st.get("thumbnail"), "warnings": st.get("warnings"),
                "seconds": int((st.get("finished") or time.time()) - st["started"])})
 
 
 routes = [
     Route("/documentary/plan", plan, methods=["POST"]),
     Route("/documentary/build", build, methods=["POST"]),
+    Route("/documentary/preview", preview, methods=["POST"]),
     Route("/documentary/{job_id}", status),
 ]

@@ -25,24 +25,65 @@ MIN_SCENE = 2.8
 SIZES = {"landscape": (1280, 720), "portrait": (720, 1280), "square": (1080, 1080)}
 
 _PROMPT = """You are a documentary writer. Topic: {topic}
+{facts}
 Write a {minutes}-minute explainer documentary in {lang}, as {n} scenes (about {per} seconds of narration each).
-Rules: facts only — if unsure of a number or date, leave it out; calm, curious, cinematic voice; short sentences that are easy to speak;
+Rules: facts only — {factrule}if unsure of a number or date, leave it out; calm, curious, cinematic voice; short sentences that are easy to speak;
 the first scene is a hook, the last scene a closing thought. No scene numbers inside the narration.
 Return ONLY JSON: {{"title": str, "scenes": [{{"narration": str (spoken text in {lang}), "visual": str (3-6 ENGLISH stock-footage search words: concrete things you can film, e.g. "aerial view himalaya mountains clouds"), "on_screen": str (<= 6 words or "")}}]}}"""
 
 _LANG = {"hi": "Hindi (Devanagari)", "en": "English", "hinglish": "Hinglish (Hindi in Roman letters)"}
 
 
-def plan(topic: str, *, minutes: float = 3.0, language: str = "hi") -> dict | None:
-    """Scenes from the LLM; None when no LLM key is configured or the answer was unusable."""
+def research(topic: str, language: str = "en", http_json=None, limit: int = 3) -> list[dict]:
+    """Grounding facts: intro extracts of the best Wikipedia articles for the topic (free, no key).
+    Returns [{title, url, text}] — empty on any failure (the plan then simply has no grounding).
+    Wikipedia text is CC BY-SA 4.0: the build adds these pages to the description as sources."""
+    import json as _json
+    import urllib.parse
+    import urllib.request
+
+    def _get(url: str) -> dict:
+        req = urllib.request.Request(url, headers={"User-Agent": "Vividora/1.0 (self-hosted video studio; documentary research)"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return _json.loads(r.read().decode())
+    get = http_json or _get
+    out: list[dict] = []
+    for lang in dict.fromkeys([language if language in ("hi", "en") else "en", "en"]):  # topic language first, then English
+        try:
+            q = urllib.parse.quote(topic[:200])
+            data = get(f"https://{lang}.wikipedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch={q}&gsrlimit={limit}"
+                       f"&prop=extracts|info&exintro=1&explaintext=1&exlimit={limit}&inprop=url&redirects=1")
+            pages = sorted((data.get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 99))
+            for pg in pages:
+                text = re.sub(r"\s+", " ", pg.get("extract") or "").strip()
+                if len(text) > 80:
+                    out.append({"title": pg.get("title", ""), "url": pg.get("fullurl", ""), "text": text[:1800], "lang": lang})
+        except Exception:  # noqa: BLE001 — research is a bonus
+            continue
+        if len(out) >= 2:
+            break
+    return out[:limit]
+
+
+def plan(topic: str, *, minutes: float = 3.0, language: str = "hi", ground: bool = True, http_json=None) -> dict | None:
+    """Scenes from the LLM; None when no LLM key is configured or the answer was unusable.
+    With ground=True the prompt carries Wikipedia extracts and the model is told to take numbers/dates/names only from them;
+    the pages used come back as result["sources"] ([{title, url}])."""
     topic = (topic or "").strip()
     if not topic or not llm.available():
         return None
     minutes = max(1.0, min(10.0, float(minutes)))
     n = max(4, min(24, round(minutes * 60 / 12)))
+    src = research(topic, language, http_json) if ground else []
+    facts = ("\nREFERENCE FACTS (use these):\n" + "\n".join(f"[{i + 1}] {s['title']}: {s['text']}" for i, s in enumerate(src)) + "\n") if src else ""
+    rule = "numbers, dates and names must come ONLY from the reference facts above; " if src else ""
     out = llm.ask_json(_PROMPT.format(topic=topic[:400], minutes=int(minutes) if minutes == int(minutes) else minutes,
-                                      lang=_LANG.get(language, language), n=n, per=12), max_tokens=4096, timeout=120)
-    return normalize(out)
+                                      lang=_LANG.get(language, language), n=n, per=12, facts=facts, factrule=rule),
+                       max_tokens=4096, timeout=120)
+    res = normalize(out)
+    if res:
+        res["sources"] = [{"title": s["title"], "url": s["url"]} for s in src]
+    return res
 
 
 def normalize(out) -> dict | None:
@@ -305,14 +346,49 @@ def chapters(scenes: list[dict], durations: list[float], min_len: float = 10.0) 
     return out if len(out) >= 3 else []
 
 
-def description(title: str, chaps: list[tuple[float, str]], credits: list[str]) -> str:
+def description(title: str, chaps: list[tuple[float, str]], credits: list[str], sources: list[dict] | None = None) -> str:
     lines = [title, ""]
     if chaps:
         lines += [f"{_clock(t)} {name}" for t, name in chaps] + [""]
+    if sources:
+        lines += ["Sources (Wikipedia, CC BY-SA 4.0):"] + [f"{x.get('title', '')} — {x.get('url', '')}" for x in sources[:6]] + [""]
     if credits:
         lines += ["Footage credits:"] + credits + [""]
     lines.append("Narration: AI voice. Facts compiled by the creator — please verify before relying on them.")
     return "\n".join(lines)
+
+
+def make_thumbnail(video: Path, title: str, out: Path, at: float = 2.0) -> Path:
+    """A frame from the film with a dark band and the title — ready as a YouTube thumbnail (1280×720 for landscape)."""
+    from PIL import Image, ImageDraw, ImageFont
+    frame = out.with_suffix(".frame.png")
+    _ff(["-ss", f"{at:.2f}", "-i", str(video), "-frames:v", "1", str(frame)])
+    img = Image.open(frame).convert("RGB")
+    w, h = img.size
+    band = Image.new("RGBA", (w, int(h * 0.34)), (0, 0, 0, 170))
+    img.paste(band, (0, h - band.size[1]), band)
+    d = ImageDraw.Draw(img)
+    fp = _font("hi")
+    size_px = max(30, int(min(w, h) * 0.09))
+    font = ImageFont.truetype(fp, size_px) if fp else ImageFont.load_default()
+    words, lines, cur = title.split(), [], ""
+    for wd in words:
+        t = (cur + " " + wd).strip()
+        if d.textlength(t, font=font) > w * 0.88 and cur:
+            lines.append(cur)
+            cur = wd
+        else:
+            cur = t
+    if cur:
+        lines.append(cur)
+    lines = lines[:2]
+    y = h - band.size[1] + (band.size[1] - int(size_px * 1.25) * len(lines)) // 2
+    for ln in lines:
+        d.text(((w - d.textlength(ln, font=font)) / 2, y), ln, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0))
+        y += int(size_px * 1.25)
+    img.save(out)
+    frame.unlink(missing_ok=True)
+    return out
 
 
 def scene_durations(narr_seconds: list[float]) -> list[float]:

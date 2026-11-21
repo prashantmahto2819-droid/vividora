@@ -142,8 +142,9 @@ def spec() -> dict:
             "/v1/documentary/plan": {"post": {
                 "summary": "Documentary plan: topic (needs GEMINI/ANTHROPIC key) or your own script → scenes [{narration, visual, on_screen}]",
                 "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "properties": {
-                    "topic": {"type": "string"}, "script": {"type": "string"}, "minutes": {"type": "number"}, "language": {"type": "string"}}}}}},
-                "responses": {"200": {"description": "{title, scenes}"}}}},
+                    "topic": {"type": "string"}, "script": {"type": "string"}, "minutes": {"type": "number"}, "language": {"type": "string"},
+                    "ground": {"type": "boolean", "description": "default true: ground facts in Wikipedia extracts"}}}}}},
+                "responses": {"200": {"description": "{title, scenes, sources:[{title,url}]}"}}}},
             "/v1/documentary/build": {"post": {
                 "summary": "Scenes → narrated documentary MP4 in the Library (job; poll /v1/jobs/{id}). Pictures: library keyword match, Pixabay, else title cards",
                 "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["scenes"], "properties": {

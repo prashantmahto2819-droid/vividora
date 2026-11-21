@@ -62,6 +62,34 @@ def units():
     check("too short for 3 chapters → none", doc.chapters(sc[:3], [3.0] * 3) == [])
     text = doc.description("My Film", ch, ["scene 2: someone (Pixabay) https://x"])
     check("description has 0:00 line, credits and the AI note", "0:00 Intro" in text and "Footage credits:" in text and "AI voice" in text, text)
+    text2 = doc.description("My Film", ch, [], [{"title": "Himalaya", "url": "https://en.wikipedia.org/wiki/Himalayas"}])
+    check("description lists Wikipedia sources with CC BY-SA", "CC BY-SA" in text2 and "wikipedia.org/wiki/Himalayas" in text2, text2)
+    urls = []
+
+    def wiki(url):
+        urls.append(url)
+        if "hi.wikipedia" in url:
+            raise OSError("down")
+        return {"query": {"pages": {"1": {"title": "Himalayas", "fullurl": "https://en.wikipedia.org/wiki/Himalayas", "index": 1,
+                                           "extract": "The Himalayas is a mountain range in Asia. " * 5},
+                                   "2": {"title": "Tiny", "fullurl": "x", "index": 2, "extract": "short"}}}}
+    r = doc.research("Himalaya", "hi", wiki)
+    check("research: hi fails → falls back to en, drops tiny extracts", len(r) == 1 and r[0]["title"] == "Himalayas" and len(urls) == 2, (r, urls))
+    check("research: total failure → []", doc.research("x", "en", lambda u: (_ for _ in ()).throw(OSError("no"))) == [])
+    from vividora.engine import llm
+    seen = {}
+    old_av, old_ask = llm.available, llm.ask_json
+    llm.available = lambda: "gemini"
+    llm.ask_json = lambda prompt, **k: (seen.setdefault("p", prompt), {"title": "T", "scenes": [{"narration": "one"}, {"narration": "two"}]})[1]
+    try:
+        res = doc.plan("Himalaya", language="en", http_json=wiki)
+        check("plan: facts + only-from-facts rule in prompt, sources returned",
+              "REFERENCE FACTS" in seen["p"] and "ONLY from the reference facts" in seen["p"] and res["sources"][0]["title"] == "Himalayas", (seen["p"][:200], res))
+        seen.clear()
+        res = doc.plan("Himalaya", language="en", ground=False, http_json=wiki)
+        check("plan ground=False: no facts, no sources", "REFERENCE FACTS" not in seen["p"] and res["sources"] == [], res)
+    finally:
+        llm.available, llm.ask_json = old_av, old_ask
     calls = []
 
     def fake(url):
@@ -87,6 +115,9 @@ def units():
         c3 = doc.render_scene(src, "video", 3.0, tmp / "c3.mp4", size, 2)
         kinds, d, st = probe(c3)
         check("short video loops to 3.0 s, filled to frame", abs(d - 3.0) < 0.15 and st[0]["height"] == 360, (d, st))
+        th = doc.make_thumbnail(c1, "हिमालय — दुनिया की छत", tmp / "th.png", at=1.0)
+        from PIL import Image
+        check("thumbnail written at video size", th.exists() and Image.open(th).size == (640, 360) and not (tmp / "th.frame.png").exists(), th)
         w1, w2 = tmp / "w1.wav", tmp / "w2.wav"
         be = tts.FakeBackend()
         be.synth("one two three", {"gender": "m"}, "en", 1.0, w1)
@@ -197,6 +228,8 @@ def e2e():
         st, r2 = call("POST", "/v1/documentary/build", {"scenes": scenes, "title": "Test डॉक्यूमेंट्री", "orientation": "portrait", "voice": "hi_rohit_deep"}, key)
         check("build accepted (202 + job_id)", st == 202 and r2.get("job_id"), (st, r2))
         jid = r2["job_id"]
+        st, pv = call("POST", "/documentary/preview", {"scenes": scenes}, tok)
+        check("preview: one entry per scene, no stock key", st == 200 and len(pv["matches"]) == 3 and pv["has_stock"] is False, (st, pv))
         st, again = call("POST", "/v1/documentary/build", {"scenes": scenes}, key)
         check("second build while running → 429", st == 429, (st, again))
         t0, j = time.time(), None
@@ -218,6 +251,8 @@ def e2e():
             st, jj = call("GET", f"/documentary/{jid}", None, tok)
             check("editor status route agrees", st == 200 and jj["status"] == "done" and jj["progress"] == 100, jj)
             check("job result carries the YouTube description (title + AI note)", "Test डॉक्यूमेंट्री" in (jj.get("description") or "") and "AI voice" in jj["description"], jj.get("description"))
+            th = jj.get("thumbnail")
+            check("job result carries a thumbnail library item", bool(th) and th.get("kind") == "image", th)
         st, lib = call("GET", "/library?kind=broll", None, tok)
         items = lib if isinstance(lib, list) else lib.get("items", [])
         check("saved in Library with tags", any("documentary" in (i.get("tags") or "") for i in items), items[:2])
