@@ -54,3 +54,6 @@ Setup: `gpu-worker/unirig/README.md`। API: `POST /api/v1/rig {library_id, temp
 **सीमा:** rigged .glb मिलता है, लेकिन हमारे 3D Studio के procedural clips (walk, talk…) अभी इस नई skeleton पर retarget नहीं होते —
 वह असली UniRig output की bone-नामों पर निर्भर है, इसलिए पहला असली rigged .glb मिलने के बाद अगला कदम।
 Rigged .glb को Blender/Mixamo/three.js में animate करके वापस import किया जा सकता है।
+
+### बिल्कुल free rigging (हाथ से)
+`gpu-worker/unirig/unirig_colab.ipynb` को https://colab.research.google.com में खोलें (Runtime → GPU), .glb upload करें, तीनों stages चलाएँ, `rigged.glb` download करके Vividora में «⬆ .glb import» करें। (असली GPU पर हमारे द्वारा test नहीं हुआ — UniRig के install/flags बदल सकते हैं।)

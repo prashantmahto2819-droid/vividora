@@ -501,7 +501,10 @@ async def preview(request: Request, user: dict):
         if m:
             used.add(m["id"])
         out.append({"index": i, "library_id": m["id"] if m else None, "name": m["name"] if m else None})
-    return ok({"matches": out, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY")),
+    from ..engine import aivideo
+    n_motion = min(sum(1 for sc in res["scenes"] if sc.get("motion")), aivideo.max_clips()) if aivideo.provider() else 0
+    return ok({"matches": out, "video_clips": n_motion, "video_estimate_usd": aivideo.estimate_usd(n_motion),
+               "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY")),
                 "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider(),
                 "video_provider": __import__("vividora.engine.aivideo", fromlist=["x"]).provider()})
 

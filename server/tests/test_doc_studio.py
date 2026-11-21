@@ -79,6 +79,25 @@ def ai_video_units():
         check("ai video: submit (image as data URI) → poll → fetch → download", out.exists() and seq[0][0] == "POST" and seq[0][2] and seq[-1][1] == "resp", seq)
         check("ai video: failed status → RuntimeError", not _raises(lambda: aivideo.animate(img, "x", tmp / "f.mp4", poll_s=0.01,
               call=lambda m, u, b=None, timeout=60: {"status_url": "s", "response_url": "r"} if m == "POST" else {"status": "FAILED", "error": "nsfw"})))
+        os.environ.update(AI_VIDEO_IMAGE_FIELD="start_image", AI_VIDEO_PROMPT_FIELD="", AI_VIDEO_EXTRA_JSON='{"duration": "5"}', AI_VIDEO_MODEL="fal-ai/cheap/i2v")
+        got = {}
+
+        def call2(method, url, body=None, timeout=60):
+            if method == "POST":
+                got.update(url=url, body=body)
+                return {"status_url": "s", "response_url": "r"}
+            return {"status": "COMPLETED", "video": {"url": "https://v.example/x.mp4"}} if url == "s" else {"video": {"url": "https://v.example/x.mp4"}}
+        aivideo.animate(img, "ignored", tmp / "h.mp4", call=call2, poll_s=0.01, download=lambda u, d: d.write_bytes(b"x" * 2000))
+        check("ai video: configurable model/field/extras, no prompt field when empty", got["url"].endswith("/fal-ai/cheap/i2v") and "start_image" in got["body"] and
+              got["body"]["duration"] == "5" and "prompt" not in got["body"] and "image_url" not in got["body"], got)
+        os.environ["AI_VIDEO_EXTRA_JSON"] = "{bad"
+        check("ai video: bad extra JSON → clear error", not _raises(lambda: aivideo.animate(img, "x", tmp / "i.mp4", call=call2, poll_s=0.01)))
+        for k in ("AI_VIDEO_IMAGE_FIELD", "AI_VIDEO_PROMPT_FIELD", "AI_VIDEO_EXTRA_JSON", "AI_VIDEO_MODEL"):
+            os.environ.pop(k)
+        os.environ.update(AI_VIDEO_PRICE_PER_SEC="0.03", AI_VIDEO_SECONDS="5")
+        check("cost estimate = price × seconds × clips", aivideo.estimate_usd(4) == 0.6 and aivideo.estimate_usd(0) == 0.0, aivideo.estimate_usd(4))
+        os.environ.pop("AI_VIDEO_PRICE_PER_SEC")
+        check("no price → no estimate", aivideo.estimate_usd(3) is None)
         check("ai video: non-https video url rejected", not _raises(lambda: aivideo.animate(img, "x", tmp / "g.mp4", poll_s=0.01, download=lambda u, d: None,
               call=lambda m, u, b=None, timeout=60: {"status_url": "s", "response_url": "r"} if m == "POST" else {"status": "COMPLETED", "video": {"url": "file:///etc/passwd"}})))
     finally:
@@ -153,7 +172,7 @@ def e2e():
            "WEB_DIST": str(tmp / "web"), "TRIPOSR_URL": "http://127.0.0.1:9", "VIVIDORA_TTS": "fake", "PUBLISH_DRY_RUN": "1",
            "OLLAMA_URL": f"http://127.0.0.1:{osrv.server_port}", "OLLAMA_MODEL": "m", "LLM_CACHE": "0",
            "CLOUDFLARE_API_BASE": f"http://127.0.0.1:{fsrv.server_port}", "CLOUDFLARE_ACCOUNT_ID": "a", "CLOUDFLARE_API_TOKEN": "t",
-           "FAL_KEY": "k", "FAL_QUEUE_BASE": f"http://127.0.0.1:{fsrv.server_port}", "AI_VIDEO_MAX": "1"}
+           "AI_VIDEO_PRICE_PER_SEC": "0.1", "FAL_KEY": "k", "FAL_QUEUE_BASE": f"http://127.0.0.1:{fsrv.server_port}", "AI_VIDEO_MAX": "1"}
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "vividora.app:app", "--port", str(port), "--log-level", "warning"],
                            cwd=str(HERE), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}/api"
@@ -253,7 +272,7 @@ def e2e():
               {"narration": "तीसरा दृश्य।", "visual": "forest"}]
         st, r = call("GET", "/documentary/drafts", None, tok)
         st, r = call("POST", "/documentary/preview", {"scenes": mo}, tok)
-        check("preview reports the video provider is not needed here; image provider on", st == 200 and r["ai_provider"] == "cloudflare", (st, r))
+        check("preview: image provider on; video clips capped by AI_VIDEO_MAX with a cost estimate", st == 200 and r["ai_provider"] == "cloudflare" and r["video_clips"] == 1 and r["video_estimate_usd"] == 0.5, (st, r))
         st, r = call("POST", "/documentary/build", {"scenes": mo, "title": "Motion", "captions": False, "stock": False}, tok)
         check("motion build accepted", st == 202, (st, r))
         j = wait(r["job_id"], tok, 300)

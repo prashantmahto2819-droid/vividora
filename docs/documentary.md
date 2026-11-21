@@ -61,3 +61,5 @@ GET  /api/v1/jobs/{job_id}      → status, file (डाउनलोड: GET /ap
 
 ## AI video clips (वैकल्पिक, पैसे वाले)
 हर scene में "🎥 AI video बनाओ" टिक करने पर उसकी तस्वीर (Library/AI/stock) fal.ai के image-to-video model से 1–3 मिनट में छोटे clip में बदलती है। `.env` में `FAL_KEY` चाहिए (https://fal.ai/dashboard/keys); model `AI_VIDEO_MODEL` से बदलें; एक film में अधिकतम `AI_VIDEO_MAX` (default 4) clips, ताकि बिल सीमित रहे। fail हो तो तस्वीर पर Ken-Burns लगता है और warning दिखती है। description में "AI video — synthetic" जुड़ता है और YouTube का synthetic flag लगता है। **ध्यान:** यह real fal.ai API पर test नहीं हुआ (नक़ली server से जाँचा) — पहले 1 scene से आज़माएँ और fal dashboard में model id/कीमत देख लें।
+
+**कोई भी fal model:** `AI_VIDEO_MODEL` के साथ ज़रूरत हो तो `AI_VIDEO_IMAGE_FIELD`, `AI_VIDEO_PROMPT_FIELD` (ख़ाली = prompt नहीं भेजना), `AI_VIDEO_EXTRA_JSON` (जैसे `{"duration":"5"}`) सेट करें — code बदलने की ज़रूरत नहीं (output `video.url` से पढ़ा जाता है; fal का नियम)। `AI_VIDEO_PRICE_PER_SEC` और `AI_VIDEO_SECONDS` डालने पर scenes के नीचे "इस film में N AI clip ≈ $x" का अंदाज़ा दिखता है।

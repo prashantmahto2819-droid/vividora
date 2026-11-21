@@ -262,7 +262,7 @@ export function docBind(c) {
     box.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => mv(+b.dataset.up, +b.dataset.up - 1)));
     box.querySelectorAll("[data-dn]").forEach((b) => (b.onclick = () => mv(+b.dataset.dn, +b.dataset.dn + 1)));
     box.querySelectorAll("[data-dup]").forEach((b) => (b.onclick = () => { docState.scenes.splice(+b.dataset.dup + 1, 0, { ...docState.scenes[+b.dataset.dup] }); docState.pv = null; draw(); }));
-    box.querySelectorAll("[data-mo]").forEach((t) => (t.onchange = () => { if (t.checked) docState.scenes[+t.dataset.mo].motion = true; else delete docState.scenes[+t.dataset.mo].motion; }));
+    box.querySelectorAll("[data-mo]").forEach((t) => (t.onchange = () => { if (t.checked) docState.scenes[+t.dataset.mo].motion = true; else delete docState.scenes[+t.dataset.mo].motion; preview(); }));
     box.querySelectorAll("[data-h]").forEach((t) => (t.oninput = () => { const v = Math.max(0, Math.min(30, +t.value || 0)); if (v) docState.scenes[+t.dataset.h].hold = v; else delete docState.scenes[+t.dataset.h].hold; }));
     box.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { docState.scenes.splice(+b.dataset.del, 1); draw(); }));
     const ti = $("#dc-title"); if (ti) ti.oninput = () => (docState.title = ti.value);
@@ -282,6 +282,7 @@ export function docBind(c) {
       const r = await ctx.api("POST", "/documentary/preview", { scenes: docState.scenes });
       docState.pv = r.matches; draw();
       const vi = $("#dc-vinfo"); if (vi) vi.textContent = r.video_provider ? `(AI video: ${r.video_provider} चालू)` : "(AI video बंद — .env में FAL_KEY डालें)";
+      if (vi && r.video_clips) vi.textContent += ` · इस film में ${r.video_clips} AI clip${r.video_estimate_usd != null ? ` ≈ $${r.video_estimate_usd}` : " (कीमत जानने के लिए .env में AI_VIDEO_PRICE_PER_SEC डालें)"}`;
       const inf = $("#dc-aiinfo"); if (inf) inf.textContent = r.ai_provider ? `(${r.ai_provider} GPU)` : "— .env में CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN या HF_TOKEN डालें";
     } catch { /* preview is optional */ }
   };
