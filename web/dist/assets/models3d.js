@@ -49,11 +49,22 @@ export async function mountModels(el, ctx, opts = {}) {
     let list = [];
     try { list = (await api("GET", "/triposr/models")).models || []; } catch (e) { el.querySelector(".m3-grid").innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
     el.querySelector(".m3-grid").innerHTML = list.length ? list.map((m) => `<div class="m3-card" data-id="${m.id}"><b title="${esc(m.name)}">🧊 ${esc(m.name)}</b><span class="small muted">${(m.size / 1048576).toFixed(1)} MB · ${new Date(m.created_at).toLocaleDateString("hi-IN")}</span>
-      <div class="m3-btns"><button class="btn small" data-act="view">👁 देखें</button><button class="btn small primary" data-act="char">🧍 बोलता character</button><a class="btn small quiet" href="${m.url}" download="${esc(m.name)}.glb">⬇</a>${canEdit ? `<button class="btn small quiet" data-act="ren" title="नाम बदलें">✏</button><button class="btn small danger" data-act="del">🗑 हटाएँ</button>` : ""}</div></div>`).join("")
+      <div class="m3-btns"><button class="btn small" data-act="view">👁 देखें</button>${canEdit && !/rigged/.test(m.tags || "") ? `<button class="btn small" data-act="rig" title="UniRig — cloud GPU पर skeleton + skin weights (पैसे लगते हैं)">🦴 Rig (cloud GPU)</button>` : ""}<button class="btn small primary" data-act="char">🧍 बोलता character</button><a class="btn small quiet" href="${m.url}" download="${esc(m.name)}.glb">⬇</a>${canEdit ? `<button class="btn small quiet" data-act="ren" title="नाम बदलें">✏</button><button class="btn small danger" data-act="del">🗑 हटाएँ</button>` : ""}</div></div>`).join("")
       : `<p class="small muted">अभी कोई 3D model नहीं — «.glb import» से अपनी फ़ाइल डालें, या «फोटो से बनाएँ» से तस्वीर से बनाएँ।</p>`;
     el.querySelectorAll(".m3-card").forEach((card) => {
       const m = list.find((x) => x.id === card.dataset.id);
       card.querySelector('[data-act="view"]').onclick = () => viewModel(m);
+      const rg = card.querySelector('[data-act="rig"]'); if (rg) rg.onclick = async () => {
+        if (!confirm(`«${m.name}» को cloud GPU पर rig करें? (RunPod पर कुछ सेंट लगते हैं; पहली बार 1–3 मिनट cold start)`)) return;
+        rg.disabled = true;
+        try {
+          const r = await api("POST", "/rig", { library_id: m.id });
+          const tick = async () => { const j = await api("GET", "/rig/" + r.job_id);
+            if (j.status === "running") { rg.textContent = "⏳ " + (j.message || "rigging…"); setTimeout(tick, 4000); return; }
+            if (j.status === "done") { toast("Rig हो गया ✓ — «" + j.item.name + "»"); draw(); } else { toast("❌ " + (j.error || "नहीं हो पाया")); rg.disabled = false; rg.textContent = "🦴 Rig (cloud GPU)"; } };
+          tick();
+        } catch (e) { toast(e.message); rg.disabled = false; }
+      };
       card.querySelector('[data-act="char"]').onclick = () => { try { sessionStorage.setItem("c3dGlb", m.id); } catch {} location.hash = "#/characters3d"; if (location.hash === "#/characters3d") window.dispatchEvent(new HashChangeEvent("hashchange")); };
       const ren = card.querySelector('[data-act="ren"]'); if (ren) ren.onclick = async () => { const n = prompt("नया नाम", m.name); if (!n || !n.trim()) return; try { await api("PATCH", `/library/${m.id}`, { name: n.trim() }); draw(); } catch (e) { toast(e.message); } };
       const del = card.querySelector('[data-act="del"]'); if (del) del.onclick = async () => { if (!confirm(`«${m.name}» हमेशा के लिए हटाएँ?`)) return; try { await api("DELETE", `/library/${m.id}`); toast("हटा दिया"); draw(); } catch (e) { toast(e.message); } };

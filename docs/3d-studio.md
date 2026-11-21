@@ -46,3 +46,11 @@ rigs (day / evening / night), 6 camera presets + orbit / push-in, 3–4 characte
 The Docker image installs `playwright` + Chromium (`server/Dockerfile`); the worker opens
 `CHARS3D_PAGE_URL` (default `http://api:8000/assets/3d.html`). Software rendering: ~1–2 frames/s at 720p on a
 Xeon core — a 15 s two-character scene takes ~5 minutes. Tests: `python3 tests/test_chars3d_units.py`.
+
+## Auto-rig on a cloud GPU (UniRig)
+3D models page → **🦴 Rig (cloud GPU)**: model (.glb, ≤ 8 MB) RunPod serverless पर चल रहे [UniRig](https://github.com/VAST-AI-Research/UniRig)
+को जाता है, skeleton + skin weights लगकर "नाम (rigged)" Library में आता है (tags `3d,glb,rigged`)। सिर्फ़ चलने के सेकंडों का पैसा लगता है।
+Setup: `gpu-worker/unirig/README.md`। API: `POST /api/v1/rig {library_id, template}`, MCP tool `vividora_rig_model`।
+**सीमा:** rigged .glb मिलता है, लेकिन हमारे 3D Studio के procedural clips (walk, talk…) अभी इस नई skeleton पर retarget नहीं होते —
+वह असली UniRig output की bone-नामों पर निर्भर है, इसलिए पहला असली rigged .glb मिलने के बाद अगला कदम।
+Rigged .glb को Blender/Mixamo/three.js में animate करके वापस import किया जा सकता है।

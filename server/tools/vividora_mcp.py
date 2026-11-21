@@ -126,6 +126,14 @@ def t_image_to_3d(a):
     return _finish(_wait(j["job_id"]), a.get("save_to"))
 
 
+def t_rig(a):
+    body = {k: a[k] for k in ("library_id", "template", "name") if a.get(k)}
+    j = _req("POST", "/v1/rig", body)
+    if a.get("wait", True) is False:
+        return j
+    return _finish(_wait(j["job_id"]), a.get("save_to"))
+
+
 def t_models(a):
     return _req("GET", "/v1/models3d")
 
@@ -228,6 +236,8 @@ TOOLS = {
     "vividora_documentary_series": (t_doc_series, "Topic → series outline (build=false), या episodes देकर build=true से पूरी series बनती है (हर episode की scenes AI लिखता है)", _obj({
         "topic": {"type": "string"}, "episodes": {"description": "outline के लिए संख्या; build के लिए [{title, summary}]"}, "series": {"type": "string"},
         "build": {"type": "boolean"}, "language": {"type": "string"}, "minutes": {"type": "number"}, "voice": {"type": "string"}, "ai_images": {"type": "boolean"}, **_WAIT})),
+    "vividora_rig_model": (t_rig, "3D model (Library id) को cloud GPU (UniRig) पर auto-rig करता है → rigged .glb; पैसे वाला, 1–5 मिनट", _obj({
+        "library_id": {"type": "string"}, "template": {"type": "string", "enum": ["mixamo", "vroid", "articulationxl"]}, "name": {"type": "string"}, **_WAIT}, ["library_id"])),
     "vividora_job_status": (t_job, "किसी job की स्थिति (running/done/failed + file)", _obj({"job_id": {"type": "string"}}, ["job_id"])),
     "vividora_download_file": (t_download, "Library की file (wav/glb/webm/mp4) local path पर सेव करें", _obj({
         "file_id": {"type": "string"}, "save_to": {"type": "string"}}, ["file_id", "save_to"])),

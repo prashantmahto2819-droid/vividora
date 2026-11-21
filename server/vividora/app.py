@@ -165,6 +165,8 @@ def create_app() -> Starlette:
     api_routes += scriptgen_api.routes  # AI Script Generator
     from .api import dashboard_api
     api_routes += dashboard_api.routes  # Creator performance dashboard
+    from .api import rig_api
+    api_routes += rig_api.routes  # cloud-GPU auto-rigging (UniRig)
     from .api import triposr_api
     api_routes += triposr_api.routes  # TripoSR: image → 3D GLB model (self-hosted, localhost:8090)
     from .api import voicestudio_api

@@ -15,7 +15,7 @@ from starlette.routing import Route
 
 from .. import __version__, db, storage
 from ..config import settings
-from . import chars3d_api, documentary_api, sfx_api, triposr_api, voiceover_api
+from . import chars3d_api, documentary_api, rig_api, sfx_api, triposr_api, voiceover_api
 from .deps import ApiError, ok, require
 
 
@@ -55,7 +55,7 @@ async def character_video(request: Request, user: dict):
 async def job(request: Request, user: dict):
     jid = request.path_params["job_id"]
     ws = user["workspace_id"]
-    for store, kind in ((triposr_api._JOBS, "image_to_3d"), (voiceover_api._JOBS, "voiceover"), (documentary_api._JOBS, "documentary")):
+    for store, kind in ((triposr_api._JOBS, "image_to_3d"), (voiceover_api._JOBS, "voiceover"), (documentary_api._JOBS, "documentary"), (rig_api._JOBS, "rig")):
         st = store.get(jid)
         if st and st["ws"] == ws:
             item = st.get("item")
@@ -143,6 +143,11 @@ def spec() -> dict:
                         "density": {"type": "string", "enum": ["low", "normal", "high"]},
                         "level": {"type": "number", "minimum": 0.3, "maximum": 1.5}}}}}},
                 "responses": {"200": {"description": "{sfx:[...], added:n}"}}}},
+            "/v1/rig": {"post": {
+                "summary": "Auto-rig a Library 3D model (.glb) on a cloud GPU (UniRig) → rigged .glb in the Library (job; poll /v1/jobs/{id})",
+                "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["library_id"], "properties": {
+                    "library_id": {"type": "string"}, "template": {"type": "string", "enum": ["mixamo", "vroid", "articulationxl"]}, "name": {"type": "string"}}}}}},
+                "responses": {"202": {"description": "{job_id}"}}}},
             "/v1/documentary/plan": {"post": {
                 "summary": "Documentary plan: topic (needs GEMINI/ANTHROPIC key) or your own script → scenes [{narration, visual, on_screen}]",
                 "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "properties": {
@@ -236,6 +241,7 @@ routes = [
     Route("/v1/models3d", triposr_api.import_glb, methods=["POST"]),
     Route("/v1/character-video", character_video, methods=["POST"]),
     Route("/v1/auto-sfx", sfx_api.auto, methods=["POST"]),
+    Route("/v1/rig", rig_api.start, methods=["POST"]),
     Route("/v1/documentary/plan", documentary_api.plan, methods=["POST"]),
     Route("/v1/documentary/build", documentary_api.build, methods=["POST"]),
     Route("/v1/documentary/shorts", documentary_api.shorts, methods=["POST"]),
