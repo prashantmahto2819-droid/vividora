@@ -7,7 +7,8 @@ render_scene() Ken-Burns pan/zoom on a picture, or a trimmed/looped clip, with s
 assemble()  scenes + narration wavs (+ SFX on scene changes, + music ducked under the voice) → one MP4.
 
 Everything here is plain functions on paths (ffmpeg + Pillow + numpy), so it is testable without a server.
-Phase 1 limits (on purpose): no captions yet, no per-scene editing UI — the result is a finished MP4 in the Library.
+Captions (optional, on by default) are burned in with libass from the narration text, timed by sentence length inside each scene.
+Phase 1 limits (on purpose): no per-scene editing UI — the result is a finished MP4 in the Library.
 """
 
 from __future__ import annotations
@@ -204,7 +205,7 @@ def narration_track(wavs: list[Path], durations: list[float], out: Path) -> Path
 
 
 def assemble(clips: list[Path], durations: list[float], narration: Path, out: Path, *, sfx: Path | None = None,
-             music: Path | None = None, work: Path | None = None) -> Path:
+             music: Path | None = None, work: Path | None = None, captions: Path | None = None) -> Path:
     """clips (concat) + narration; whoosh at every scene change; music at ~12% ducked under the voice; loudness normalised."""
     work = work or out.parent
     lst = work / "clips.txt"
@@ -230,8 +231,48 @@ def assemble(clips: list[Path], durations: list[float], narration: Path, out: Pa
         n += 1
     total = sum(durations)
     chain.append("".join(mix) + f"amix=inputs={len(mix)}:duration=first:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,atrim=0:{total:.3f}[aout]")
-    _ff([*ins, "-filter_complex", ";".join(chain), "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+    if captions:
+        fonts = str(Path(__file__).resolve().parents[2] / "fonts")
+        esc = lambda x: str(x).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")  # noqa: E731
+        chain.append(f"[0:v]subtitles='{esc(captions)}':fontsdir='{esc(fonts)}'[vout]")
+        vmap, vcodec = "[vout]", ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
+    else:
+        vmap, vcodec = "0:v", ["-c:v", "copy"]
+    _ff([*ins, "-filter_complex", ";".join(chain), "-map", vmap, "-map", "[aout]", *vcodec, "-c:a", "aac", "-b:a", "160k",
          "-t", f"{total:.3f}", "-movflags", "+faststart", str(out)])
+    return out
+
+
+def _ass_time(t: float) -> str:
+    cs = int(round(t * 100))
+    return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
+
+
+def build_captions(scenes: list[str], narr: list[float], durations: list[float], size: tuple[int, int], out: Path) -> Path:
+    """ASS file: each scene's narration cut at sentence/phrase ends (≤ ~46 chars a line), shown for a time proportional to its
+    length inside the spoken part of the scene (the real narration seconds, so lines follow the voice)."""
+    w, h = size
+    fs = max(26, int(min(w, h) * (0.055 if w >= h else 0.05)))
+    font = Path(__file__).resolve().parents[2] / "fonts"
+    fname = "Hind" if (font / "Hind-Bold.ttf").exists() else "Noto Sans Devanagari"
+    lines = ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {w}", f"PlayResY: {h}", "WrapStyle: 0", "",
+             "[V4+ Styles]",
+             "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+             f"Style: Cap,{fname},{fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,3,6,0,2,{int(w * 0.07)},{int(w * 0.07)},{int(h * (0.1 if w >= h else 0.18))},1",
+             "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text"]
+    t0 = 0.0
+    for text, spoken, total in zip(scenes, narr, durations):
+        parts = [p for p in tts.split_sentences(text, max_chars=46) if p.strip()] or [text]
+        weight = sum(len(p) for p in parts) or 1
+        t = t0 + 0.1
+        span = max(0.5, min(spoken, total - 0.2))
+        for p in parts:
+            d = span * len(p) / weight
+            safe = p.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ")
+            lines.append(f"Dialogue: 0,{_ass_time(t)},{_ass_time(t + d)},Cap,,0,0,0,,{safe}")
+            t += d
+        t0 += total
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
 
 

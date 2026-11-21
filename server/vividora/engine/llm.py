@@ -1,7 +1,8 @@
 """Tiny LLM client (stdlib only). Gemini first (cheap), Claude if configured.
 
 Set GEMINI_API_KEY (and optionally GEMINI_MODEL) or ANTHROPIC_API_KEY
-(ANTHROPIC_MODEL). Every call asks for JSON and returns the parsed object,
+(ANTHROPIC_MODEL), or run it free on your own machine with Ollama: OLLAMA_URL (e.g. http://host.docker.internal:11434) and
+OLLAMA_MODEL (default qwen2.5:7b). LLM_PROVIDER=gemini|claude|ollama forces one when several are set. Every call asks for JSON and returns the parsed object,
 or None when no key is set or the call fails — callers always have a
 heuristic fallback, so the product works offline too.
 """
@@ -18,11 +19,12 @@ from pathlib import Path
 
 
 def available() -> str | None:
-    if os.getenv("GEMINI_API_KEY"):
-        return "gemini"
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return "claude"
-    return None
+    have = {"gemini": bool(os.getenv("GEMINI_API_KEY")), "claude": bool(os.getenv("ANTHROPIC_API_KEY")),
+            "ollama": bool((os.getenv("OLLAMA_URL") or "").strip())}
+    forced = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if forced in have and have[forced]:
+        return forced
+    return next((k for k in ("gemini", "claude", "ollama") if have[k]), None)
 
 
 def _extract_json(text: str):
@@ -44,6 +46,8 @@ def _cache_dir() -> Path:
 
 
 def _model(which: str) -> str:
+    if which == "ollama":
+        return os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     return _gemini_model() if which == "gemini" else os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
 
 
@@ -199,6 +203,15 @@ def _ask(which: str, prompt: str, *, system: str, max_tokens: int, timeout: floa
                 if not alt or alt == model:
                     raise
                 text = _gemini_call(alt, prompt, system, max_tokens, timeout)
+        elif which == "ollama":
+            body = {"model": _model("ollama"), "stream": False, "format": "json",
+                    "messages": [{"role": "system", "content": system or "Reply with JSON only."}, {"role": "user", "content": prompt}],
+                    "options": {"num_predict": max_tokens, "temperature": 0.7}}
+            url = os.environ["OLLAMA_URL"].strip().rstrip("/") + "/api/chat"
+            req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=max(timeout, 300)) as r:  # a local 7B model on CPU is slow
+                data = json.loads(r.read().decode())
+            text = (data.get("message") or {}).get("content", "")
         else:
             model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
             body = {"model": model, "max_tokens": max_tokens, "system": system or "Reply with JSON only.",

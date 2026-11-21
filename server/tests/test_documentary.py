@@ -81,12 +81,58 @@ def units():
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=800:duration=0.4", str(sfx)], check=True)
         mus = tmp / "mus.wav"
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=2", str(mus)], check=True)
+        ass = doc.build_captions(["पहला वाक्य है। दूसरा वाक्य भी है।", "तीसरा scene"], [2.4, 1.0], durs, (640, 360), tmp / "c.ass")
+        txt = ass.read_text(encoding="utf-8")
+        ev = [l for l in txt.splitlines() if l.startswith("Dialogue")]
+        check("captions: one line per phrase, inside scene windows", len(ev) >= 3 and "0:00:03.00" in ev[-1] or "0:00:03.10" in ev[-1], ev)
+        capped = doc.assemble([c1, c2], durs, track, tmp / "cap.mp4", work=tmp, captions=ass)
+        kinds, d, _ = probe(capped)
+        check("assemble with burned captions: audio+video, 5.8 s", kinds == {"video", "audio"} and abs(d - 5.8) < 0.2, (kinds, d))
         for label, kw in (("voice only", {}), ("voice + sfx", {"sfx": sfx}), ("voice + sfx + music (looped)", {"sfx": sfx, "music": mus})):
             out = doc.assemble([c1, c2], durs, track, tmp / f"o_{len(kw)}.mp4", work=tmp, **kw)
             kinds, d, _ = probe(out)
             check(f"assemble {label}: audio+video, 5.8 s", kinds == {"video", "audio"} and abs(d - 5.8) < 0.2, (kinds, d))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def ollama():
+    """LLM provider 'ollama': a fake local server answers /api/chat; plan() turns its JSON into scenes."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from vividora.engine import documentary as doc
+    from vividora.engine import llm
+    seen = {}
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen["path"] = self.path
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            reply = {"message": {"content": json.dumps({"title": "हिमालय", "scenes": [
+                {"narration": "यह पहला दृश्य है।", "visual": "aerial himalaya"}, {"narration": "यह दूसरा दृश्य है।", "visual": "snow peaks"}]})}}
+            b = json.dumps(reply).encode()
+            self.send_response(200); self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+        def log_message(self, *a): pass
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    old = {k: os.environ.get(k) for k in ("OLLAMA_URL", "OLLAMA_MODEL", "LLM_PROVIDER", "LLM_CACHE")}
+    os.environ.update(OLLAMA_URL=f"http://127.0.0.1:{srv.server_port}/", OLLAMA_MODEL="test-model", LLM_CACHE="0")
+    try:
+        check("ollama is picked when only OLLAMA_URL is set", llm.available() == "ollama", llm.available())
+        os.environ["GEMINI_API_KEY"] = "x"
+        check("gemini still wins by default", llm.available() == "gemini")
+        os.environ["LLM_PROVIDER"] = "ollama"
+        check("LLM_PROVIDER forces ollama", llm.available() == "ollama")
+        os.environ.pop("GEMINI_API_KEY"); os.environ.pop("LLM_PROVIDER")
+        res = doc.plan("Himalaya", minutes=1)
+        check("plan() via ollama gives scenes", res and len(res["scenes"]) == 2 and res["title"] == "हिमालय", res)
+        check("request went to /api/chat with json format + model", seen.get("path") == "/api/chat" and seen["body"].get("format") == "json"
+              and seen["body"].get("model") == "test-model" and seen["body"].get("stream") is False, seen)
+    finally:
+        srv.shutdown()
+        for k, v in old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
 
 def e2e():
@@ -168,6 +214,7 @@ def e2e():
 
 if __name__ == "__main__":
     units()
+    ollama()
     e2e()
     print(f"\n{'ALL PASS' if not fails else str(fails) + ' FAILED'}")
     sys.exit(1 if fails else 0)

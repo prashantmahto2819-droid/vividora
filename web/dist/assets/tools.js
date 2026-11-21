@@ -217,7 +217,9 @@ export function docView() {
     <div id="dc-opts" hidden>
       <div class="tl-row"><div class="field"><label>आवाज़</label><select id="dc-voice"></select></div>
         <div class="field"><label>Shape</label><select id="dc-or"><option value="landscape">Landscape 16:9 (YouTube)</option><option value="portrait">Portrait 9:16 (Reels/Shorts)</option><option value="square">Square 1:1</option></select></div></div>
-      <p class="small muted">तस्वीरें: पहले आपकी Library (नाम/tags से मिलान), फिर Pixabay (अगर PIXABAY_API_KEY है), नहीं तो title card। Captions अभी नहीं हैं।</p>
+      <div class="tl-row"><div class="field"><label>Background music (वैकल्पिक)</label><select id="dc-music"><option value="">— कोई नहीं —</option></select></div>
+        <div class="field"><label><input type="checkbox" id="dc-cap" checked> Captions (नीचे लिखा हुआ text)</label></div></div>
+      <p class="small muted">तस्वीरें: पहले आपकी Library (नाम/tags से मिलान), फिर Pixabay (अगर PIXABAY_API_KEY है), नहीं तो title card।</p>
       <button class="btn primary" id="dc-build">🎬 Documentary बनाओ</button>
     </div>
     <div id="dc-status"></div>
@@ -246,6 +248,8 @@ export function docBind(c) {
     sel.innerHTML = r.voices.map((v) => `<option value="${esc(v.id)}">${esc(v.name || v.id)}${safe(v) ? "" : v.engine === "voicestudio" ? " ⚠ सिर्फ़ निजी इस्तेमाल" : ""}</option>`).join("");
     const pref = r.voices.find((v) => safe(v) && v.lang === "hi") || r.voices.find(safe); if (pref) sel.value = pref.id;
   }).catch(() => {});
+  ctx.api("GET", "/library?kind=music").then((r) => { const sel = $("#dc-music"); if (!sel) return; const items = Array.isArray(r) ? r : (r.items || []);
+    sel.innerHTML += items.slice(0, 60).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join(""); }).catch(() => {});
   const plan = async (body, btn) => {
     btn.disabled = true; st("scenes बन रहे हैं… (AI 20–60 सेकंड ले सकता है)");
     try { const r = await ctx.api("POST", "/documentary/plan", body); docState = { title: r.title, scenes: r.scenes, job: null }; draw(); st(`${r.scenes.length} scenes तैयार — जाँचकर नीचे से बनाएँ`); }
@@ -265,7 +269,7 @@ export function docBind(c) {
   $("#dc-build").onclick = async (e) => {
     const b = e.target; b.disabled = true; st("शुरू हो रहा है…");
     try {
-      const r = await ctx.api("POST", "/documentary/build", { title: docState.title, scenes: docState.scenes, voice: $("#dc-voice").value, orientation: $("#dc-or").value, lang: $("#dc-lang").value === "en" ? "en" : "hi" });
+      const r = await ctx.api("POST", "/documentary/build", { title: docState.title, scenes: docState.scenes, voice: $("#dc-voice").value, orientation: $("#dc-or").value, lang: $("#dc-lang").value === "en" ? "en" : "hi", music_id: $("#dc-music").value || undefined, captions: $("#dc-cap").checked });
       docState.job = r.job_id; poll(r.job_id);
     } catch (er) { st(esc(er.message), true); b.disabled = false; }
   };

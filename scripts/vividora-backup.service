@@ -1,0 +1,7 @@
+[Unit]
+Description=Vividora data backup
+
+[Service]
+Type=oneshot
+Environment=DATA_DIR=/srv/studio/data BACKUP_DIR=/srv/studio/backups KEEP=14
+ExecStart=/srv/studio/vividora/scripts/backup.sh

@@ -17,8 +17,24 @@ Dashboard → **Auto Documentary** (`#/documentary`), या API `/api/v1/docume
 - Default आवाज़ **commercial-safe** engine की चुनी जाती है (Kokoro / Parler)। Voice Studio (OmniVoice) की आवाज़ पर ⚠ दिखता है — वह **सिर्फ़ निजी/non-commercial** है, public/monetised वीडियो में न लगाएँ।
 - Kokoro Hindi (`hi_kokoro_alpha`, `hi_kokoro_omega`) जुड़ गई हैं — हल्का CPU model, quality सुनकर तय करें।
 
+## मुफ़्त AI अपनी मशीन पर (Ollama) — वैकल्पिक
+`.env` में Gemini/Claude key की जगह अपना model चला सकते हैं (free, offline): `OLLAMA_URL=http://host.docker.internal:11434` और `OLLAMA_MODEL=qwen2.5:7b`।
+`LLM_PROVIDER=ollama` से इसे ज़बरदस्ती चुनें (वरना Gemini → Claude → Ollama क्रम है)।
+⚠ CPU पर 7B model धीमा है (एक script में कई मिनट) और **हिंदी की गुणवत्ता Gemini से कमज़ोर** — पहले English/Hinglish में आज़माएँ।
+Setup (VM पर):
+1. `curl -fsSL https://ollama.com/install.sh | sh`
+2. `ollama pull qwen2.5:7b`
+3. Docker से पहुँचने के लिए: `sudo systemctl edit ollama` → नीचे दो लाइनें डालें → save:
+   ```
+   [Service]
+   Environment="OLLAMA_HOST=0.0.0.0:11434"
+   ```
+   फिर `sudo systemctl restart ollama` (यह port सिर्फ़ आपके LAN में खुलता है; router से बाहर forward न करें)।
+4. `.env` में ऊपर की दो लाइनें, फिर `docker compose --profile tunnel up -d`।
+5. जाँच: `curl http://127.0.0.1:11434/api/tags`
+
 ## अभी की सीमाएँ (Phase 1)
-- Captions नहीं हैं; scene-by-scene timeline editing UI नहीं — वीडियो सीधा MP4 बनता है।
+- Scene-by-scene timeline editing UI नहीं — वीडियो सीधा MP4 बनता है (Captions burned-in आते हैं; बंद करने का checkbox है)।
 - AI जो facts लिखे उन्हें **publish से पहले ख़ुद जाँचें**; script में वही नाम/तारीख़ें रखें जिन पर भरोसा हो।
 - तस्वीरें Pixabay/आपकी Library से हैं — AI-generated या aerial footage अपने-आप नहीं बनती (अगला phase: GPU image/video model)।
 - एक workspace में एक साथ एक ही documentary बनती है; ज़्यादा से ज़्यादा 24 scenes, 9000 अक्षर।

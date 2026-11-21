@@ -28,5 +28,14 @@
 3. API keys सिर्फ़ ज़रूरत भर के role से बनाएँ; लीक पर Dashboard → API & Integrations से revoke।
 4. Router (Omada ER605) में VM का Address Reservation (MAC 00-0C-29-F8-ED-96 → 192.168.1.31) लगा है — हटाएँ नहीं।
 
-## Backup
-- असली data: `/srv/studio/data` (DB, settings) और `/srv/studio/media`, `/srv/studio/archive`। इन्हें समय-समय पर Windows drive पर copy करें: `sudo rsync -a /srv/studio/data /srv/studio/media <backup-जगह>/`
+## Backup (रोज़ रात 3:30 अपने-आप)
+`scripts/backup.sh` — `/srv/studio/data` का सुरक्षित snapshot (SQLite server चलते हुए भी सही copy होती है) `/srv/studio/backups/` में, आख़िरी 14 रखता है।
+एक बार लगाएँ (VM पर):
+1. `cd /srv/studio/vividora && git pull`
+2. `sudo cp scripts/vividora-backup.service scripts/vividora-backup.timer /etc/systemd/system/`
+3. `sudo systemctl daemon-reload && sudo systemctl enable --now vividora-backup.timer`
+4. अभी एक बार चलाकर जाँचें: `sudo systemctl start vividora-backup.service && ls -lh /srv/studio/backups`
+5. Timer देखें: `systemctl list-timers | grep vividora`
+- Media/archive भी चाहिए तो service में `Environment=INCLUDE_MEDIA=1` जोड़ें (बड़ा होगा)।
+- **ज़रूरी:** backups उसी disk पर हैं — हफ़्ते में एक बार `/srv/studio/backups` को Windows drive/दूसरे PC पर copy करें (`scp prashant@192.168.1.31:/srv/studio/backups/* D:\vividora-backups\`)।
+- Restore: server बंद (`docker compose stop api worker`) → `tar -xzf vividora-data-….tar.gz -C /tmp` → `/tmp/data/*` को `/srv/studio/data/` में रखें → `docker compose up -d`।

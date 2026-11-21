@@ -123,7 +123,8 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                 mrow = db.get("library", p["music_id"])
                 if mrow and mrow["workspace_id"] == ws and mrow["kind"] == "music":
                     music_path = storage.abs_path(mrow["path"])
-            out = doc.assemble(clips, durs, track, work / "documentary.mp4", sfx=sfx_path, music=music_path, work=work)
+            ass = doc.build_captions([sc["narration"] for sc in scenes], narr, durs, size, work / "captions.ass") if p.get("captions") else None
+            out = doc.assemble(clips, durs, track, work / "documentary.mp4", sfx=sfx_path, music=music_path, work=work, captions=ass)
             lic = "own narration; visuals: library + " + ("; ".join(credits) if credits else "title cards")
             item = _add_file(ws, user_id, "broll", out, name=(p["title"] or "Documentary")[:100], tags="documentary,auto", source="documentary",
                              license=lic[:900], analyse=False)
@@ -198,7 +199,7 @@ async def build(request: Request, user: dict):
         job_id = uuid.uuid4().hex[:16]
         _JOBS[job_id] = {"status": "running", "ws": ws, "started": time.time(), "callback": cb, "progress": 1, "message": "शुरू", "warnings": warn}
     p = {"scenes": res["scenes"], "title": res["title"], "voice": voice, "lang": lang, "orientation": orient, "speed": speed,
-         "music_id": b.get("music_id"), "stock": b.get("stock", True) is not False}
+         "music_id": b.get("music_id"), "stock": b.get("stock", True) is not False, "captions": b.get("captions", True) is not False}
     threading.Thread(target=_run, args=(job_id, ws, user["id"], p), daemon=True).start()
     return ok({"job_id": job_id, "warnings": warn}, 202)
 
