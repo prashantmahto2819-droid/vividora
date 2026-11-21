@@ -70,6 +70,7 @@ def _download(url: str, dest: Path) -> Path:
 def _run(job_id: str, ws: str, user_id: str, p: dict):
     import os
 
+    from ..engine import aiimage
     from ..engine import documentary as doc
     from ..engine import tts
     from .library import _add_file, _http_json, _view
@@ -94,7 +95,15 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                 if m:
                     src, kind = storage.abs_path(m["path"]), ("image" if m["kind"] == "image" else "video")
                     used.add(m["id"])
-                elif key and sc.get("visual"):
+                elif p.get("ai_images") and aiimage.provider() and (sc.get("visual") or sc.get("narration")):
+                    try:
+                        src, prov = aiimage.generate(aiimage.prompt_for(sc.get("visual"), sc["narration"]), work / f"ai{i}", size)
+                        kind = "image"
+                        credits.append(f"scene {i + 1}: AI-generated image ({prov}) — synthetic")
+                    except Exception as e:  # noqa: BLE001 — falls through to stock / title card
+                        log.info("ai image for scene %d failed: %s", i, e)
+                        src = None
+                if not src and key and sc.get("visual"):
                     try:
                         for c in doc.stock_candidates(sc["visual"], key, _http_json):
                             is_img = c["kind"] == "image"
@@ -169,7 +178,8 @@ async def plan(request: Request, user: dict):
             raise ApiError(502, "AI से scenes नहीं बन पाए — दोबारा कोशिश करें")
     if res is None:
         raise ApiError(422, "script से scenes नहीं बने")
-    return ok({**res, "source": source, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY"))})
+    return ok({**res, "source": source, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY")),
+                "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider()})
 
 
 @require("editor")
@@ -211,6 +221,7 @@ async def build(request: Request, user: dict):
         _JOBS[job_id] = {"status": "running", "ws": ws, "started": time.time(), "callback": cb, "progress": 1, "message": "शुरू", "warnings": warn}
     p = {"scenes": res["scenes"], "title": res["title"], "voice": voice, "lang": lang, "orientation": orient, "speed": speed,
          "music_id": b.get("music_id"), "stock": b.get("stock", True) is not False, "captions": b.get("captions", True) is not False,
+         "ai_images": b.get("ai_images", True) is not False,
          "sources": [{"title": str(x.get("title", ""))[:120], "url": str(x.get("url", ""))[:300]} for x in (b.get("sources") or [])[:6] if isinstance(x, dict)]}
     threading.Thread(target=_run, args=(job_id, ws, user["id"], p), daemon=True).start()
     return ok({"job_id": job_id, "warnings": warn}, 202)
@@ -230,7 +241,8 @@ async def preview(request: Request, user: dict):
         if m:
             used.add(m["id"])
         out.append({"index": i, "library_id": m["id"] if m else None, "name": m["name"] if m else None})
-    return ok({"matches": out, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY"))})
+    return ok({"matches": out, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY")),
+                "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider()})
 
 
 @require("viewer")

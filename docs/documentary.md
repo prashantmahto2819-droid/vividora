@@ -39,8 +39,9 @@ Setup (VM पर):
 - Topic से plan करते समय Wikipedia के intro extracts prompt में जाते हैं और AI को कहा जाता है कि संख्या/तारीख़/नाम सिर्फ़ उन्हीं से लें; इस्तेमाल हुए pages YouTube description में "Sources (Wikipedia, CC BY-SA 4.0)" बनकर जुड़ते हैं। बंद करने के लिए `"ground": false` या UI का checkbox।
 - Build के बाद एक **thumbnail** (फ़िल्म का frame + title) Library में image (`documentary,thumbnail`) की तरह सेव होता है।
 - UI में हर scene के नीचे दिखता है कि Library से कौन-सी तस्वीर मिलेगी (`POST /documentary/preview`)।
+- **AI तस्वीरें (GPU API):** Library में match न मिले तो scene की `visual` से FLUX.1-schnell image बनती है (पहले Cloudflare Workers AI, फिर Hugging Face; `AI_IMAGE_PROVIDER` से चुनें)। GPU इस server पर नहीं, API पर चलता है। description में "AI-generated image — synthetic" लिखा आता है; YouTube पर realistic AI तस्वीरों के लिए upload के समय **altered/synthetic content** वाला विकल्प ख़ुद चुनें। बंद: `"ai_images": false`।
 - AI जो facts लिखे उन्हें **publish से पहले ख़ुद जाँचें**; script में वही नाम/तारीख़ें रखें जिन पर भरोसा हो।
-- तस्वीरें Pixabay/आपकी Library से हैं — AI-generated या aerial footage अपने-आप नहीं बनती (अगला phase: GPU image/video model)।
+- तस्वीरें: Library → AI image → Pixabay → title card। AI *video* clips अभी नहीं (वो API पर महँगे हैं); तस्वीरों में Ken-Burns zoom लगता है।
 - एक workspace में एक साथ एक ही documentary बनती है; ज़्यादा से ज़्यादा 24 scenes, 9000 अक्षर।
 
 ## API

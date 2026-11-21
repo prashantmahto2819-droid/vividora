@@ -149,7 +149,7 @@ def t_doc_plan(a):
 
 
 def t_doc_build(a):
-    body = {k: a[k] for k in ("title", "scenes", "voice", "lang", "speed", "orientation", "music_id", "stock") if a.get(k) is not None}
+    body = {k: a[k] for k in ("title", "scenes", "voice", "lang", "speed", "orientation", "music_id", "stock", "ai_images") if a.get(k) is not None}
     j = _req("POST", "/v1/documentary/build", body)
     if a.get("wait", True) is False:
         return j
@@ -194,7 +194,7 @@ TOOLS = {
             "narration": {"type": "string"}, "visual": {"type": "string"}, "on_screen": {"type": "string"}, "library_id": {"type": "string"}}}},
         "voice": {"type": "string"}, "lang": {"type": "string"}, "speed": {"type": "number"},
         "orientation": {"type": "string", "enum": ["landscape", "portrait", "square"]}, "music_id": {"type": "string"},
-        "stock": {"type": "boolean"}, **_WAIT}, ["scenes"])),
+        "stock": {"type": "boolean"}, "ai_images": {"type": "boolean", "description": "AI-generated pictures via the configured GPU API (default true)"}, **_WAIT}, ["scenes"])),
     "vividora_job_status": (t_job, "किसी job की स्थिति (running/done/failed + file)", _obj({"job_id": {"type": "string"}}, ["job_id"])),
     "vividora_download_file": (t_download, "Library की file (wav/glb/webm/mp4) local path पर सेव करें", _obj({
         "file_id": {"type": "string"}, "save_to": {"type": "string"}}, ["file_id", "save_to"])),

@@ -36,6 +36,14 @@ def probe(p):
     return {s["codec_type"] for s in j["streams"]}, float(j["format"]["duration"]), j["streams"]
 
 
+def _ok(fn):
+    try:
+        fn()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def units():
     from vividora.engine import documentary as doc
     from vividora.engine import tts
@@ -90,6 +98,40 @@ def units():
         check("plan ground=False: no facts, no sources", "REFERENCE FACTS" not in seen["p"] and res["sources"] == [], res)
     finally:
         llm.available, llm.ask_json = old_av, old_ask
+    from vividora.engine import aiimage
+    png = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x36", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
+                         capture_output=True).stdout
+    keep = {k: os.environ.get(k) for k in ("AI_IMAGE_PROVIDER", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "HF_TOKEN")}
+    for k in keep:
+        os.environ.pop(k, None)
+    d0 = Path(tempfile.mkdtemp(prefix="doc_ai_"))
+    try:
+        check("ai image: nothing configured → provider None, generate raises", aiimage.provider() is None and
+              not _ok(lambda: aiimage.generate("x", d0 / "a")))
+        os.environ["AI_IMAGE_PROVIDER"] = "pollinations"
+        check("pollinations only when forced", aiimage.provider() == "pollinations")
+        os.environ.pop("AI_IMAGE_PROVIDER")
+        os.environ.update(CLOUDFLARE_ACCOUNT_ID="acc", CLOUDFLARE_API_TOKEN="tok")
+        import base64
+        seen_cf = {}
+
+        def cf(url, data, headers, timeout=90):
+            seen_cf.update(url=url, body=json.loads(data), auth=headers.get("Authorization"))
+            return json.dumps({"success": True, "result": {"image": base64.b64encode(png).decode()}}).encode(), "application/json"
+        out, prov = aiimage.generate(aiimage.prompt_for("aerial himalaya"), d0 / "cf", http=cf)
+        check("cloudflare: FLUX call, key in header, PNG written", prov == "cloudflare" and out.suffix == ".png" and out.read_bytes() == png and
+              "flux-1-schnell" in seen_cf["url"] and seen_cf["auth"] == "Bearer tok" and "aerial himalaya" in seen_cf["body"]["prompt"], seen_cf)
+        check("cloudflare error body → RuntimeError", not _ok(lambda: aiimage.generate("x", d0 / "e", http=lambda *a, **k: (b'{"success": false, "errors": [{"message": "quota"}]}', "application/json"))))
+        check("non-image payload rejected", not _ok(lambda: aiimage.generate("x", d0 / "n", http=lambda *a, **k: (json.dumps({"result": {"image": base64.b64encode(b"hello").decode()}}).encode(), "application/json"))))
+        for k in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
+            os.environ.pop(k)
+        os.environ["HF_TOKEN"] = "hf"
+        out, prov = aiimage.generate("x", d0 / "hf", http=lambda url, data, h, timeout=90: (png, "image/png"))
+        check("huggingface: image bytes → file", prov == "huggingface" and out.exists())
+    finally:
+        for k, v in keep.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        shutil.rmtree(d0, ignore_errors=True)
     calls = []
 
     def fake(url):
@@ -186,7 +228,25 @@ def ollama():
 def e2e():
     tmp = Path(tempfile.mkdtemp(prefix="vivi_doc_"))
     s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
-    env = {**os.environ, "DATA_ROOT": str(tmp / "data"), "MEDIA_ROOT": str(tmp / "media"), "ADMIN_PASSWORD": "test-pass-123",
+    import base64
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    png = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
+                         capture_output=True).stdout
+    hits = []
+
+    class CF(BaseHTTPRequestHandler):
+        def do_POST(self):
+            hits.append(self.path)
+            self.rfile.read(int(self.headers["content-length"]))
+            b = json.dumps({"success": True, "result": {"image": base64.b64encode(png).decode()}}).encode()
+            self.send_response(200); self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+        def log_message(self, *a): pass
+    cfs = HTTPServer(("127.0.0.1", 0), CF)
+    threading.Thread(target=cfs.serve_forever, daemon=True).start()
+    env = {**os.environ, "CLOUDFLARE_API_BASE": f"http://127.0.0.1:{cfs.server_port}", "CLOUDFLARE_ACCOUNT_ID": "acc", "CLOUDFLARE_API_TOKEN": "tok",
+           "DATA_ROOT": str(tmp / "data"), "MEDIA_ROOT": str(tmp / "media"), "ADMIN_PASSWORD": "test-pass-123",
            "SECRET_KEY": "t", "WEB_DIST": str(tmp / "web"), "TRIPOSR_URL": "http://127.0.0.1:9", "VIVIDORA_TTS": "fake"}
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "vividora.app:app", "--port", str(port), "--log-level", "warning"],
                            cwd=str(HERE), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -229,7 +289,7 @@ def e2e():
         check("build accepted (202 + job_id)", st == 202 and r2.get("job_id"), (st, r2))
         jid = r2["job_id"]
         st, pv = call("POST", "/documentary/preview", {"scenes": scenes}, tok)
-        check("preview: one entry per scene, no stock key", st == 200 and len(pv["matches"]) == 3 and pv["has_stock"] is False, (st, pv))
+        check("preview: one entry per scene, no stock key, AI provider reported", st == 200 and len(pv["matches"]) == 3 and pv["has_stock"] is False and pv["ai_provider"] == "cloudflare", (st, pv))
         st, again = call("POST", "/v1/documentary/build", {"scenes": scenes}, key)
         check("second build while running → 429", st == 429, (st, again))
         t0, j = time.time(), None
@@ -252,6 +312,8 @@ def e2e():
             check("editor status route agrees", st == 200 and jj["status"] == "done" and jj["progress"] == 100, jj)
             check("job result carries the YouTube description (title + AI note)", "Test डॉक्यूमेंट्री" in (jj.get("description") or "") and "AI voice" in jj["description"], jj.get("description"))
             th = jj.get("thumbnail")
+            check("AI images: provider was called once per scene and disclosed in the description",
+                  len(hits) == 3 and "AI-generated image (cloudflare)" in (jj.get("description") or ""), (hits, jj.get("description")))
             check("job result carries a thumbnail library item", bool(th) and th.get("kind") == "image", th)
         st, lib = call("GET", "/library?kind=broll", None, tok)
         items = lib if isinstance(lib, list) else lib.get("items", [])

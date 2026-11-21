@@ -220,7 +220,8 @@ export function docView() {
         <div class="field"><label>Shape</label><select id="dc-or"><option value="landscape">Landscape 16:9 (YouTube)</option><option value="portrait">Portrait 9:16 (Reels/Shorts)</option><option value="square">Square 1:1</option></select></div></div>
       <div class="tl-row"><div class="field"><label>Background music (वैकल्पिक)</label><select id="dc-music"><option value="">— कोई नहीं —</option></select></div>
         <div class="field"><label><input type="checkbox" id="dc-cap" checked> Captions (नीचे लिखा हुआ text)</label></div></div>
-      <p class="small muted">तस्वीरें: पहले आपकी Library (नाम/tags से मिलान), फिर Pixabay (अगर PIXABAY_API_KEY है), नहीं तो title card।</p>
+      <div class="field"><label><input type="checkbox" id="dc-ai" checked> AI से तस्वीरें बनाओ (Library में match न मिले तो) <span class="muted" id="dc-aiinfo"></span></label></div>
+      <p class="small muted">तस्वीरें: पहले आपकी Library (नाम/tags से मिलान), फिर AI-generated (GPU API), फिर Pixabay (अगर PIXABAY_API_KEY है), नहीं तो title card।</p>
       <button class="btn primary" id="dc-build">🎬 Documentary बनाओ</button>
     </div>
     <div id="dc-status"></div>
@@ -259,6 +260,7 @@ export function docBind(c) {
     try {
       const r = await ctx.api("POST", "/documentary/preview", { scenes: docState.scenes });
       docState.pv = r.matches; draw();
+      const inf = $("#dc-aiinfo"); if (inf) inf.textContent = r.ai_provider ? `(${r.ai_provider} GPU)` : "— .env में CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN या HF_TOKEN डालें";
     } catch { /* preview is optional */ }
   };
   const plan = async (body, btn) => {
@@ -281,7 +283,7 @@ export function docBind(c) {
   $("#dc-build").onclick = async (e) => {
     const b = e.target; b.disabled = true; st("शुरू हो रहा है…");
     try {
-      const r = await ctx.api("POST", "/documentary/build", { title: docState.title, scenes: docState.scenes, voice: $("#dc-voice").value, orientation: $("#dc-or").value, lang: $("#dc-lang").value === "en" ? "en" : "hi", music_id: $("#dc-music").value || undefined, captions: $("#dc-cap").checked, sources: docState.sources || [] });
+      const r = await ctx.api("POST", "/documentary/build", { title: docState.title, scenes: docState.scenes, voice: $("#dc-voice").value, orientation: $("#dc-or").value, lang: $("#dc-lang").value === "en" ? "en" : "hi", music_id: $("#dc-music").value || undefined, captions: $("#dc-cap").checked, ai_images: $("#dc-ai").checked, sources: docState.sources || [] });
       docState.job = r.job_id; poll(r.job_id);
     } catch (er) { st(esc(er.message), true); b.disabled = false; }
   };
