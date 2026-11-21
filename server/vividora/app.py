@@ -140,7 +140,8 @@ def create_app() -> Starlette:
     from .bootstrap import ensure_starter
     ensure_starter()
 
-    api_routes = [Route("/health", health), *auth.routes, *projects.routes, *uploads.routes, *workers.routes, *library.routes, *publish.routes, *plan.routes, *analytics.routes, *channels.routes, *storage_api.routes, *schedule_api.routes, *radar_api.routes,
+    from .api import twofa_api
+    api_routes = [Route("/health", health), *auth.routes, *twofa_api.routes, *projects.routes, *uploads.routes, *workers.routes, *library.routes, *publish.routes, *plan.routes, *analytics.routes, *channels.routes, *storage_api.routes, *schedule_api.routes, *radar_api.routes,
                   *thumbnails.routes, *overview.routes, *command_api.routes]
     api_routes += dub_api.routes  # AI voice-over / dubbing
     from .api import pro_api

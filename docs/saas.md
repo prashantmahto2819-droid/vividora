@@ -77,6 +77,8 @@ Signature (`X-Razorpay-Signature`, HMAC-SHA256 of raw body) गलत → 401, �
 - Worker file routes: worker हर request में `X-Job` भेजता है → सिर्फ़ उसी job के workspace की files मिलती हैं।
 - Backup: रोज़ एक SQLite backup `DATA_ROOT/backups/` (7 दिन), archive remote (rclone/Drive) पर भी copy। Admin → "अभी backup लें"। Restore: app बंद → file को `vividora.db` पर copy (-wal/-shm हटाएँ) → start।
 - Audit log: Admin page पर (login, signup, user/role, publish, billing, backup)।
+- **2-step verification (optional, हर user के लिए)**: Settings → "🔐 2-step verification" → password डालें → authenticator app (Google/Microsoft Authenticator, Authy) में key डालें → 6 अंकों का code → चालू। 8 recovery codes (एक-बार वाले) बस उसी समय दिखते हैं। चालू होने पर login = password + code; password-reset link से भी सीधा login नहीं होता, code लगता है। ग़लत code पर 5 बार में lock, एक code दोबारा नहीं चलता। Phone और recovery codes दोनों खो जाएँ तो admin: Users → "2FA बंद"। QR नहीं है — key कॉपी करें या "App में खोलें" (otpauth link)।
+- **Open + invite users साथ-साथ**: `.env` में `SAAS_MODE=1`, `SIGNUP_OPEN=1`, `INVITE_ONLY=0`। `#/signup` से आया user अपना workspace + 14 दिन का trial पाता है; admin का invite link (Users → Link बनाएँ) से आया user admin के workspace में दिए role के साथ जुड़ता है।
 
 ## अभी नहीं है (जानबूझकर)
 

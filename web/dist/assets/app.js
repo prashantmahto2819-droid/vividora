@@ -492,6 +492,15 @@ function loginView() {
     <p class="small muted" id="signup-link" style="margin-top:.4rem;text-align:center" hidden>नया हैं? <a href="#/signup"><b>Free trial शुरू करें →</b></a></p></form></div>`;
 }
 function bindLogin() {
+  // password was right but the account has 2-step verification: ask for the authenticator / recovery code
+  const ask2fa = (form, r) => { const ch = r.challenge;
+    form.innerHTML = `<div class="brand"><i></i>Vividora</div><p class="muted">🔐 2-step verification — authenticator app का 6 अंकों का code लिखें।<br><span class="small">phone नहीं है? 8 में से कोई एक recovery code (xxxx-xxxx) लिखें।</span></p>
+      <div class="field"><label>Code</label><input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required placeholder="123456"></div>
+      <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Verify करें</button>
+      <p class="small muted" style="margin-top:.8rem;text-align:center"><a href="#/" onclick="location.reload()">← वापस</a></p>`;
+    form.onsubmit = async (e) => { e.preventDefault(); const b = form.querySelector("button"); b.disabled = true;
+      try { const r2 = await api("POST", "/auth/2fa/login", { challenge: ch, code: form.code.value }); await finish(r2); }
+      catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; b.disabled = false; } }; };
   const finish = async (r, isNewSignup) => { S.token = r.token; S.user = r.user; S.ws = r.workspace; S.saas = !!r.saas; localStorage.setItem("vividora_token", r.token); location.hash = "#/"; await load(); render();
     if (isNewSignup) { try { localStorage.setItem("vividora_onboarded", "0"); } catch {} showOnboarding(); }
     else { try { if (!localStorage.getItem("vividora_onboarded") && (S.projects || []).length === 0) showOnboarding(); } catch {} } };
@@ -510,7 +519,7 @@ function bindLogin() {
   const rpf = $("#reset-pw");
   if (rpf) { rpf.onsubmit = async (e) => { e.preventDefault(); const f = e.target; const b = f.querySelector("button"); b.disabled = true;
     if (f.password.value !== f.confirm.value) { $("#login-err").innerHTML = `<div class="note err">दोनों password एक जैसे नहीं हैं</div>`; b.disabled = false; return; }
-    try { const r = await api("POST", "/auth/reset", { token: f.token.value, password: f.password.value }); await finish(r); toast("Password बदल गया — आप login हो गए!"); }
+    try { const r = await api("POST", "/auth/reset", { token: f.token.value, password: f.password.value }); if (r.need_2fa) { ask2fa(rpf, r); return; } await finish(r); toast("Password बदल गया — आप login हो गए!"); }
     catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; b.disabled = false; } }; return; }
   // forgot password form
   const fpf = $("#forgot-pw");
@@ -525,7 +534,7 @@ function bindLogin() {
   fetch("/api/auth/signup", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => { if (r.status !== 404) $("#signup-link").hidden = false; }).catch(() => {});
   $("#login").onsubmit = async (e) => {
     e.preventDefault(); const f = e.target;
-    try { const r = await api("POST", "/auth/login", { email: f.email.value, password: f.password.value }); await finish(r); }
+    try { const r = await api("POST", "/auth/login", { email: f.email.value, password: f.password.value }); if (r.need_2fa) { ask2fa(f, r); return; } await finish(r); }
     catch (err) { $("#login-err").innerHTML = `<div class="note err">${esc(err.message)}</div>`; }
   };
 }
@@ -839,7 +848,7 @@ function usersView() {
     <div class="tablewrap"><table><tr><th>नाम</th><th>Email</th><th>Role</th><th>आख़िरी login</th><th></th></tr>${(S.users || []).map((u) => `<tr class="${u.active ? "" : "muted"}"><td>${esc(u.name)}</td><td>${esc(u.email)}</td>
       <td><select data-id="${u.id}" class="role" ${u.id === S.user.id ? "disabled" : ""}>${["admin", "editor", "viewer"].map((r) => `<option ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
       <td class="small">${u.last_login_at ? new Date(u.last_login_at).toLocaleString("hi-IN") : "कभी नहीं"}</td>
-      <td>${u.id !== S.user.id ? `<button class="btn quiet small toggle" data-id="${u.id}" data-active="${u.active}">${u.active ? "बंद करें" : "चालू करें"}</button>` : ""}</td></tr>`).join("")}</table></div>
+      <td>${u.twofa ? `<span class="pill" title="2-step verification चालू">🔐</span> ` : ""}${u.twofa && u.id !== S.user.id ? `<button class="btn quiet small tf-reset" data-id="${u.id}" title="user का phone और recovery codes दोनों खो गए हों तब">2FA बंद</button> ` : ""}${u.id !== S.user.id ? `<button class="btn quiet small toggle" data-id="${u.id}" data-active="${u.active}">${u.active ? "बंद करें" : "चालू करें"}</button>` : ""}</td></tr>`).join("")}</table></div>
     <div class="section"><h2>नया user</h2><form id="adduser" class="row">
       <div class="field"><label>नाम</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" type="email" required></div>
       <div class="field"><label>Password (कम से कम 8 अक्षर)</label><input name="password" type="password" minlength="8" required></div>
@@ -851,6 +860,7 @@ function usersView() {
 }
 function bindUsers() {
   document.querySelectorAll(".role").forEach((s) => (s.onchange = () => api("PATCH", `/users/${s.dataset.id}`, { role: s.value }).then(() => toast("Role बदल दिया")).catch((e) => toast(e.message))));
+  document.querySelectorAll(".tf-reset").forEach((b) => (b.onclick = () => { if (!confirm("इस user का 2-step verification बंद करें? उसे दोबारा setup करना होगा।")) return; api("POST", `/users/${b.dataset.id}/2fa-reset`).then(() => { toast("2FA बंद कर दिया"); return load().then(render); }).catch((e) => toast(e.message)); }));
   document.querySelectorAll(".toggle").forEach((b) => (b.onclick = () => api("PATCH", `/users/${b.dataset.id}`, { active: b.dataset.active !== "true" }).then(() => load().then(render))));
   const mk = $("#mkinv"); if (mk) mk.onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { const r = await api("POST", "/invites", { role: f.role.value, email: f.email.value }); try { await navigator.clipboard.writeText(r.url); toast("Invite link copy हो गया"); } catch { toast("Invite link बना"); } await load(); render(); } catch (err) { toast(err.message); } };
   $("#adduser").onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/users", { name: f.name.value, email: f.email.value, password: f.password.value, role: f.role.value }); toast("User जोड़ दिया"); load().then(render); } catch (err) { toast(err.message); } };
@@ -1533,6 +1543,7 @@ function accountView() {
       <section class="card"><div class="card-h"><h2>आपका account</h2></div><p><b>${esc(S.user.name)}</b> <span class="pill">${S.user.role}</span><br><span class="small muted">${esc(S.user.email || "")}</span></p>
         <form id="pw" class="row" style="align-items:flex-end"><div class="field"><label>मौजूदा password</label><input name="current" type="password" required autocomplete="current-password"></div><div class="field"><label>नया password</label><input name="new" type="password" minlength="8" required autocomplete="new-password"></div><button class="btn">बदलें</button></form>
         <div class="row" style="gap:.5rem;flex-wrap:wrap"><button class="btn quiet danger" id="logout2">${ic("out")} बाहर निकलें</button><button class="btn quiet small" id="logout-all" title="हर phone/laptop से logout — token बदल जाते हैं">सब devices से बाहर</button></div></section>
+      <section class="card" id="twofa-card"><div class="card-h"><h2>🔐 2-step verification</h2></div><div id="twofa-box" class="small muted">देख रहे हैं…</div></section>
       ${S.planInfo?.saas ? `<section class="card"><div class="card-h"><h2>Plan</h2><a class="btn small" href="#/billing">देखें / बदलें</a></div>${planMini(S.planInfo)}</section>` : ""}
       <section class="card"><div class="card-h"><h2>Workspace</h2></div><ul class="hlist">
         <li><a href="#/settings">Channels & Brand kit, YouTube / Instagram / TikTok connections</a></li>${admin ? `<li><a href="#/users">Users और roles (${(S.users || []).length})</a></li><li><a href="#/admin">Admin — workspaces, audit log, backups</a></li>` : ""}<li><a href="#/status">Workers, queue और archive की स्थिति</a></li>
@@ -1541,9 +1552,41 @@ function accountView() {
     ${admin ? `<section class="card" id="storage"><div class="card-h"><h2>Storage</h2><button class="btn small" id="st-load">फिर जाँचें</button></div>
       <p class="muted small">server की disk कितनी भरी है, किस project ने कितनी जगह ली — और सुरक्षित तरीके से साफ़ करें। project हटाने पर उसकी सारी फ़ाइलें अपने-आप हट जाती हैं।</p><div id="st-body"></div></section>` : ""}`;
 }
+// ---- 2-step verification (authenticator app) ----
+async function bindTwofa() {
+  const box = $("#twofa-box"); if (!box) return;
+  const adopt = (r) => { if (r.token) { S.token = r.token; localStorage.setItem("vividora_token", r.token); } if (r.user) S.user = r.user; };
+  const showCodes = (codes) => `<div class="note"><b>Recovery codes — अभी कहीं सुरक्षित लिख/सेव कर लें, ये दोबारा नहीं दिखेंगे।</b><br>phone खो जाए तो हर code एक बार login करा देगा।<pre style="user-select:all;margin:.5rem 0">${codes.map(esc).join("\n")}</pre><button class="btn small" id="tf-copy">Copy</button></div>`;
+  const draw = async (extra = "") => {
+    let st; try { st = await api("GET", "/auth/2fa"); } catch (e) { box.textContent = e.message; return; }
+    if (!st.enabled) {
+      box.innerHTML = `${extra}<p class="small muted">Login पर password के साथ authenticator app (Google Authenticator, Microsoft Authenticator, Authy…) का code भी माँगा जाएगा। चाहें तो चालू करें — ज़रूरी नहीं।</p>
+        <form id="tf-start" class="row" style="align-items:flex-end"><div class="field"><label>अपना password</label><input name="password" type="password" required autocomplete="current-password"></div><button class="btn primary">चालू करें</button></form>`;
+      $("#tf-start").onsubmit = async (e) => { e.preventDefault(); try { const r = await api("POST", "/auth/2fa/setup", { password: e.target.password.value });
+        box.innerHTML = `<ol class="small" style="padding-left:1.1rem;margin:.2rem 0 .6rem"><li>Phone में authenticator app खोलें → <b>+</b> → <b>Enter a setup key</b>।</li><li>नीचे की key डालें (या इसी phone पर हैं तो "App में खोलें" दबाएँ)।</li><li>app में जो 6 अंकों का code दिखे वो यहाँ लिखकर Verify दबाएँ।</li></ol>
+          <p><code style="user-select:all;word-break:break-all">${esc(r.secret)}</code> <button class="btn small quiet" id="tf-cs">Copy key</button> <a class="btn small quiet" href="${esc(r.uri)}">App में खोलें</a></p>
+          <form id="tf-on" class="row" style="align-items:flex-end"><div class="field"><label>6 अंकों का code</label><input name="code" inputmode="numeric" autocomplete="one-time-code" required></div><button class="btn primary">Verify और चालू करें</button><button type="button" class="btn quiet" id="tf-cancel">रद्द</button></form>`;
+        $("#tf-cs").onclick = () => { navigator.clipboard?.writeText(r.secret).then(() => toast("Key copy हो गई")).catch(() => {}); };
+        $("#tf-cancel").onclick = () => draw();
+        $("#tf-on").onsubmit = async (e2) => { e2.preventDefault(); try { const r2 = await api("POST", "/auth/2fa/enable", { code: e2.target.code.value }); adopt(r2); draw(showCodes(r2.recovery_codes)).then(() => { const c = $("#tf-copy"); if (c) c.onclick = () => navigator.clipboard?.writeText(r2.recovery_codes.join("\n")).then(() => toast("Codes copy हो गए")).catch(() => {}); }); } catch (er) { toast(er.message); } };
+      } catch (er) { toast(er.message); } };
+      return;
+    }
+    box.innerHTML = `${extra}<p class="small">✅ चालू है · बचे recovery codes: <b>${st.recovery_left}</b></p>
+      <form id="tf-mng" class="row" style="align-items:flex-end;flex-wrap:wrap"><div class="field"><label>Password</label><input name="password" type="password" required autocomplete="current-password"></div><div class="field"><label>अभी का code</label><input name="code" inputmode="numeric" autocomplete="one-time-code" required></div>
+      <button class="btn" data-a="regen" type="submit">नए recovery codes</button><button class="btn quiet danger" data-a="off" type="submit">बंद करें</button></form>`;
+    let act = "regen"; box.querySelectorAll("#tf-mng button").forEach((b) => (b.onclick = () => { act = b.dataset.a; }));
+    $("#tf-mng").onsubmit = async (e) => { e.preventDefault(); const f = e.target; const body = { password: f.password.value, code: f.code.value };
+      try { if (act === "off") { if (!confirm("2-step verification बंद करें? इससे account कम सुरक्षित होगा।")) return; const r = await api("POST", "/auth/2fa/disable", body); adopt(r); toast("2-step verification बंद"); draw(); }
+        else { const r = await api("POST", "/auth/2fa/recovery", body); draw(showCodes(r.recovery_codes)).then(() => { const c = $("#tf-copy"); if (c) c.onclick = () => navigator.clipboard?.writeText(r.recovery_codes.join("\n")).then(() => toast("Codes copy हो गए")).catch(() => {}); }); } }
+      catch (er) { toast(er.message); } };
+  };
+  draw();
+}
 function bindAccount() {
   $("#pw").onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api("POST", "/auth/password", { current: f.current.value, new: f.new.value }); toast("Password बदल दिया"); f.reset(); } catch (err) { toast(err.message); } };
   $("#logout2").onclick = logout;
+  bindTwofa();
   const la = $("#logout-all"); if (la) la.onclick = async () => { if (!confirm("हर device से logout हो जाएगा — ठीक है?")) return; try { await api("POST", "/auth/logout-all"); } catch {} logout(); };
   $("#home-reset").onclick = () => { try { localStorage.removeItem("vividora_home"); } catch {} toast("Home के sections default पर लौट आए"); };
   const stl = $("#st-load"); if (stl) { stl.onclick = () => loadStorage(); loadStorage(); }

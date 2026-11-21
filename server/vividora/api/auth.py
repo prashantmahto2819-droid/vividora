@@ -12,14 +12,20 @@ from .deps import ApiError, body, client_ip, need, ok, rate_limit, require
 
 
 def public_user(u: dict) -> dict:
-    return {k: u[k] for k in ("id", "email", "name", "role", "active", "created_at", "last_login_at")}
+    return {**{k: u[k] for k in ("id", "email", "name", "role", "active", "created_at", "last_login_at")}, "twofa": bool(u.get("totp_secret"))}
 
 
-def _session(user: dict):
+def challenge(user: dict) -> object:
+    """Password was right but the account has 2-step verification: no session yet, only a 5-minute challenge."""
+    from ..security import make_token
+    return ok({"need_2fa": True, "challenge": make_token(user["id"], kind="2fa", hours=5 / 60)})
+
+
+def _session(user: dict, extra: dict | None = None):
     ws = db.get("workspaces", user["workspace_id"])
     tok = access_token(user["id"], user.get("token_version") or 0)
     resp = ok({"token": tok, "user": public_user(user), "workspace": {"id": ws["id"], "name": ws["name"]},
-               "saas": saas.enabled()})
+               "saas": saas.enabled(), **(extra or {})})
     # Secure=True when PUBLIC_URL is https (production behind Cloudflare); False for local dev (http)
     secure = settings.public_url.startswith("https")
     resp.set_cookie("vividora_token", tok, httponly=True, samesite="lax", max_age=72 * 3600, path="/", secure=secure)
@@ -41,6 +47,8 @@ async def login(request: Request):
         raise ApiError(401, "email या password गलत है")
     if saas.enabled() and not user.get("verified", 1):
         raise ApiError(403, "पहले email verify करें (inbox में link है)", unverified=True)
+    if user.get("totp_secret"):
+        return challenge(user)  # second step: POST /auth/2fa/login
     saas.login_ok(key)
     with db.tx() as c:
         db.update(c, "users", user["id"], {"last_login_at": db.now()})
@@ -197,7 +205,10 @@ async def reset_password(request: Request):
                 "token_version": int(user.get("token_version") or 0) + 1
             })
             service.log(c, user["workspace_id"], "password.reset", user_id=user["id"])
-        return _session(db.get("users", user["id"]))
+        fresh = db.get("users", user["id"])
+        if fresh.get("totp_secret"):
+            return challenge(fresh)  # a reset link alone must not bypass 2-step verification
+        return _session(fresh)
     # GET-style: just validate the token
     return ok({"valid": True, "email": user["email"]})
 

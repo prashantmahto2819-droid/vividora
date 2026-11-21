@@ -220,6 +220,10 @@ MIGRATIONS = [
     ("workspaces", "owner_id", "TEXT"),
     ("users", "reset_token", "TEXT"),
     ("users", "reset_token_at", "TEXT"),
+    ("users", "totp_secret", "TEXT"),      # encrypted {"s": base32} — set = 2-step verification is ON
+    ("users", "totp_pending", "TEXT"),     # encrypted secret while the user is still setting up
+    ("users", "totp_last", "INTEGER NOT NULL DEFAULT 0"),  # last accepted time-step (replay guard)
+    ("users", "totp_recovery", "TEXT"),    # JSON list of sha256(recovery code)
 ]
 
 
