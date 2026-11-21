@@ -105,6 +105,7 @@ def normalize(out) -> dict | None:
             continue
         scenes.append({"narration": text, "visual": str(s.get("visual") or "")[:120].strip(),
                        "on_screen": str(s.get("on_screen") or "")[:60].strip(), **({"library_id": str(s["library_id"])} if s.get("library_id") else {}),
+                       **({"motion": True} if s.get("motion") is True else {}),
                        **({"hold": hold} if (hold := _num(s.get("hold"), 0, 30)) else {})})
     if not scenes:
         return None

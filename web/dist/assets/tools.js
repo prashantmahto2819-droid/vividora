@@ -221,7 +221,7 @@ export function docView() {
       <div class="tl-row"><div class="field"><label>Background music (वैकल्पिक)</label><select id="dc-music"><option value="">— कोई नहीं —</option></select></div>
         <div class="field"><label><input type="checkbox" id="dc-cap" checked> Captions (नीचे लिखा हुआ text)</label></div></div>
       <div class="field"><label>Music की आवाज़ <input type="range" id="dc-mvol" min="0.04" max="0.4" step="0.02" value="0.14" style="vertical-align:middle"> <span class="small muted">(आवाज़ के नीचे अपने-आप दबती है)</span></label></div>
-      <div class="field"><label><input type="checkbox" id="dc-ai" checked> AI से तस्वीरें बनाओ (Library में match न मिले तो) <span class="muted" id="dc-aiinfo"></span></label></div>
+      <div class="field"><label><input type="checkbox" id="dc-ai" checked> AI से तस्वीरें बनाओ (Library में match न मिले तो) <span class="muted" id="dc-aiinfo"></span></label> <span class="small muted" id="dc-vinfo"></span></div>
       <p class="small muted">तस्वीरें: पहले आपकी Library (नाम/tags से मिलान), फिर AI-generated (GPU API), फिर Pixabay (अगर PIXABAY_API_KEY है), नहीं तो title card।</p>
       <button class="btn primary" id="dc-build">🎬 Documentary बनाओ</button>
       <div class="tl-row" style="margin-top:.6rem"><div class="field"><label>Draft (बाद में जारी रखने के लिए)</label><select id="dc-drafts"><option value="">— सेव किए हुए —</option></select></div>
@@ -251,6 +251,7 @@ export function docBind(c) {
       <b>Scene ${i + 1}</b> <span style="float:right"><button class="btn small quiet" data-up="${i}" title="ऊपर">▲</button> <button class="btn small quiet" data-dn="${i}" title="नीचे">▼</button> <button class="btn small quiet" data-dup="${i}" title="copy">⧉</button> <button class="btn small quiet" data-del="${i}">🗑</button></span>
       <textarea data-n="${i}" rows="3" style="width:100%">${esc(s.narration)}</textarea>
       <label class="small muted" style="display:block;margin-top:.3rem">कम से कम इतने सेकंड दिखाएँ (0 = आवाज़ जितना) <input data-h="${i}" type="number" min="0" max="30" step="0.5" value="${s.hold || 0}" style="width:5rem"></label>
+      <label class="small" style="display:block;margin-top:.3rem" title="हर clip पर fal.ai का पैसा लगता है"><input type="checkbox" data-mo="${i}" ${s.motion ? "checked" : ""}> 🎥 इस scene की तस्वीर को AI video बनाओ (पैसे वाला, वैकल्पिक)</label>
       <input data-v="${i}" value="${esc(s.visual || "")}" placeholder="तस्वीर के English keywords (जैसे aerial himalaya mountains)" style="width:100%;margin-top:.3rem">
       <select data-l="${i}" style="width:100%;margin-top:.3rem"><option value="">तस्वीर: अपने-आप (Library → Pixabay → title card)</option>${(docState.lib || []).map((m) => `<option value="${esc(m.id)}" ${s.library_id === m.id ? "selected" : ""}>${m.kind === "image" ? "🖼" : "🎞"} ${esc(m.name)}</option>`).join("")}</select>${!s.library_id && docState.pv && docState.pv[i] ? `<div class="small muted">${docState.pv[i].library_id ? "✓ Library से मिलेगी: " + esc(docState.pv[i].name) : "Library में match नहीं — Pixabay या title card"}</div>` : ""}
     </div>`).join("");
@@ -261,6 +262,7 @@ export function docBind(c) {
     box.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => mv(+b.dataset.up, +b.dataset.up - 1)));
     box.querySelectorAll("[data-dn]").forEach((b) => (b.onclick = () => mv(+b.dataset.dn, +b.dataset.dn + 1)));
     box.querySelectorAll("[data-dup]").forEach((b) => (b.onclick = () => { docState.scenes.splice(+b.dataset.dup + 1, 0, { ...docState.scenes[+b.dataset.dup] }); docState.pv = null; draw(); }));
+    box.querySelectorAll("[data-mo]").forEach((t) => (t.onchange = () => { if (t.checked) docState.scenes[+t.dataset.mo].motion = true; else delete docState.scenes[+t.dataset.mo].motion; }));
     box.querySelectorAll("[data-h]").forEach((t) => (t.oninput = () => { const v = Math.max(0, Math.min(30, +t.value || 0)); if (v) docState.scenes[+t.dataset.h].hold = v; else delete docState.scenes[+t.dataset.h].hold; }));
     box.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { docState.scenes.splice(+b.dataset.del, 1); draw(); }));
     const ti = $("#dc-title"); if (ti) ti.oninput = () => (docState.title = ti.value);
@@ -279,6 +281,7 @@ export function docBind(c) {
     try {
       const r = await ctx.api("POST", "/documentary/preview", { scenes: docState.scenes });
       docState.pv = r.matches; draw();
+      const vi = $("#dc-vinfo"); if (vi) vi.textContent = r.video_provider ? `(AI video: ${r.video_provider} चालू)` : "(AI video बंद — .env में FAL_KEY डालें)";
       const inf = $("#dc-aiinfo"); if (inf) inf.textContent = r.ai_provider ? `(${r.ai_provider} GPU)` : "— .env में CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN या HF_TOKEN डालें";
     } catch { /* preview is optional */ }
   };

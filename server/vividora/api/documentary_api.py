@@ -70,7 +70,7 @@ def _download(url: str, dest: Path) -> Path:
 def _run(job_id: str, ws: str, user_id: str, p: dict):
     import os
 
-    from ..engine import aiimage
+    from ..engine import aiimage, aivideo
     from ..engine import documentary as doc
     from ..engine import tts
     from .library import _add_file, _http_json, _view
@@ -113,6 +113,16 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                             break
                     except Exception as e:  # noqa: BLE001 — stock is a bonus; a title card is the fallback
                         log.info("stock for scene %d failed: %s", i, e)
+                if (sc.get("motion") and p.get("ai_video") and aivideo.provider() and src and kind == "image" and Path(src).exists()
+                        and sum(1 for c in credits if "AI video" in c) < aivideo.max_clips()):
+                    try:
+                        st.update(message=f"scene {i + 1}/{n}: AI video बन रही है (1–3 मिनट)")
+                        src = aivideo.animate(Path(src), sc.get("visual") or sc["narration"][:120], work / f"mo{i}.mp4")
+                        kind = "video"
+                        credits.append(f"scene {i + 1}: AI video ({aivideo.provider()}) — synthetic")
+                    except Exception as e:  # noqa: BLE001 — the still picture (Ken-Burns) is the fallback
+                        log.info("ai video for scene %d failed: %s", i, e)
+                        st["warnings"].append(f"scene {i + 1}: AI video नहीं बनी — तस्वीर इस्तेमाल हुई")
                 if not src or not Path(src).exists():
                     src, kind = doc.title_card(sc.get("on_screen") or sc["narration"][:90], work / f"card{i}.png", size, i), "image"
                 visuals.append((Path(src), kind))
@@ -179,7 +189,8 @@ async def plan(request: Request, user: dict):
     if res is None:
         raise ApiError(422, "script से scenes नहीं बने")
     return ok({**res, "source": source, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY")),
-                "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider()})
+                "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider(),
+                "video_provider": __import__("vividora.engine.aivideo", fromlist=["x"]).provider()})
 
 
 def _params(b: dict, user: dict) -> tuple[dict, list[str]]:
@@ -210,7 +221,7 @@ def _params(b: dict, user: dict) -> tuple[dict, list[str]]:
     ser = b.get("series") if isinstance(b.get("series"), dict) else None
     p = {"scenes": res["scenes"], "title": res["title"], "voice": voice, "lang": lang, "orientation": orient, "speed": speed,
          "music_id": b.get("music_id"), "music_volume": mv, "stock": b.get("stock", True) is not False,
-         "captions": b.get("captions", True) is not False, "ai_images": b.get("ai_images", True) is not False,
+         "captions": b.get("captions", True) is not False, "ai_images": b.get("ai_images", True) is not False, "ai_video": b.get("ai_video", True) is not False,
          "series": ({"name": str(ser.get("name", ""))[:100], "i": int(ser.get("i") or 1), "titles": [str(t)[:100] for t in (ser.get("titles") or [])[:12]]} if ser else None),
          "sources": [{"title": str(x.get("title", ""))[:120], "url": str(x.get("url", ""))[:300]} for x in (b.get("sources") or [])[:6] if isinstance(x, dict)]}
     return p, warn
@@ -292,7 +303,7 @@ def _start_batch(user: dict, items: list[dict], common: dict, label: str) -> str
     return bid
 
 
-_COMMON_KEYS = ("voice", "lang", "language", "speed", "orientation", "music_id", "music_volume", "stock", "captions", "ai_images", "minutes", "ground")
+_COMMON_KEYS = ("voice", "lang", "language", "speed", "orientation", "music_id", "music_volume", "stock", "captions", "ai_images", "ai_video", "minutes", "ground")
 
 
 def _common(b: dict) -> dict:
@@ -491,7 +502,8 @@ async def preview(request: Request, user: dict):
             used.add(m["id"])
         out.append({"index": i, "library_id": m["id"] if m else None, "name": m["name"] if m else None})
     return ok({"matches": out, "has_stock": bool(__import__("os").getenv("PIXABAY_API_KEY")),
-                "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider()})
+                "ai_provider": __import__("vividora.engine.aiimage", fromlist=["x"]).provider(),
+                "video_provider": __import__("vividora.engine.aivideo", fromlist=["x"]).provider()})
 
 
 @require("viewer")

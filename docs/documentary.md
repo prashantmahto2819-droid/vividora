@@ -41,7 +41,7 @@ Setup (VM पर):
 - UI में हर scene के नीचे दिखता है कि Library से कौन-सी तस्वीर मिलेगी (`POST /documentary/preview`)।
 - **AI तस्वीरें (GPU API):** Library में match न मिले तो scene की `visual` से FLUX.1-schnell image बनती है (पहले Cloudflare Workers AI, फिर Hugging Face; `AI_IMAGE_PROVIDER` से चुनें)। GPU इस server पर नहीं, API पर चलता है। description में "AI-generated image — synthetic" लिखा आता है; YouTube पर realistic AI तस्वीरों के लिए upload के समय **altered/synthetic content** वाला विकल्प ख़ुद चुनें। बंद: `"ai_images": false`।
 - AI जो facts लिखे उन्हें **publish से पहले ख़ुद जाँचें**; script में वही नाम/तारीख़ें रखें जिन पर भरोसा हो।
-- तस्वीरें: Library → AI image → Pixabay → title card। AI *video* clips अभी नहीं (वो API पर महँगे हैं); तस्वीरों में Ken-Burns zoom लगता है।
+- तस्वीरें: Library → AI image → Pixabay → title card। AI *video* clips वैकल्पिक हैं (नीचे देखें); बाक़ी तस्वीरों में Ken-Burns zoom लगता है।
 - एक workspace में एक साथ एक ही documentary बनती है; ज़्यादा से ज़्यादा 24 scenes, 9000 अक्षर।
 
 ## API
@@ -58,3 +58,6 @@ GET  /api/v1/jobs/{job_id}      → status, file (डाउनलोड: GET /ap
 - **Series:** topic → AI episodes की list → आप नाम बदलें → "पूरी series बनाओ": हर episode की scenes AI लिखता है (बाक़ी episodes के नाम देकर, ताकि दोहराव न हो), एक के बाद एक बनती हैं, description में पूरी series की list आती है। API: `POST /api/v1/documentary/series` (`build:false` outline, `build:true` + `episodes[]`)। Batch का नतीजा `/v1/jobs/{id}` के `items[]` में।
 - **YouTube private draft:** फ़िल्म बनने पर "⬆ Private draft के रूप में upload" — आपके connected channel पर **हमेशा private** (public नहीं होता), title/description/thumbnail के साथ; AI तस्वीरें लगी हों तो YouTube का "synthetic content" flag अपने-आप लगता है। देखकर publish आप YouTube Studio में ख़ुद करें। `PUBLISH_DRY_RUN=1` हो तो असल upload नहीं होता।
 - सीमाएँ: एक workspace में एक समय एक ही job/batch; Shorts हर बार नए सिरे से (TTS + तस्वीरें) बनते हैं, इसलिए ज़्यादा Shorts = ज़्यादा समय।
+
+## AI video clips (वैकल्पिक, पैसे वाले)
+हर scene में "🎥 AI video बनाओ" टिक करने पर उसकी तस्वीर (Library/AI/stock) fal.ai के image-to-video model से 1–3 मिनट में छोटे clip में बदलती है। `.env` में `FAL_KEY` चाहिए (https://fal.ai/dashboard/keys); model `AI_VIDEO_MODEL` से बदलें; एक film में अधिकतम `AI_VIDEO_MAX` (default 4) clips, ताकि बिल सीमित रहे। fail हो तो तस्वीर पर Ken-Burns लगता है और warning दिखती है। description में "AI video — synthetic" जुड़ता है और YouTube का synthetic flag लगता है। **ध्यान:** यह real fal.ai API पर test नहीं हुआ (नक़ली server से जाँचा) — पहले 1 scene से आज़माएँ और fal dashboard में model id/कीमत देख लें।

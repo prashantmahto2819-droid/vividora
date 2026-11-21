@@ -57,6 +57,46 @@ def units():
         llm.available, llm.ask_json = old_av, old_ask
 
 
+def ai_video_units():
+    from vividora.engine import aivideo
+    tmp = Path(tempfile.mkdtemp(prefix="vivi_av_"))
+    keep = os.environ.pop("FAL_KEY", None)
+    try:
+        img = tmp / "a.png"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x36", "-frames:v", "1", str(img)], check=True)
+        check("ai video: no key → provider None, animate raises", aivideo.provider() is None and not _raises(lambda: aivideo.animate(img, "x", tmp / "o.mp4")))
+        os.environ["FAL_KEY"] = "k"
+        seq = []
+
+        def call(method, url, body=None, timeout=60):
+            seq.append((method, url.rsplit("/", 1)[-1], bool(body and body.get("image_url", "").startswith("data:image/png;base64,"))))
+            if method == "POST":
+                return {"status_url": "http://x/status", "response_url": "http://x/resp"}
+            if url.endswith("status"):
+                return {"status": "COMPLETED" if len(seq) > 3 else "IN_PROGRESS"}
+            return {"video": {"url": "https://v.example/x.mp4"}}
+        out = aivideo.animate(img, "snow peaks", tmp / "o.mp4", call=call, poll_s=0.01, download=lambda u, d: d.write_bytes(b"x" * 2000))
+        check("ai video: submit (image as data URI) → poll → fetch → download", out.exists() and seq[0][0] == "POST" and seq[0][2] and seq[-1][1] == "resp", seq)
+        check("ai video: failed status → RuntimeError", not _raises(lambda: aivideo.animate(img, "x", tmp / "f.mp4", poll_s=0.01,
+              call=lambda m, u, b=None, timeout=60: {"status_url": "s", "response_url": "r"} if m == "POST" else {"status": "FAILED", "error": "nsfw"})))
+        check("ai video: non-https video url rejected", not _raises(lambda: aivideo.animate(img, "x", tmp / "g.mp4", poll_s=0.01, download=lambda u, d: None,
+              call=lambda m, u, b=None, timeout=60: {"status_url": "s", "response_url": "r"} if m == "POST" else {"status": "COMPLETED", "video": {"url": "file:///etc/passwd"}})))
+    finally:
+        os.environ.pop("FAL_KEY", None)
+        if keep:
+            os.environ["FAL_KEY"] = keep
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _raises(fn):
+    """True when fn does NOT raise (so `not _raises(...)` reads 'it raised')."""
+    try:
+        fn()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def e2e():
     tmp = Path(tempfile.mkdtemp(prefix="vivi_ds_"))
     s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
@@ -75,11 +115,45 @@ def e2e():
             self.send_response(200); self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
         def log_message(self, *a): pass
+    import base64
+    png = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"], capture_output=True).stdout
+    mp4 = tmp / "fake.mp4"
+    tmp.mkdir(exist_ok=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=24:duration=2", "-pix_fmt", "yuv420p", str(mp4)], check=True)
+    fal_hits = []
+
+    class Fake(BaseHTTPRequestHandler):
+        def _send(self, b, ctype="application/json"):
+            self.send_response(200); self.send_header("content-type", ctype); self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+        def do_POST(self):
+            n = int(self.headers.get("content-length") or 0); self.rfile.read(n)
+            if "/client/v4/" in self.path:
+                self._send(json.dumps({"success": True, "result": {"image": base64.b64encode(png).decode()}}).encode())
+            else:
+                fal_hits.append("submit")
+                base = f"http://127.0.0.1:{fsrv.server_port}"
+                self._send(json.dumps({"status_url": base + "/status", "response_url": base + "/resp"}).encode())
+
+        def do_GET(self):
+            if self.path == "/status":
+                self._send(b'{"status": "COMPLETED"}')
+            elif self.path == "/resp":
+                self._send(json.dumps({"video": {"url": f"http://127.0.0.1:{fsrv.server_port}/v.mp4"}}).encode())
+            else:
+                fal_hits.append("download")
+                self._send(mp4.read_bytes(), "video/mp4")
+
+        def log_message(self, *a): pass
+    fsrv = HTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=fsrv.serve_forever, daemon=True).start()
     osrv = HTTPServer(("127.0.0.1", 0), Oll)
     threading.Thread(target=osrv.serve_forever, daemon=True).start()
     env = {**os.environ, "DATA_ROOT": str(tmp / "data"), "MEDIA_ROOT": str(tmp / "media"), "ADMIN_PASSWORD": "test-pass-123", "SECRET_KEY": "t",
            "WEB_DIST": str(tmp / "web"), "TRIPOSR_URL": "http://127.0.0.1:9", "VIVIDORA_TTS": "fake", "PUBLISH_DRY_RUN": "1",
-           "OLLAMA_URL": f"http://127.0.0.1:{osrv.server_port}", "OLLAMA_MODEL": "m", "LLM_CACHE": "0"}
+           "OLLAMA_URL": f"http://127.0.0.1:{osrv.server_port}", "OLLAMA_MODEL": "m", "LLM_CACHE": "0",
+           "CLOUDFLARE_API_BASE": f"http://127.0.0.1:{fsrv.server_port}", "CLOUDFLARE_ACCOUNT_ID": "a", "CLOUDFLARE_API_TOKEN": "t",
+           "FAL_KEY": "k", "FAL_QUEUE_BASE": f"http://127.0.0.1:{fsrv.server_port}", "AI_VIDEO_MAX": "1"}
     srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "vividora.app:app", "--port", str(port), "--log-level", "warning"],
                            cwd=str(HERE), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}/api"
@@ -174,6 +248,20 @@ def e2e():
             check("series: description lists the whole series", "part 2 of 2" in (j["items"][1].get("description") or "") and "जन्म" in j["items"][1]["description"], j["items"][1].get("description"))
         st, r = call("POST", "/documentary/series", {"build": True, "episodes": [{"title": "only one"}]}, tok)
         check("series needs ≥2 episodes → 422", st == 422, (st, r))
+        # ---- AI motion: scene 1 opts in (AI still → AI video clip); scene 2 also opts in but AI_VIDEO_MAX=1 caps it
+        mo = [{"narration": "पहला दृश्य यहाँ है।", "visual": "snow peaks", "motion": True}, {"narration": "दूसरा दृश्य यहाँ है।", "visual": "river", "motion": True},
+              {"narration": "तीसरा दृश्य।", "visual": "forest"}]
+        st, r = call("GET", "/documentary/drafts", None, tok)
+        st, r = call("POST", "/documentary/preview", {"scenes": mo}, tok)
+        check("preview reports the video provider is not needed here; image provider on", st == 200 and r["ai_provider"] == "cloudflare", (st, r))
+        st, r = call("POST", "/documentary/build", {"scenes": mo, "title": "Motion", "captions": False, "stock": False}, tok)
+        check("motion build accepted", st == 202, (st, r))
+        j = wait(r["job_id"], tok, 300)
+        check("motion build done", j and j["status"] == "done", j)
+        if j and j["status"] == "done":
+            cr = "\n".join(j.get("credits") or [])
+            check("exactly one AI video clip (cap), scene 1, disclosed; flagged synthetic", cr.count("AI video") == 1 and "scene 1: AI video" in cr and j["ai_used"] is True, cr)
+            check("fal flow ran once: submit + download", fal_hits.count("submit") == 1 and fal_hits.count("download") == 1, fal_hits)
         # ---- v1 job view for a batch
         key = call("POST", "/keys", {"name": "t"}, tok)[1]["key"]
         st, r = call("POST", "/v1/documentary/shorts", {"scenes": long_scenes, "count": 1}, key)
@@ -189,6 +277,7 @@ def e2e():
 
 if __name__ == "__main__":
     units()
+    ai_video_units()
     e2e()
     print("\nALL PASS" if not fails else f"\n{fails} FAILED")
     sys.exit(1 if fails else 0)

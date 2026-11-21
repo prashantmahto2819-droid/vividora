@@ -149,7 +149,7 @@ def t_doc_plan(a):
 
 
 def t_doc_build(a):
-    body = {k: a[k] for k in ("title", "scenes", "voice", "lang", "speed", "orientation", "music_id", "stock", "ai_images") if a.get(k) is not None}
+    body = {k: a[k] for k in ("title", "scenes", "voice", "lang", "speed", "orientation", "music_id", "stock", "ai_images", "ai_video") if a.get(k) is not None}
     j = _req("POST", "/v1/documentary/build", body)
     if a.get("wait", True) is False:
         return j
