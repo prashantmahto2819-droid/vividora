@@ -117,6 +117,8 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      # QUIC (UDP 7844) अक्सर router/ISP पर रुक जाता है ("failed to dial to edge with quic: timeout") → TCP/http2 पर चलाओ
+      TUNNEL_TRANSPORT_PROTOCOL: http2
     depends_on:
       - api
     profiles: ["tunnel"]
