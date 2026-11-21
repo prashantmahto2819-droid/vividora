@@ -25,6 +25,8 @@ n8n, Zapier, Make, अपनी app या script से Vividora के 3 क�
 | GET / POST | `/models3d` | 3D models की list / तैयार `.glb` upload (multipart `file`, `name`) |
 | POST | `/character-video` | JSON `{glb \| profile, lines:[{text,voice?}], animation?, camera?, seconds?, width?, height?, scene?, lighting?}` → `202 {job_id}` |
 | POST | `/auto-sfx` | JSON `{project_id \| (effects + duration), cut_times?, density?: low/normal/high, level?: 0.3–1.5}` → `200 {sfx:[…], added}` — timeline (title / B-roll / sticker / cut) देखकर whoosh, pop, tick अपने-आप; सेव नहीं करता, editor `effects.sfx` में डालना आपके हाथ में |
+| POST | `/documentary/plan` | `{topic, minutes?, language?}` या `{script}` → `{title, scenes[]}` (topic के लिए GEMINI/ANTHROPIC key) — देखें [documentary.md](documentary.md) |
+| POST | `/documentary/build` | `{scenes[], title?, voice?, lang?, orientation?, music_id?, stock?, callback_url?}` → `202 {job_id}` — narrated MP4 Library में |
 | GET | `/jobs/{job_id}` | `status`: `queued/running/done/failed` (+ `file` जब done) |
 | GET | `/files/{file_id}` | नतीजा download (key चाहिए, link expire नहीं होता) |
 

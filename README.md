@@ -33,6 +33,7 @@ Windows PC (NVIDIA GPU)            Ubuntu VM (Docker)
 - **Autopilot** — `engine/autopilot.py`
 - **API for other software** — API keys + `/api/v1` (`api/keys_api.py`, `api/v1_api.py`, `apikeys.py`, `webhooks.py`); guide `docs/api.md`, full setup/update `docs/setup.md`
 - Claude से जोड़ना (MCP): [docs/mcp.md](docs/mcp.md)
+- Auto Documentary: [docs/documentary.md](docs/documentary.md) · Server देखभाल: [docs/ops.md](docs/ops.md)
 - Setup guides: `docs/first-video.md`, `docs/cloudflare-tunnel.md`, `docs/google-drive.md`; research: `docs/research-editors-2026.md`
 
 ## Editor (CapCut-style)

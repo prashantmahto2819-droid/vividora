@@ -67,6 +67,11 @@ VOICE_PRESETS: list[dict] = [
      "kokoro_voice": "am_michael", "kokoro_lang": "a"},
     {"id": "en_kokoro_heart", "label": "Heart — American English, हल्का model (महिला)", "lang": "en", "gender": "f", "engine": "kokoro",
      "kokoro_voice": "af_heart", "kokoro_lang": "a"},
+    # Kokoro Hindi (Apache-2.0, commercial-safe, CPU-friendly) — lang code "h"; quality varies, listen before publishing
+    {"id": "hi_kokoro_alpha", "label": "Alpha — Hindi, हल्का model, commercial-safe (महिला)", "lang": "hi", "gender": "f", "engine": "kokoro",
+     "kokoro_voice": "hf_alpha", "kokoro_lang": "h"},
+    {"id": "hi_kokoro_omega", "label": "Omega — Hindi, हल्का model, commercial-safe (पुरुष)", "lang": "hi", "gender": "m", "engine": "kokoro",
+     "kokoro_voice": "hm_omega", "kokoro_lang": "h"},
     # ---- ElevenLabs Cloud voices (require ELEVENLABS_API_KEY) ----
     {"id": "el_rachel", "label": "Rachel — ElevenLabs, शांत professional (महिला)", "lang": "en", "gender": "f",
      "engine": "elevenlabs", "elevenlabs_voice_id": "21m00Tcm4TlvDq8ikWAM", "cloud": True,

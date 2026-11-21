@@ -73,7 +73,7 @@ def main():
         check("one reply per request (notification gets none)", sorted(by) == [1, 2, 3, 4, 5, 6, 7, 8, 9], sorted(by))
         check("initialize", by[1]["result"]["serverInfo"]["name"] == "vividora" and "tools" in by[1]["result"]["capabilities"], by[1])
         names = [t["name"] for t in by[2]["result"]["tools"]]
-        check("8+ tools listed with schemas", len(names) >= 8 and all(t["inputSchema"]["type"] == "object" for t in by[2]["result"]["tools"]), names)
+        check("10+ tools listed with schemas", len(names) >= 10 and "vividora_documentary_build" in names and all(t["inputSchema"]["type"] == "object" for t in by[2]["result"]["tools"]), names)
         who = json.loads(by[3]["result"]["content"][0]["text"])
         check("whoami works with the key", who["via_api_key"] is True and who["role"], who)
         sfx = json.loads(by[4]["result"]["content"][0]["text"])

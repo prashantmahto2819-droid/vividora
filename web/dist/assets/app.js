@@ -93,7 +93,7 @@ function toast(msg, ms = 2600) {
 // ---------- routing ----------
 function parseRoute() {
   const full = location.hash.replace(/^#/, "") || "/"; const [p, qs] = full.split("?");
-  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|forgot|reset|characters3d|scenes3d|characters|scenes|copilot|yt-shorts|voicestudio|image3d|api)?\/?([^/]*)/) || [];
+  const [, kind, id] = p.match(/^\/(projects|users|status|new|settings|plan|analytics|record|library|thumbs|templates|publish|trends|help|account|compress|billing|admin|signup|forgot|reset|characters3d|scenes3d|characters|scenes|copilot|yt-shorts|documentary|voicestudio|image3d|api)?\/?([^/]*)/) || [];
   return { kind: kind || "home", id, q: new URLSearchParams(qs || "") };
 }
 function go(path) { location.hash = path; }
@@ -148,12 +148,12 @@ function schedulePoll() {
   if (busy || anyBusy || compBusy || ytBusy || S.route.kind === "status") S.poll = setTimeout(() => load().then(renderSoft), busy || compBusy || ytBusy ? 2500 : 6000);
 }
 // a background poll must never wipe a form someone is filling in: the upload/montage page keeps chosen files in memory
-function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "templates", "characters", "scenes", "characters3d", "scenes3d", "voicestudio", "image3d", "api"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
+function renderSoft() { if ((document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) || $("#pmenu") || ["thumbs", "new", "record", "templates", "characters", "scenes", "characters3d", "scenes3d", "voicestudio", "image3d", "api", "documentary"].includes(S.route.kind) || $("[data-keep]")) { schedulePoll(); return; } render(); }
 
 // ---------- shell: left nav, mobile top bar + tab bar ----------
 const NAV = [
   [null, [["home", "#/", "home", "Home"], ["projects", "#/projects", "grid", "Projects"]]],
-  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["edit", "#/new?quick=1", "film", "Timeline Editor", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["yt-shorts", "#/yt-shorts", "film", "YT → Shorts", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1], ["voicestudio", "#/voicestudio", "music", "Voice Studio (TTS)", 1], ["image3d", "#/image3d", "cube", "Image → 3D (.glb)", 1]]],
+  ["बनाएँ", [["record", "#/record", "rec", "Record", 1], ["edit", "#/new?quick=1", "film", "Timeline Editor", 1], ["new", "#/new", "upload", "Upload", 1], ["montage", "#/new?type=montage", "music", "Montage", 1], ["yt-shorts", "#/yt-shorts", "film", "YT → Shorts", 1], ["documentary", "#/documentary", "film", "Auto Documentary", 1], ["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["compress", "#/compress", "zip", "Compress", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1], ["voicestudio", "#/voicestudio", "music", "Voice Studio (TTS)", 1], ["image3d", "#/image3d", "cube", "Image → 3D (.glb)", 1]]],
   ["API", [["api", "#/api", "gear", "API & Integrations", 1]]],
   ["बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["dashboard", "#/dashboard", "grid", "Dashboard"], ["copilot", "#/copilot", "pulse", "Copilot"], ["publish", "#/publish", "send", "Publish"]]],
   ["Workspace", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"], ["account", "#/account", "gear", "Settings"], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
@@ -244,12 +244,12 @@ function render() {
   }
   app.dataset.mode = "shell"; ED.unmount();
   const views = { characters: CHS.view, scenes: SCN.view, compress: compressView, templates: templatesView, new: newView, users: usersView, status: statusView, settings: settingsView, plan: planView, analytics: analyticsView, dashboard: dashboardView, copilot: copilotView, library: libraryView,
-                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView, "yt-shorts": ytShortsView, voicestudio: TL.voiceView, image3d: TL.glbView, api: TL.apiView };
+                  thumbs: thumbsPickView, publish: publishView, trends: trendsView, help: helpView, account: accountView, billing: billingView, admin: adminView, "yt-shorts": ytShortsView, voicestudio: TL.voiceView, image3d: TL.glbView, api: TL.apiView, documentary: TL.docView };
   const main = detail ? (S.project ? projectView(S.project) : `<div class="empty"><p>यह project नहीं मिला — शायद हटा दिया गया है।</p><a class="btn" href="#/projects">सभी projects</a></div>`) : r.kind === "projects" ? projectsView() : (views[r.kind] || homeView)();
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, dashboard: bindDashboard, copilot: bindCopilot, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts, voicestudio: () => TL.voiceBind({ S, api, toast, go }), image3d: () => TL.glbBind({ S, api, toast, go }), api: () => TL.apiBind({ S, api, toast, go }) };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts, voicestudio: () => TL.voiceBind({ S, api, toast, go }), image3d: () => TL.glbBind({ S, api, toast, go }), api: () => TL.apiBind({ S, api, toast, go }), documentary: () => TL.docBind({ S, api, toast, go }) };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 

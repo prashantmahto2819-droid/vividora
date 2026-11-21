@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Auto Documentary: units (planner parsing, picture choice, ffmpeg clips/mix) + end-to-end build with the fake TTS.
+    cd server && VIVIDORA_TTS=fake python3 tests/test_documentary.py"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(HERE))
+os.environ["VIVIDORA_TTS"] = "fake"
+for k in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "PIXABAY_API_KEY"):
+    os.environ.pop(k, None)
+fails = 0
+
+
+def check(label, cond, val=None):
+    global fails
+    print(("PASS " if cond else "FAIL ") + label + ("" if cond else f"  → {str(val)[:300]}"))
+    fails += 0 if cond else 1
+
+
+def probe(p):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "json", str(p)],
+                       capture_output=True, text=True)
+    j = json.loads(r.stdout)
+    return {s["codec_type"] for s in j["streams"]}, float(j["format"]["duration"]), j["streams"]
+
+
+def units():
+    from vividora.engine import documentary as doc
+    from vividora.engine import tts
+    n = doc.normalize({"title": "T", "scenes": [{"narration": "  नमस्ते   दुनिया ", "visual": "aerial himalaya", "on_screen": "x"}, {"narration": ""}, "bad", {"narration": "ok text"}]})
+    check("normalize drops empty/bad scenes, squeezes spaces", n and len(n["scenes"]) == 2 and n["scenes"][0]["narration"] == "नमस्ते दुनिया", n)
+    check("normalize rejects garbage", doc.normalize(None) is None and doc.normalize({"scenes": []}) is None and doc.normalize({"scenes": "x"}) is None)
+    s = doc.scenes_from_script("पहला भाग।\n\nदूसरा भाग।\n\nतीसरा भाग।")
+    check("paragraphs → scenes", s and len(s["scenes"]) == 3, s)
+    long = " ".join(f"This is sentence number {i} of a long paragraph." for i in range(30))
+    s = doc.scenes_from_script(long)
+    check("one long paragraph is cut into several scenes", s and len(s["scenes"]) >= 4 and all(len(x["narration"]) <= 400 for x in s["scenes"]), s and len(s["scenes"]))
+    check("no llm key → plan() is None", doc.plan("Himalaya") is None)
+    lib = [{"id": "a", "kind": "image", "name": "Himalaya mountains sunrise", "tags": "nature", "meta": {}},
+           {"id": "b", "kind": "broll", "name": "city traffic", "tags": "urban,cars", "meta": {}},
+           {"id": "c", "kind": "image", "name": "himalaya cutout", "tags": "", "meta": {"alpha": True}},
+           {"id": "d", "kind": "music", "name": "himalaya song", "tags": "", "meta": {}}]
+    check("keyword match picks the himalaya image", doc.pick_visual({"visual": "aerial view himalaya mountains"}, lib, set())["id"] == "a")
+    check("no overlap → None (title card)", doc.pick_visual({"visual": "ocean whales"}, lib, set()) is None)
+    check("explicit library_id wins", doc.pick_visual({"visual": "x", "library_id": "b"}, lib, set())["id"] == "b")
+    check("durations have a floor", doc.scene_durations([0.5, 10.0]) == [doc.MIN_SCENE, 10.45], doc.scene_durations([0.5, 10.0]))
+    tmp = Path(tempfile.mkdtemp(prefix="doc_u_"))
+    try:
+        size = (640, 360)
+        card = doc.title_card("हिमालय — दुनिया की छत", tmp / "c.png", size, 1)
+        check("title card (Devanagari) written", card.exists() and card.stat().st_size > 2000)
+        c1 = doc.render_scene(card, "image", 3.0, tmp / "c1.mp4", size, 0)
+        c2 = doc.render_scene(card, "image", 2.8, tmp / "c2.mp4", size, 1)
+        kinds, d, st = probe(c1)
+        check("image clip: 3.0 s video, right size", kinds == {"video"} and abs(d - 3.0) < 0.15 and st[0]["width"] == 640, (kinds, d))
+        src = tmp / "src.mp4"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=1", "-pix_fmt", "yuv420p", str(src)], check=True)
+        c3 = doc.render_scene(src, "video", 3.0, tmp / "c3.mp4", size, 2)
+        kinds, d, st = probe(c3)
+        check("short video loops to 3.0 s, filled to frame", abs(d - 3.0) < 0.15 and st[0]["height"] == 360, (d, st))
+        w1, w2 = tmp / "w1.wav", tmp / "w2.wav"
+        be = tts.FakeBackend()
+        be.synth("one two three", {"gender": "m"}, "en", 1.0, w1)
+        be.synth("another line of narration here", {"gender": "f"}, "en", 1.0, w2)
+        durs = [3.0, 2.8]
+        track = doc.narration_track([w1, w2], durs, tmp / "n.wav")
+        check("narration padded to the sum of scene lengths", abs(tts.wav_seconds(track) - 5.8) < 0.05, tts.wav_seconds(track))
+        sfx = tmp / "sfx.wav"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=800:duration=0.4", str(sfx)], check=True)
+        mus = tmp / "mus.wav"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=2", str(mus)], check=True)
+        for label, kw in (("voice only", {}), ("voice + sfx", {"sfx": sfx}), ("voice + sfx + music (looped)", {"sfx": sfx, "music": mus})):
+            out = doc.assemble([c1, c2], durs, track, tmp / f"o_{len(kw)}.mp4", work=tmp, **kw)
+            kinds, d, _ = probe(out)
+            check(f"assemble {label}: audio+video, 5.8 s", kinds == {"video", "audio"} and abs(d - 5.8) < 0.2, (kinds, d))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def e2e():
+    tmp = Path(tempfile.mkdtemp(prefix="vivi_doc_"))
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    env = {**os.environ, "DATA_ROOT": str(tmp / "data"), "MEDIA_ROOT": str(tmp / "media"), "ADMIN_PASSWORD": "test-pass-123",
+           "SECRET_KEY": "t", "WEB_DIST": str(tmp / "web"), "TRIPOSR_URL": "http://127.0.0.1:9", "VIVIDORA_TTS": "fake"}
+    srv = subprocess.Popen([sys.executable, "-m", "uvicorn", "vividora.app:app", "--port", str(port), "--log-level", "warning"],
+                           cwd=str(HERE), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    base = f"http://127.0.0.1:{port}/api"
+
+    def call(method, path, body=None, token=None, raw=False):
+        h = {"content-type": "application/json"} if body is not None else {}
+        if token:
+            h["authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body is not None else None, headers=h)
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                blob = r.read()
+                return r.status, (blob if raw else json.loads(blob or b"null"))
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read() or b"null")
+            except ValueError:
+                return e.code, None
+
+    try:
+        for _ in range(400):
+            try:
+                if call("GET", "/health")[0] == 200:
+                    break
+            except OSError:
+                time.sleep(0.3)
+        tok = call("POST", "/auth/login", {"email": "admin@vividora.local", "password": "test-pass-123"})[1]["token"]
+        key = call("POST", "/keys", {"name": "t"}, tok)[1]["key"]
+        st, r = call("POST", "/v1/documentary/plan", {"topic": "Himalaya"}, key)
+        check("plan from topic without LLM key → 409 with the way out", st == 409 and "script" in json.dumps(r, ensure_ascii=False), (st, r))
+        st, r = call("POST", "/v1/documentary/plan", {"script": "पहला भाग बहुत लंबा नहीं है।\n\nदूसरा भाग भी छोटा है।\n\nतीसरा और आख़िरी भाग।"}, key)
+        check("plan from own script", st == 200 and len(r["scenes"]) == 3 and r["source"] == "script", (st, r))
+        scenes = r["scenes"]
+        st, r2 = call("POST", "/v1/documentary/build", {"scenes": []}, key)
+        check("build without scenes → 422", st == 422, (st, r2))
+        st, r2 = call("POST", "/v1/documentary/build", {"scenes": scenes, "orientation": "tall"}, key)
+        check("bad orientation → 422", st == 422, (st, r2))
+        st, r2 = call("POST", "/v1/documentary/build", {"scenes": scenes, "title": "Test डॉक्यूमेंट्री", "orientation": "portrait", "voice": "hi_rohit_deep"}, key)
+        check("build accepted (202 + job_id)", st == 202 and r2.get("job_id"), (st, r2))
+        jid = r2["job_id"]
+        st, again = call("POST", "/v1/documentary/build", {"scenes": scenes}, key)
+        check("second build while running → 429", st == 429, (st, again))
+        t0, j = time.time(), None
+        while time.time() - t0 < 240:
+            st, j = call("GET", f"/v1/jobs/{jid}", None, key)
+            if j.get("status") in ("done", "failed"):
+                break
+            time.sleep(2)
+        check("job finishes done", j and j.get("status") == "done", j)
+        if j and j.get("status") == "done":
+            f = j["file"]
+            st, blob = call("GET", f"/v1/files/{f['id']}", None, key, raw=True)
+            p = tmp / "out.mp4"
+            p.write_bytes(blob)
+            kinds, d, streams = probe(p)
+            vs = next(s for s in streams if s["codec_type"] == "video")
+            check("downloaded MP4 has audio+video, portrait", kinds == {"video", "audio"} and vs["height"] > vs["width"], (kinds, vs))
+            check("length = sum of scene lengths (≥ 3×2.8 s)", d >= 8.3, d)
+            st, jj = call("GET", f"/documentary/{jid}", None, tok)
+            check("editor status route agrees", st == 200 and jj["status"] == "done" and jj["progress"] == 100, jj)
+        st, lib = call("GET", "/library?kind=broll", None, tok)
+        items = lib if isinstance(lib, list) else lib.get("items", [])
+        check("saved in Library with tags", any("documentary" in (i.get("tags") or "") for i in items), items[:2])
+    finally:
+        srv.terminate()
+        try:
+            srv.wait(10)
+        except subprocess.TimeoutExpired:
+            srv.kill()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    units()
+    e2e()
+    print(f"\n{'ALL PASS' if not fails else str(fails) + ' FAILED'}")
+    sys.exit(1 if fails else 0)

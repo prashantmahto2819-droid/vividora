@@ -143,6 +143,24 @@ def t_auto_sfx(a):
     return _req("POST", "/v1/auto-sfx", body)
 
 
+def t_doc_plan(a):
+    body = {k: a[k] for k in ("topic", "script", "minutes", "language") if a.get(k) not in (None, "")}
+    return _req("POST", "/v1/documentary/plan", body, timeout=180)
+
+
+def t_doc_build(a):
+    body = {k: a[k] for k in ("title", "scenes", "voice", "lang", "speed", "orientation", "music_id", "stock") if a.get(k) is not None}
+    j = _req("POST", "/v1/documentary/build", body)
+    if a.get("wait", True) is False:
+        return j
+    global WAIT_SECONDS
+    old, WAIT_SECONDS = WAIT_SECONDS, 1500
+    try:
+        return _finish(_wait(j["job_id"]), a.get("save_to"))
+    finally:
+        WAIT_SECONDS = old
+
+
 _WAIT = {"wait": {"type": "boolean", "description": "true (default): काम पूरा होने तक रुकें; false: सिर्फ़ job_id लौटाएँ"},
          "save_to": {"type": "string", "description": "नतीजा इस local path पर सेव करें (वैकल्पिक)"}}
 
@@ -169,6 +187,14 @@ TOOLS = {
         "project_id": {"type": "string"}, "effects": {"type": "object"}, "duration": {"type": "number"},
         "cut_times": {"type": "array", "items": {"type": "number"}}, "density": {"type": "string", "enum": ["low", "normal", "high"]},
         "level": {"type": "number"}})),
+    "vividora_documentary_plan": (t_doc_plan, "Topic (AI key चाहिए) या अपनी script → documentary scenes [{narration, visual, on_screen}]", _obj({
+        "topic": {"type": "string"}, "script": {"type": "string"}, "minutes": {"type": "number"}, "language": {"type": "string", "enum": ["hi", "en", "hinglish"]}})),
+    "vividora_documentary_build": (t_doc_build, "Scenes → narrated documentary MP4 (Library में + वैकल्पिक local save)। बनने में मिनट लगते हैं", _obj({
+        "title": {"type": "string"}, "scenes": {"type": "array", "items": {"type": "object", "properties": {
+            "narration": {"type": "string"}, "visual": {"type": "string"}, "on_screen": {"type": "string"}, "library_id": {"type": "string"}}}},
+        "voice": {"type": "string"}, "lang": {"type": "string"}, "speed": {"type": "number"},
+        "orientation": {"type": "string", "enum": ["landscape", "portrait", "square"]}, "music_id": {"type": "string"},
+        "stock": {"type": "boolean"}, **_WAIT}, ["scenes"])),
     "vividora_job_status": (t_job, "किसी job की स्थिति (running/done/failed + file)", _obj({"job_id": {"type": "string"}}, ["job_id"])),
     "vividora_download_file": (t_download, "Library की file (wav/glb/webm/mp4) local path पर सेव करें", _obj({
         "file_id": {"type": "string"}, "save_to": {"type": "string"}}, ["file_id", "save_to"])),
