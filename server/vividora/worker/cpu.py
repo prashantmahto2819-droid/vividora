@@ -204,6 +204,21 @@ def _qa(project: dict, p: dict, preset: dict, vid: dict, out: dict) -> dict:
                     encoder_preset=os.getenv("X264_PRESET") or None)
 
 
+def _montage_quality(preset: dict, quality: str | None) -> tuple[dict, str | None]:
+    """Montage export quality → (platform preset to render with, x264 preset override).
+    draft: 720p + fast encode (to check the cut quickly) · standard: the platform's own settings · high: sharper, slower."""
+    env = os.getenv("X264_PRESET") or None
+    if quality == "draft":
+        w, h = int(preset["width"]), int(preset["height"])
+        k = 720 / min(w, h)
+        if k < 1:
+            w, h = int(w * k) // 2 * 2, int(h * k) // 2 * 2
+        return {**preset, "width": w, "height": h, "video": {**preset.get("video", {}), "crf": 26, "preset": "veryfast"}}, "veryfast"
+    if quality == "high":
+        return {**preset, "video": {**preset.get("video", {}), "crf": 17, "preset": "slow"}}, env or "slow"
+    return preset, env
+
+
 HEAVY_KINDS = {"render", "montage", "matte", "dub", "transcribe"}
 
 
@@ -515,7 +530,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 except Exception:  # noqa: BLE001
                     pass
             wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None
-            preset = platform(p.get("preset", "ig-reel"))
+            preset, enc_preset = _montage_quality(platform(p.get("preset", "ig-reel")), p.get("quality"))
             texts = list(p.get("texts") or [])
             if p.get("text_mode") == "names" or (p.get("text_mode") == "beats" and not texts):
                 # words from the clip names: "bike_ride.mp4" → "bike ride"
@@ -532,7 +547,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                                  texts=texts, look=look, reframe=p.get("reframe") or "smart",
                                  font=p.get("font") or th.get("font") or "Poppins", text_color=p.get("text_color") or th.get("text_color") or "#FFFFFF",
                                  text_size=float(p.get("text_size") or th.get("text_size") or 0.07), watermark=wm,
-                                 encoder_preset=os.getenv("X264_PRESET") or None, on_progress=prog,
+                                 encoder_preset=enc_preset, on_progress=prog,
                                  text_style=th.get("text_style") if p.get("theme_text", True) else None,
                                  text_mode="beats" if p.get("text_mode") in ("beats", "names") else "bars",
                                  intro_text=str(p.get("intro_text") or ""), outro_text=str(p.get("outro_text") or ""),
@@ -554,13 +569,13 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 clips.append({"path": path, "type": kind_, "duration": item.get("duration")})
             music = client.download_library(p["music"], lib / p["music"])
             wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None
-            preset = platform(p.get("preset", "ig-reel"))
+            preset, enc_preset = _montage_quality(platform(p.get("preset", "ig-reel")), p.get("quality"))
             out = montage.render(clips=clips, music=music, out_dir=tmp / "out", name=preset["id"], preset=preset,
                                  texts=p.get("texts") or [], look=p.get("look", "none"), every=int(p.get("every", 2)),
                                  max_seconds=float(p.get("max_seconds", 30)), flash=bool(p.get("flash", True)),
                                  font=p.get("font") or "Poppins", text_color=p.get("text_color") or "#FFFFFF",
                                  text_size=float(p.get("text_size", 0.07)), watermark=wm, seed=int(p.get("seed", 7)),
-                                 encoder_preset=os.getenv("X264_PRESET") or None, on_progress=_progress(client, job["id"]))
+                                 encoder_preset=enc_preset, on_progress=_progress(client, job["id"]))
             warns = _montage_voice(client, p, assets, out, tmp)
             files = []
             for f in out["files"]:
