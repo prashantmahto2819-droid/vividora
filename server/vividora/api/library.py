@@ -530,9 +530,32 @@ def _fetch_trending() -> list[dict]:
     return out or _trending_cache["data"]
 
 
+def _jamendo_item(r: dict, allow_nc: bool = False) -> dict | None:
+    """One Jamendo track → a search result, or None when its licence / download flag rules it out.
+    ND (no-derivatives) is always refused: putting music under a video is an adaptation."""
+    lic = (r.get("license_ccurl") or "").lower()
+    kind = lic.split("/licenses/")[-1].split("/")[0] if "/licenses/" in lic else ""
+    parts = set(kind.split("-"))
+    if not kind or "nd" in parts:
+        return None
+    nc = "nc" in parts
+    if nc and not allow_nc:
+        return None
+    if r.get("audiodownload_allowed") is False:
+        return None   # the artist does not allow downloads — streaming only
+    url = r.get("audiodownload") or r.get("audio")
+    tags = ["non-commercial"] if nc else []
+    mi = (r.get("musicinfo") or {}).get("tags") or {}
+    tags += [str(t) for t in (mi.get("vartags") or [])[:4] + (mi.get("genres") or [])[:3]]
+    return {"title": f"{r.get('name')} — {r.get('artist_name')}", "url": url, "preview": r.get("audio") or url,
+            "duration": r.get("duration"), "creator": r.get("artist_name"), "page": r.get("shareurl"),
+            "license": f"CC {kind.upper()} {lic}" + (" — NON-COMMERCIAL: monetised video में नहीं" if nc else " — credit ज़रूरी"),
+            "nc": nc, "tags": ",".join(tags), "kind": "music", "source": "jamendo-nc" if nc else "jamendo"}
+
+
 @require("viewer")
 async def search_free(request: Request, user: dict):
-    """Search free libraries. source: openverse-audio | openverse-sfx | openverse-image | pixabay-video | pixabay-image | jamendo | youtube-audio | freesound | tenor | tenor-gif | tenor-trending"""
+    """Search free libraries. source: openverse-audio | openverse-sfx | openverse-image | pixabay-video | pixabay-image | jamendo | jamendo-nc | youtube-audio | freesound | tenor | tenor-gif | tenor-trending"""
     src = request.query_params.get("source", "openverse-audio")
     q = (request.query_params.get("q") or "").strip()[:100]
     if not q:
@@ -571,19 +594,18 @@ async def search_free(request: Request, user: dict):
                     out.append({"title": r.get("tags"), "url": r.get("largeImageURL") or r.get("webformatURL"), "preview": r.get("previewURL"),
                                 "license": "Pixabay Content License", "creator": r.get("user"), "page": r.get("pageURL"),
                                 "kind": "image", "source": "pixabay"})
-        elif src == "jamendo":
+        elif src in ("jamendo", "jamendo-nc"):
+            # jamendo     → only licences usable in monetised videos (CC BY / BY-SA; credit required)
+            # jamendo-nc  → also non-commercial (NC) tracks — ONLY for channels that earn nothing; tagged so Auto never picks them
             cid = os.getenv("JAMENDO_CLIENT_ID")
             if not cid:
-                raise ApiError(400, ".env में JAMENDO_CLIENT_ID डालें (developer.jamendo.com — free)")
-            data = _http_json(f"https://api.jamendo.com/v3.0/tracks/?client_id={cid}&format=json&limit=30&search={urllib.parse.quote(q)}"
-                              f"&audioformat=mp32&include=licenses")
+                raise ApiError(400, ".env में JAMENDO_CLIENT_ID डालें (devportal.jamendo.com — free)")
+            data = _http_json(f"https://api.jamendo.com/v3.0/tracks/?client_id={cid}&format=json&limit=40&search={urllib.parse.quote(q)}"
+                              f"&audioformat=mp32&include=licenses+musicinfo")
             for r in data.get("results", []):
-                lic = (r.get("license_ccurl") or "")
-                if "nc" in lic or "nd" in lic:
-                    continue  # non-commercial / no-derivatives — not usable in monetised videos
-                out.append({"title": f"{r.get('name')} — {r.get('artist_name')}", "url": r.get("audio"), "preview": r.get("audio"),
-                            "duration": r.get("duration"), "license": lic, "creator": r.get("artist_name"), "page": r.get("shareurl"),
-                            "kind": "music", "source": "jamendo"})
+                item = _jamendo_item(r, allow_nc=src == "jamendo-nc")
+                if item:
+                    out.append(item)
         elif src == "youtube-audio":
             out.extend(_yt_search(q))
         elif src == "freesound":

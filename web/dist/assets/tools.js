@@ -281,7 +281,7 @@ export function docBind(c) {
     const pref = r.voices.find((v) => safe(v) && v.lang === "hi") || r.voices.find(safe); if (pref) sel.value = pref.id;
   }).catch(() => {});
   ctx.api("GET", "/library?kind=music").then((r) => { const sel = $("#dc-music"); if (!sel) return; const items = Array.isArray(r) ? r : (r.items || []);
-    sel.innerHTML += items.slice(0, 60).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join(""); }).catch(() => {});
+    sel.innerHTML += items.slice(0, 60).map((m) => `<option value="${esc(m.id)}">${/non-commercial|-nc\b/i.test((m.license || "") + " " + (m.tags || "")) ? "⚠ NC · " : ""}${esc(m.name)}</option>`).join(""); }).catch(() => {});
   Promise.all(["image", "broll"].map((k) => ctx.api("GET", "/library?kind=" + k).catch(() => []))).then((rs) => {
     docState.lib = rs.flatMap((r) => (Array.isArray(r) ? r : (r.items || []))).filter((m) => !(m.meta && m.meta.alpha)).slice(0, 150); if (docState.scenes.length) draw(); });
   const preview = async () => {

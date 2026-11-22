@@ -481,6 +481,12 @@ _SAFE_SOURCES = {"starter", "upload"}          # bundled pack / the user's own f
 _RISKY = ("youtube", "yt", "trending", "chart")  # yt-dlp pulls can trigger Content ID on a monetised channel
 
 
+def music_is_nc(m: dict) -> bool:
+    """A library track under a non-commercial licence (e.g. Jamendo CC BY-NC) — not for monetised uploads."""
+    blob = f"{m.get('license') or ''} {m.get('tags') or ''} {m.get('source') or ''}".lower()
+    return "non-commercial" in blob or "-nc" in blob or "jamendo-nc" in blob
+
+
 def detect_mood(title: str, scenes: list[dict]) -> str:
     """Cheap keyword vote over the title + narration → one of musictag.MOODS (defaults to 'story')."""
     from . import musictag

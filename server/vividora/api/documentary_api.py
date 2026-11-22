@@ -138,7 +138,7 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                                     "ORDER BY CASE lower(name) WHEN 'whoosh soft' THEN 0 WHEN 'whoosh' THEN 1 ELSE 2 END LIMIT 1", (ws,)).fetchone()
             if row:
                 sfx_path = storage.abs_path(db.row(row)["path"])
-            music_path = None
+            music_path, mrow = None, None
             if p.get("music_id") == "auto":   # pick from the library by the script's mood — safe licences only
                 lib = db.rows(db.conn().execute("SELECT * FROM library WHERE workspace_id = ? AND kind = 'music' LIMIT 400", (ws,)))
                 mood = p.get("music_mood") or doc.detect_mood(p.get("title") or "", scenes)
@@ -146,10 +146,15 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                 if pick:
                     music_path = storage.abs_path(pick["path"])
                     st.update(message=f"music: {pick['name']} ({mood})")
+                    mrow = pick
             elif p.get("music_id"):
                 mrow = db.get("library", p["music_id"])
                 if mrow and mrow["workspace_id"] == ws and mrow["kind"] == "music":
                     music_path = storage.abs_path(mrow["path"])
+            if music_path and (mrow.get("source") or "") not in ("starter", "upload"):   # CC music needs its credit in the description
+                credits.append(f"Music: {mrow.get('license') or mrow['name']}"[:300])
+                if doc.music_is_nc(mrow):
+                    st.setdefault("warnings", []).append("⚠ यह music NON-COMMERCIAL licence का है — monetised channel पर upload न करें")
             ass = doc.build_captions([sc["narration"] for sc in scenes], narr, durs, size, work / "captions.ass") if p.get("captions") else None
             out = doc.assemble(clips, durs, track, work / "documentary.mp4", sfx=sfx_path, music=music_path, work=work, captions=ass, music_volume=p.get("music_volume", 0.14))
             chaps = doc.chapters(scenes, durs)

@@ -197,6 +197,20 @@ def units():
     check("no mood match → any safe track", doc.pick_music(lib, "devotional")["id"] in ("a", "b"))
     check("only risky sources → no music rather than a Content ID risk", doc.pick_music([lib[2]], "motivational") is None)
     check("empty library → None", doc.pick_music([], "calm") is None)
+    # ---- Jamendo: licence filter (monetised-safe vs non-commercial option)
+    from vividora.api import library as L
+    J = lambda lic, **kw: {"name": "T", "artist_name": "A", "audio": "https://x/a.mp3", "audiodownload": "https://x/d.mp3", "shareurl": "https://jam/1",  # noqa: E731
+                           "license_ccurl": f"http://creativecommons.org/licenses/{lic}/3.0/", "duration": 100, **kw}
+    check("jamendo: CC BY kept, uses the download url, credit note", (L._jamendo_item(J("by")) or {}).get("url") == "https://x/d.mp3" and "credit" in L._jamendo_item(J("by"))["license"])
+    check("jamendo: BY-NC hidden in the monetised-safe search", L._jamendo_item(J("by-nc-sa")) is None)
+    nc = L._jamendo_item(J("by-nc-sa"), allow_nc=True)
+    check("jamendo-nc: BY-NC shown, flagged + tagged non-commercial", nc and nc["nc"] and "non-commercial" in nc["tags"] and nc["source"] == "jamendo-nc" and "NON-COMMERCIAL" in nc["license"], nc)
+    check("jamendo: no-derivatives refused in both modes", L._jamendo_item(J("by-nd")) is None and L._jamendo_item(J("by-nc-nd"), allow_nc=True) is None)
+    check("jamendo: download not allowed → skipped", L._jamendo_item(J("by", audiodownload_allowed=False)) is None)
+    check("jamendo: missing licence → skipped", L._jamendo_item({**J("by"), "license_ccurl": ""}) is None)
+    nclib = {"id": "n", "kind": "music", "name": "NC song", "source": "jamendo-nc", "license": nc["license"], "tags": nc["tags"], "meta": {"moods": ["calm"]}}
+    check("NC track detected", doc.music_is_nc(nclib) and not doc.music_is_nc(lib[0]))
+    check("Auto never picks a Jamendo / NC track", doc.pick_music([nclib], "calm") is None and doc.pick_music([nclib, lib[0]], "calm")["id"] == "a")
 
 def ollama():
     """LLM provider 'ollama': a fake local server answers /api/chat; plan() turns its JSON into scenes."""
