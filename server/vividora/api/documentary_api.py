@@ -139,7 +139,14 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
             if row:
                 sfx_path = storage.abs_path(db.row(row)["path"])
             music_path = None
-            if p.get("music_id"):
+            if p.get("music_id") == "auto":   # pick from the library by the script's mood — safe licences only
+                lib = db.rows(db.conn().execute("SELECT * FROM library WHERE workspace_id = ? AND kind = 'music' LIMIT 400", (ws,)))
+                mood = p.get("music_mood") or doc.detect_mood(p.get("title") or "", scenes)
+                pick = doc.pick_music(lib, mood, seed=p.get("title") or mood)
+                if pick:
+                    music_path = storage.abs_path(pick["path"])
+                    st.update(message=f"music: {pick['name']} ({mood})")
+            elif p.get("music_id"):
                 mrow = db.get("library", p["music_id"])
                 if mrow and mrow["workspace_id"] == ws and mrow["kind"] == "music":
                     music_path = storage.abs_path(mrow["path"])
@@ -220,7 +227,7 @@ def _params(b: dict, user: dict) -> tuple[dict, list[str]]:
         mv = 0.14
     ser = b.get("series") if isinstance(b.get("series"), dict) else None
     p = {"scenes": res["scenes"], "title": res["title"], "voice": voice, "lang": lang, "orientation": orient, "speed": speed,
-         "music_id": b.get("music_id"), "music_volume": mv, "stock": b.get("stock", True) is not False,
+         "music_id": b.get("music_id"), "music_mood": (str(b.get("music_mood") or "")[:20] or None), "music_volume": mv, "stock": b.get("stock", True) is not False,
          "captions": b.get("captions", True) is not False, "ai_images": b.get("ai_images", True) is not False, "ai_video": b.get("ai_video", True) is not False,
          "series": ({"name": str(ser.get("name", ""))[:100], "i": int(ser.get("i") or 1), "titles": [str(t)[:100] for t in (ser.get("titles") or [])[:12]]} if ser else None),
          "sources": [{"title": str(x.get("title", ""))[:120], "url": str(x.get("url", ""))[:300]} for x in (b.get("sources") or [])[:6] if isinstance(x, dict)]}
@@ -303,7 +310,7 @@ def _start_batch(user: dict, items: list[dict], common: dict, label: str) -> str
     return bid
 
 
-_COMMON_KEYS = ("voice", "lang", "language", "speed", "orientation", "music_id", "music_volume", "stock", "captions", "ai_images", "ai_video", "minutes", "ground")
+_COMMON_KEYS = ("voice", "lang", "language", "speed", "orientation", "music_id", "music_mood", "music_volume", "stock", "captions", "ai_images", "ai_video", "minutes", "ground")
 
 
 def _common(b: dict) -> dict:

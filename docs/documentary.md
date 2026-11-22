@@ -67,3 +67,8 @@ GET  /api/v1/jobs/{job_id}      → status, file (डाउनलोड: GET /ap
 ## Instagram
 - **Reel post:** फ़िल्म/Short बनने पर "📸 Instagram Reel" — connected Instagram (Dashboard → Connections → Meta) पर post होता है। YouTube की तरह private draft **नहीं** है: Instagram API draft नहीं देती, इसलिए यह तुरंत live होता है और टिक (`confirm:true`) ज़रूरी है। Instagram वीडियो आपके `PUBLIC_URL` से 48 घंटे के signed link (`/publib/…`) से उठाता है, इसलिए `.env` में `PUBLIC_URL=https://studio.vividbrandify.com` ज़रूरी है। 9:16 (Shorts वाला) सबसे अच्छा। `PUBLISH_DRY_RUN=1` में कुछ नहीं जाता।
 - **Analysis:** "4. Instagram analysis" पिछली 12 posts के views / reach / saves / shares / watch time और saves-per-reach दिखाता है (Meta Graph API insights; account Business/Creator + Page से जुड़ा होना चाहिए)। असली Meta API पर test नहीं हुआ — नक़ली server से जाँचा; Meta के metric नाम बदलते हैं (2025 में plays → views), इसलिए code दोनों आज़माता है।
+
+## Background music (monetised channel के लिए safe)
+- Music dropdown में **🎲 Auto** (`music_id: "auto"`, चाहें तो `music_mood`): script के शब्दों से mood (motivational, emotional, calm, devotional…) पहचानकर **आपकी Library** से track चुनता है।
+- सिर्फ़ **safe** tracks: bundled starter pack, आपके अपने upload, CC0। YouTube/yt-dlp से खींचे गए tracks Auto में कभी नहीं चुने जाते (Content ID claim का जोखिम)। कोई safe track न हो तो बिना music बनता है।
+- Library को भरें: Library → Music में अपने licensed/CC0 tracks upload करें (YouTube Audio Library, Pixabay Music से download की हुई files — licence पन्ना सहेज कर रखें), फिर "Audio tab → analyse" से mood tags अपने-आप लगते हैं।

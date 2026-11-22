@@ -186,6 +186,18 @@ def units():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+    # ---- auto background music from the library (monetised-channel safe)
+    sc = [{"narration": "यह एक motivational कहानी है — rise and inspire, हीरो की epic journey"}]
+    check("mood detected from the script", doc.detect_mood("Rise", sc) == "motivational", doc.detect_mood("Rise", sc))
+    check("no keywords → 'story'", doc.detect_mood("x", [{"narration": "abc"}]) == "story")
+    lib = [{"id": "a", "kind": "music", "name": "Calm Piano", "source": "starter", "license": "cc0", "tags": "calm", "meta": {"moods": ["calm"]}},
+           {"id": "b", "kind": "music", "name": "Hero Rise", "source": "starter", "license": "cc0", "tags": "", "meta": {"moods": ["motivational"]}},
+           {"id": "c", "kind": "music", "name": "Epic YT", "source": "youtube", "license": "Creative Commons", "tags": "motivational", "meta": {"moods": ["motivational"]}}]
+    check("picks the safe track that fits the mood (not the YouTube pull)", doc.pick_music(lib, "motivational")["id"] == "b")
+    check("no mood match → any safe track", doc.pick_music(lib, "devotional")["id"] in ("a", "b"))
+    check("only risky sources → no music rather than a Content ID risk", doc.pick_music([lib[2]], "motivational") is None)
+    check("empty library → None", doc.pick_music([], "calm") is None)
+
 def ollama():
     """LLM provider 'ollama': a fake local server answers /api/chat; plan() turns its JSON into scenes."""
     import threading

@@ -218,7 +218,7 @@ export function docView() {
     <div id="dc-opts" hidden>
       <div class="tl-row"><div class="field"><label>आवाज़</label><select id="dc-voice"></select></div>
         <div class="field"><label>Shape</label><select id="dc-or"><option value="landscape">Landscape 16:9 (YouTube)</option><option value="portrait">Portrait 9:16 (Reels/Shorts)</option><option value="square">Square 1:1</option></select></div></div>
-      <div class="tl-row"><div class="field"><label>Background music (वैकल्पिक)</label><select id="dc-music"><option value="">— कोई नहीं —</option></select></div>
+      <div class="tl-row"><div class="field"><label>Background music (वैकल्पिक)</label><select id="dc-music"><option value="">— कोई नहीं —</option><option value="auto">🎲 Auto — script के mood से (सिर्फ़ safe tracks)</option></select></div>
         <div class="field"><label><input type="checkbox" id="dc-cap" checked> Captions (नीचे लिखा हुआ text)</label></div></div>
       <div class="field"><label>Music की आवाज़ <input type="range" id="dc-mvol" min="0.04" max="0.4" step="0.02" value="0.14" style="vertical-align:middle"> <span class="small muted">(आवाज़ के नीचे अपने-आप दबती है)</span></label></div>
       <div class="field"><label><input type="checkbox" id="dc-ai" checked> AI से तस्वीरें बनाओ (Library में match न मिले तो) <span class="muted" id="dc-aiinfo"></span></label> <span class="small muted" id="dc-vinfo"></span></div>

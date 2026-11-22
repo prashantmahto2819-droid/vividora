@@ -474,3 +474,41 @@ def scene_durations(narr_seconds: list[float], holds: list[float] | None = None)
     """Scene length = narration + pad, never below MIN_SCENE, and never below the creator's own `hold` (seconds)."""
     holds = holds or [0.0] * len(narr_seconds)
     return [round(max(MIN_SCENE, s + PAD, h or 0.0), 3) for s, h in zip(narr_seconds, holds)]
+
+
+# ---------------------------------------------------------------- automatic background music (from the user's own library)
+_SAFE_SOURCES = {"starter", "upload"}          # bundled pack / the user's own files
+_RISKY = ("youtube", "yt", "trending", "chart")  # yt-dlp pulls can trigger Content ID on a monetised channel
+
+
+def detect_mood(title: str, scenes: list[dict]) -> str:
+    """Cheap keyword vote over the title + narration → one of musictag.MOODS (defaults to 'story')."""
+    from . import musictag
+    text = (title + " " + " ".join(sc.get("narration", "") for sc in scenes)).lower()
+    best, score = "story", 0
+    for m in musictag.MOODS:
+        n = sum(text.count(w) for w in musictag._WORDS.get(m, ()))
+        if n > score:
+            best, score = m, n
+    return best
+
+
+def pick_music(library: list[dict], mood: str, seed: str = "") -> dict | None:
+    """Best track for a mood: safe licences first (bundled/own upload, CC0), then mood match from the analysis (meta.moods) or tags."""
+    import random
+    musics = [m for m in library if m.get("kind") == "music"]
+    if not musics:
+        return None
+
+    def safe(m: dict) -> bool:
+        lic = str(m.get("license") or "").lower()
+        src = str(m.get("source") or "").lower()
+        return (src in _SAFE_SOURCES or lic in ("own", "cc0") or "cc0" in lic or "public domain" in lic) and not any(x in src for x in _RISKY)
+
+    def fits(m: dict) -> bool:
+        moods = [str(x).lower() for x in ((m.get("meta") or {}).get("moods") or [])]
+        return mood in moods or mood in str(m.get("tags") or "").lower() or mood in str(m.get("name") or "").lower()
+    for pool in ([m for m in musics if safe(m) and fits(m)], [m for m in musics if safe(m)]):
+        if pool:
+            return random.Random(seed or mood).choice(pool)
+    return None   # only risky sources left → no music is safer than a Content ID claim
