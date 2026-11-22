@@ -619,11 +619,13 @@ a.stat:hover { border-color: #46546A; } .stat b { font-size: 1.55rem; font-varia
 .th-canvas.wide { max-height: 60vh; margin: 0 auto; }
 @media (max-width: 640px) { .tplgrid2 { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } .th-fmt select { max-width: 60vw; } .trtbl { display: block; overflow-x: auto; } }
 
-/* ---- tablet refinements (≤ 1024px) ---- */
-@media (max-width: 1024px) {
+/* ---- tablet refinements (901–1024px; phones ≤900px use the drawer layout above) ---- */
+@media (min-width: 901px) and (max-width: 1024px) {
   .app2 { grid-template-columns: 200px minmax(0, 1fr); }
   .nav { width: 200px; }
   .nav a { padding: .55rem .8rem; font-size: .88rem; }
+}
+@media (max-width: 1024px) {
   .tplgrid2 { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
   .stats { gap: .75rem; }
   .stat { padding: .8rem; }
