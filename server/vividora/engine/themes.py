@@ -67,6 +67,10 @@ def listing(workspace_id: str) -> list[dict]:
     return [_public(t) for t in builtin().values()] + [_public(t) for t in saved(workspace_id)]
 
 
+def options() -> dict:
+    return {"feels": [{"id": f, "label": l} for f, l in FEELS], "beat_colours": [{"id": b, "label": l} for b, l in BEAT_COLOURS]}
+
+
 def _public(t: dict) -> dict:
     cs = caption_styles().get(t.get("caption_style") or "", {})
     st = text_style(t.get("text_style"))
@@ -91,6 +95,58 @@ def pick_music(library: list[dict], mood: str | None, seed: str = "") -> str:
     return random.Random(seed or mood).choice(hit or musics)["id"]
 
 
+# ---- colour feel: how light / vivid the picture is, whatever the theme ------------------------------------------------
+# A theme's grade can be dark or lean hard on one colour (teal-orange, maroon, B&W). The feel re-shapes that grade so the
+# same theme can also be bright and colourful for social media. All grade values: 0 = neutral.
+FEELS = [("theme", "Theme जैसा (बिना बदलाव)"), ("light_vivid", "हल्का और चटख — रोशन, रंगीन, shadow कम"),
+         ("bright_clean", "साफ़ और रोशन — कोई रंग की परत नहीं"), ("soft_light", "नरम हल्का (pastel)"),
+         ("punchy", "चटख + गहरा contrast"), ("theme_lite", "Theme का रंग, पर आधा")]
+FEEL_IDS = [f for f, _ in FEELS]
+_TINTS = ("temperature", "tint", "tone_shadows", "tone_highlights", "hue")
+
+
+def colour_feel(grade: dict | None, feel: str | None) -> dict:
+    """The theme's grade re-shaped by a feel (see FEELS). Unknown / 'theme' → unchanged."""
+    g = {k: float(v) for k, v in (grade or {}).items() if isinstance(v, (int, float))}
+    if feel not in FEEL_IDS or feel == "theme":
+        return g
+    if feel == "theme_lite":
+        return {k: round(v * 0.5, 3) for k, v in g.items()}
+    keep = {"light_vivid": 0.4, "bright_clean": 0.0, "soft_light": 0.5, "punchy": 0.6}[feel]   # how much of the theme's colour cast stays
+    out = {k: round(g.get(k, 0.0) * keep, 3) for k in _TINTS if g.get(k)}
+    out["sharpness"] = g.get("sharpness", 0.0)
+    if feel == "light_vivid":
+        out.update(exposure=0.1, shadows=0.3, blacks=0.08, highlights=-0.05, contrast=0.08, saturation=0.15, vibrance=0.35)
+    elif feel == "bright_clean":
+        out.update(exposure=0.1, shadows=0.18, contrast=0.06, vibrance=0.18)
+    elif feel == "soft_light":
+        out.update(exposure=0.12, shadows=0.22, contrast=-0.1, fade=0.08, vibrance=0.12)
+    elif feel == "punchy":
+        out.update(exposure=0.03, shadows=0.06, contrast=0.26, vibrance=0.32, saturation=0.08)
+    return {k: v for k, v in out.items() if v}
+
+
+# ---- colour on the beat ---------------------------------------------------------------------------------------------
+BEAT_COLOURS = [("none", "नहीं"), ("pulse", "Colour pulse — beat पर रंग की झलक"), ("flash", "Light flash — beat पर हल्की चमक"),
+                ("cycle", "रंग धीरे-धीरे बदलते रहें")]
+BEAT_IDS = [b for b, _ in BEAT_COLOURS]
+
+
+def beat_colour_stack(kind: str | None, bpm: float | None) -> list[dict]:
+    """Effect-stack entries for a colour-on-the-beat option; the song's BPM (when known) sets the rhythm."""
+    b = float(bpm or 0)
+    b = b if 50 <= b <= 200 else 110.0
+    while b > 130:          # a pulse on every beat of a fast song is tiring — halve it
+        b /= 2
+    if kind == "pulse":
+        return [{"id": "tr_chroma_pulse", "params": {"amount": 14, "bpm": round(b), "zoom": 0.03}}]
+    if kind == "flash":
+        return [{"id": "flash_pulse", "params": {"amount": 0.25, "period": round(60 / b * 2, 2)}}]
+    if kind == "cycle":
+        return [{"id": "hue_cycle", "params": {"speed": 20}}]
+    return []
+
+
 def recolor(style: dict, color: str | None) -> dict:
     """A text style in the user's own colour: boxed styles get the colour as the box (text turns black/white to stay
     readable), plain styles get it as the letter colour (a too-similar outline flips to black/white)."""
@@ -110,7 +166,8 @@ def recolor(style: dict, color: str | None) -> dict:
 
 
 def apply(render: dict, theme: dict, parts: list[str] | None = None, *, has_transcript: bool = True,
-          library: list[dict] | None = None, seed: str = "", text_color: str | None = None) -> tuple[dict, list[str], list[str]]:
+          library: list[dict] | None = None, seed: str = "", text_color: str | None = None,
+          feel: str | None = None, beat_colour: str | None = None) -> tuple[dict, list[str], list[str]]:
     """render settings (project.settings.render) → new settings, applied parts, skipped parts (with reason)."""
     parts = [p for p in (parts or PART_IDS) if p in PART_IDS]
     rs = json.loads(json.dumps(render or {}))
@@ -119,13 +176,18 @@ def apply(render: dict, theme: dict, parts: list[str] | None = None, *, has_tran
     skipped: list[str] = []
     if "look" in parts:
         gp = theme.get("grade_preset") or ""
+        feel = feel if feel in FEEL_IDS else "theme"
+        light = feel in ("light_vivid", "bright_clean", "soft_light")
         if gp and gp in GRADE_PRESETS:
-            e["grade_preset"] = gp
-            e["grade"] = {k: v for k, v in GRADE_PRESETS[gp].items() if k not in ("label", "cat")}
+            e["grade_preset"] = gp if feel == "theme" else ""     # a re-shaped grade is no longer that preset
+            e["grade"] = colour_feel({k: v for k, v in GRADE_PRESETS[gp].items() if k not in ("label", "cat")}, feel)
+        elif feel != "theme":
+            e["grade_preset"], e["grade"] = "", colour_feel({}, feel)
+        e["grade_feel"] = feel
         look = theme.get("look") or "none"
         if look in LOOKS:
-            e["look"] = look
-        ex = [x for x in (theme.get("extras") or []) if x in EXTRAS]
+            e["look"] = "none" if light else look
+        ex = [x for x in (theme.get("extras") or []) if x in EXTRAS and not (light and x in ("vignette", "letterbox"))]
         e["extras"] = ex
         applied.append("look")
     if "captions" in parts:
@@ -172,6 +234,16 @@ def apply(render: dict, theme: dict, parts: list[str] | None = None, *, has_tran
                 skipped.append("music: library में music नहीं है")
         e["music"] = cur
         applied.append("music")
+    if "effects" in parts and beat_colour in BEAT_IDS:
+        bpm = None
+        mid = (e.get("music") or {}).get("id")
+        for it in library or []:
+            if it.get("id") == mid:
+                bpm = (it.get("meta") or {}).get("bpm")
+        keep = [s for s in (e.get("stack") or []) if not s.get("beat_colour")]
+        e["stack"] = keep + [{**s, "enabled": True, "theme": True, "beat_colour": True} for s in beat_colour_stack(beat_colour, bpm)
+                             if s["id"] in _FX_IDS]
+        e["beat_colour"] = beat_colour
     if "voice" in parts:
         vp = theme.get("voice") or "studio"
         if vp in VOICE_PRESETS:

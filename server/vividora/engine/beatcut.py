@@ -540,6 +540,15 @@ def _fx_chain(s: dict, W: int, H: int, fps: int) -> str:
 def _grade(look: str | None, mean_energy: float) -> str:
     from .catalog import GRADE_PRESETS, grade_filter
     from .effects import LOOKS
+    look, _, feel = str(look or "").partition("@")      # "grade:teal_orange@light_vivid" — the colour feel rides along
+    if feel:
+        from .themes import colour_feel
+        if look in ("", "none"):
+            return grade_filter(colour_feel({}, feel))
+        if look == "auto":
+            look = "grade:" + ("punchy" if mean_energy > 0.55 else "teal_orange" if mean_energy > 0.35 else "warm_film")
+        if look.startswith("grade:") and look[6:] in GRADE_PRESETS:
+            return grade_filter(colour_feel({k: v for k, v in GRADE_PRESETS[look[6:]].items() if k not in ("label", "cat")}, feel))
     if not look or look == "none":
         return ""
     if look == "auto":

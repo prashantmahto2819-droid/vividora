@@ -449,7 +449,7 @@ function bindStatic() {
 
 // ---------- 🎨 one-click themes ----------
 export async function loadThemes(ctx) {
-  try { const r = await ctx.api("GET", "/presets/themes"); return { themes: r.themes || [], parts: r.parts || [] }; } catch { return { themes: [], parts: [] }; }
+  try { const r = await ctx.api("GET", "/presets/themes"); return { themes: r.themes || [], parts: r.parts || [], feels: r.feels || [], beats: r.beat_colours || [] }; } catch { return { themes: [], parts: [], feels: [], beats: [] }; }
 }
 export function themeTile(t, esc, sel) {
   return `<button class="thtile ${sel ? "on" : ""}" data-theme="${t.id}" title="${esc(t.hint || "")}">
@@ -461,7 +461,7 @@ function showThemes(forMontage) {
   const x = () => { m.hidden = true; m.innerHTML = ""; if (E.exportOpen) renderExport(); };
   m.hidden = false; m.innerHTML = `<div class="modal"><div class="row between"><h2>🎨 Theme</h2><button class="ibtn" data-thx>✕</button></div><p class="small muted">लोड हो रहा है…</p></div>`;
   $("[data-thx]", m).onclick = x; m.onclick = (e) => { if (e.target === m) x(); };
-  loadThemes(E.ctx).then(({ themes, parts }) => {
+  loadThemes(E.ctx).then(({ themes, parts, feels, beats }) => {
     if (m.hidden) return;
     E.themes = themes;
     const cur = E.montage ? (E.mo?.theme || "") : (E.rs.theme_id || "");
@@ -474,6 +474,9 @@ function showThemes(forMontage) {
         ${t.id ? `<div class="box"><b>${t.emoji || ""} ${esc(t.label)}</b> <span class="small muted">${esc(t.hint || "")}</span>
           ${E.montage ? "" : `<div class="chips" style="margin-top:.5rem">${parts.map((p) => { const dis = p.id === "captions" && noTr; return `<label class="chip ${dis ? "" : "on"}" title="${dis ? "transcript नहीं है" : ""}"><input type="checkbox" data-thpart="${p.id}" ${dis ? "disabled" : "checked"}>${esc(p.label)}</label>`; }).join("")}</div>
           ${noTr ? `<p class="small muted">captions: transcript नहीं है — «Transcript बनाएँ» के बाद लगेगा</p>` : ""}`}
+          <div class="irow" style="margin-top:.6rem">${feels.length ? field("रंग का अंदाज़ (theme कोई भी हो)", `<select id="th-feel">${feels.map((f) => `<option value="${f.id}" ${(E.thFeel || "theme") === f.id ? "selected" : ""}>${esc(f.label)}</option>`).join("")}</select>`) : ""}
+          ${!E.montage && beats.length ? field("Beat पर रंग", `<select id="th-beat">${beats.map((f) => `<option value="${f.id}" ${(E.thBeat || "none") === f.id ? "selected" : ""}>${esc(f.label)}</option>`).join("")}</select>`) : ""}</div>
+          <p class="small muted" style="margin:.2rem 0 0">«हल्का और चटख» = video रोशन और रंगीन रहता है, shadow कम — theme का गहरा या एक-रंग वाला असर हल्का हो जाता है।</p>
           <label class="chk small" style="margin-top:.5rem;display:flex;align-items:center;gap:.4rem"><input type="checkbox" id="th-owncol" ${E.thOwn ? "checked" : ""}> text का रंग अपना रखें <input type="color" id="th-col" value="${E.thCol || t.text_color || "#FFD400"}" ${E.thOwn ? "" : "disabled"}> <span class="muted">(theme का बाकी सब वैसा ही)</span></label>
           <div class="row" style="margin-top:.6rem;flex-wrap:wrap;gap:.4rem"><button class="btn primary" data-thapply>${E.montage ? "लगाओ और दोबारा plan बनाओ" : "इस project पर लगाएँ"}</button>
           ${E.montage ? `<button class="btn" data-thapply-only>सिर्फ़ settings बदलो</button>` : ""}
@@ -481,15 +484,16 @@ function showThemes(forMontage) {
         <div class="row between" style="margin-top:.8rem"><span class="small muted">अपनी settings पसंद आईं?</span><button class="btn small" data-thsave>⭐ इस project की settings को theme की तरह save करें</button></div></div>`;
       $("[data-thx]", m).onclick = x;
       $$("[data-theme]", m).forEach((b) => (b.onclick = () => { sel = b.dataset.theme; draw(); }));
-      { const oc = $("#th-owncol", m), cc = $("#th-col", m); if (oc) oc.onchange = () => { E.thOwn = oc.checked; cc.disabled = !oc.checked; }; if (cc) cc.oninput = () => { E.thCol = cc.value; }; }
+      { const oc = $("#th-owncol", m), cc = $("#th-col", m); if (oc) oc.onchange = () => { E.thOwn = oc.checked; cc.disabled = !oc.checked; }; if (cc) cc.oninput = () => { E.thCol = cc.value; };
+        const fs = $("#th-feel", m), bs = $("#th-beat", m); if (fs) fs.onchange = () => { E.thFeel = fs.value; }; if (bs) bs.onchange = () => { E.thBeat = bs.value; }; }
       const apply = async (replan) => {
         const partsSel = $$("[data-thpart]", m).filter((c) => c.checked && !c.disabled).map((c) => c.dataset.thpart);
         try {
           await flush();
-          const r = await api("POST", `/projects/${E.pid}/theme`, { id: sel, parts: E.montage ? ["montage", "text", "look"] : partsSel, text_color: E.thOwn ? (E.thCol || $("#th-col", m)?.value) : undefined });
+          const r = await api("POST", `/projects/${E.pid}/theme`, { id: sel, parts: E.montage ? ["montage", "text", "look"] : partsSel, text_color: E.thOwn ? (E.thCol || $("#th-col", m)?.value) : undefined, feel: E.thFeel || "theme", beat_colour: E.montage ? undefined : (E.thBeat || "none") });
           toast(`theme «${r.theme.label}» लगा${r.skipped?.length ? " · " + r.skipped.join("; ") : ""}`);
           if (E.montage) { const ctx = E.ctx; const mo = r.settings.montage || {}; x(); unmount(); await ctx.load(); ctx.render();
-            if (replan && E && E.mo) { E.mo.theme = mo.theme || sel; Object.assign(E.mo, { pace: mo.pace, effects_level: mo.effects_level, look: mo.look });
+            if (replan && E && E.mo) { E.mo.theme = mo.theme || sel; Object.assign(E.mo, { pace: mo.pace, effects_level: mo.effects_level, look: mo.look, look_feel: mo.look_feel === "theme" ? "" : (mo.look_feel || "") });
               if (E.mo.clips.length && E.mo.music) { await api("POST", `/projects/${E.pid}/montage`, { ...E.mo, texts: String(E.mo.texts || "").split("\n").map((s) => s.trim()).filter(Boolean), mode: "auto", replan: true, auto_render: false, plan: null, theme: E.mo.theme }); toast("नए theme से beat plan बन रहा है ⏳"); await ctx.load(); ctx.render(); } }
             return; }
           const ctx = E.ctx; x(); unmount(); await ctx.load(); ctx.render();
@@ -1529,7 +1533,7 @@ function renderPanel() {
       ${auto ? `<div class="irow"><label class="chk small"><input type="checkbox" id="mo-intro" ${mo.intro ? "checked" : ""} ${dis}> 🎬 intro (पहला cut एक bar रुके, title के साथ)</label><label class="chk small"><input type="checkbox" id="mo-outro" ${mo.outro ? "checked" : ""} ${dis}> 🏁 outro (आख़िर में CTA)</label></div>
         <div class="irow">${field("intro title", `<input id="mo-introtext" value="${esc(mo.intro_text || "")}" placeholder="जैसे: Goa Trip 2026" ${dis}>`)}${field("outro / CTA", `<input id="mo-outrotext" value="${esc(mo.outro_text || "")}" placeholder="जैसे: Follow @theprashantmahto" ${dis}>`)}</div>` : ""}
       ${auto ? `<div class="irow">${field("cut speed", sel("mo-pace", [["auto", "Auto (song के हिसाब से)"], ["fast", "Fast · ½–1 beat"], ["medium", "Medium"], ["slow", "Slow · 2–4 beat"]], mo.pace))}${field("effects", sel("mo-fxl", [["auto", "Auto"], ["strong", "ज़्यादा (strong)"], ["subtle", "हल्के"], ["none", "बिना effect"]], mo.effects_level))}</div>
-        <div class="irow">${field("frame / crop", sel("mo-reframe", [["smart", "Smart crop (चेहरा/subject)"], ["fit", "पूरा दिखाओ + blur background"], ["center", "बीच से crop"]], mo.reframe))}${field("Export quality", sel("mo-quality", [["draft", "Draft — 720p, जल्दी (जाँचने के लिए)"], ["standard", "Standard — platform के हिसाब से"], ["high", "High — ज़्यादा साफ़, धीमा"]], mo.quality || "standard"))}<label class="chk small"><input type="checkbox" id="mo-slow" ${mo.slowmo ? "checked" : ""} ${dis}> धीमे हिस्से में slow-mo</label></div>
+        <div class="irow">${field("frame / crop", sel("mo-reframe", [["smart", "Smart crop (चेहरा/subject)"], ["fit", "पूरा दिखाओ + blur background"], ["center", "बीच से crop"]], mo.reframe))}${field("रंग का अंदाज़", sel("mo-feel", [["", "जैसा है"], ["light_vivid", "हल्का और चटख (रोशन, रंगीन)"], ["bright_clean", "साफ़ और रोशन"], ["soft_light", "नरम हल्का (pastel)"], ["punchy", "चटख + contrast"], ["theme_lite", "रंग आधा"]], mo.look_feel || ""))}${field("Export quality", sel("mo-quality", [["draft", "Draft — 720p, जल्दी (जाँचने के लिए)"], ["standard", "Standard — platform के हिसाब से"], ["high", "High — ज़्यादा साफ़, धीमा"]], mo.quality || "standard"))}<label class="chk small"><input type="checkbox" id="mo-slow" ${mo.slowmo ? "checked" : ""} ${dis}> धीमे हिस्से में slow-mo</label></div>
         <div class="box" style="margin-top:.4rem"><label class="chk small"><input type="checkbox" id="mo-beatonly" ${mo.beat_only ? "checked" : ""} ${dis}> 🔇 Beat-only (trending sound बाद में लगाएँ)</label>${mo.beat_only ? `<p class="small muted" style="margin-top:.3rem">song सिर्फ़ beat detection के लिए — output में नहीं आएगी। IG/YT app में trending sound लगाएँ।</p><label class="chk small" style="margin-top:.3rem"><input type="checkbox" id="mo-clipaudio" ${mo.keep_clip_audio ? "checked" : ""} ${dis}> clip की आवाज़ रखें</label>` : ""}</div>`
       : `<div class="irow">${field("हर कितने beat पर", sel("mo-every", [1, 2, 4, 8].map((n) => [n, n + " beat"]), mo.every))}<label class="chk small"><input type="checkbox" id="mo-flash" ${mo.flash ? "checked" : ""} ${dis}> beat flash</label></div>`}
       <div class="irow">${field("color / filter", `<select id="mo-look" ${dis}>${auto ? `<option value="auto" ${mo.look === "auto" ? "selected" : ""}>Auto (song के mood से)</option>` : ""}${looks.map((l) => `<option value="${l.id}" ${mo.look === l.id ? "selected" : ""}>${esc(l.label)}</option>`).join("")}${auto && grades.length ? `<optgroup label="Filters (115)">${grades.map(([k, g]) => `<option value="grade:${k}" ${mo.look === "grade:" + k ? "selected" : ""}>${esc(g.label)}</option>`).join("")}</optgroup>` : ""}</select>`)}
@@ -1765,11 +1769,11 @@ function bindPanel() {
     const sync = () => { const g = (id) => $(id, panel); mo.music = g("#mo-music")?.value ?? mo.music; mo.texts = g("#mo-texts")?.value ?? mo.texts; mo.font = g("#mo-font")?.value || mo.font; mo.text_color = g("#mo-color")?.value || mo.text_color;
       mo.text_size = +(g("#mo-size")?.value || mo.text_size); mo.every = +(g("#mo-every")?.value || mo.every); mo.max_seconds = +(g("#mo-max")?.value || mo.max_seconds); mo.preset = g("#mo-preset")?.value || mo.preset;
       mo.look = g("#mo-look")?.value || mo.look; if (g("#mo-flash")) mo.flash = g("#mo-flash").checked; mo.watermark = g("#mo-wm")?.value ?? mo.watermark;
-      mo.pace = g("#mo-pace")?.value || mo.pace; mo.effects_level = g("#mo-fxl")?.value || mo.effects_level; mo.reframe = g("#mo-reframe")?.value || mo.reframe; mo.quality = g("#mo-quality")?.value || mo.quality || "standard"; if (g("#mo-slow")) mo.slowmo = g("#mo-slow").checked;
+      mo.pace = g("#mo-pace")?.value || mo.pace; mo.effects_level = g("#mo-fxl")?.value || mo.effects_level; mo.reframe = g("#mo-reframe")?.value || mo.reframe; mo.quality = g("#mo-quality")?.value || mo.quality || "standard"; if (g("#mo-feel")) mo.look_feel = g("#mo-feel").value; if (g("#mo-slow")) mo.slowmo = g("#mo-slow").checked;
       if (g("#mo-intro")) mo.intro = g("#mo-intro").checked; if (g("#mo-outro")) mo.outro = g("#mo-outro").checked; if (g("#mo-themetext")) mo.theme_text = g("#mo-themetext").checked;
       mo.intro_text = g("#mo-introtext")?.value ?? mo.intro_text; mo.outro_text = g("#mo-outrotext")?.value ?? mo.outro_text; mo.text_mode = g("#mo-textmode")?.value || mo.text_mode;
       if (g("#mo-beatonly")) mo.beat_only = g("#mo-beatonly").checked; if (g("#mo-clipaudio")) mo.keep_clip_audio = g("#mo-clipaudio").checked; };
-    ["#mo-music", "#mo-texts", "#mo-font", "#mo-color", "#mo-size", "#mo-every", "#mo-max", "#mo-preset", "#mo-look", "#mo-flash", "#mo-wm", "#mo-pace", "#mo-fxl", "#mo-reframe", "#mo-quality", "#mo-slow", "#mo-intro", "#mo-outro", "#mo-themetext", "#mo-introtext", "#mo-outrotext", "#mo-textmode", "#mo-clipaudio"].forEach((sl) => on(sl, "onchange", sync));
+    ["#mo-music", "#mo-texts", "#mo-font", "#mo-color", "#mo-size", "#mo-every", "#mo-max", "#mo-preset", "#mo-look", "#mo-flash", "#mo-wm", "#mo-pace", "#mo-fxl", "#mo-reframe", "#mo-quality", "#mo-feel", "#mo-slow", "#mo-intro", "#mo-outro", "#mo-themetext", "#mo-introtext", "#mo-outrotext", "#mo-textmode", "#mo-clipaudio"].forEach((sl) => on(sl, "onchange", sync));
     on("#mo-beatonly", "onchange", () => { sync(); renderPanel(); });
     on("#mo-theme", "onclick", () => { sync(); showThemes(true); });
     on("#mo-retheme", "onclick", () => { sync(); showThemes(true); });

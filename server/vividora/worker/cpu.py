@@ -548,7 +548,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             look = th.get("look") if th.get("look") and p.get("look") in (None, "", "auto") else p.get("look") or "auto"
             prog(0.0, "video बन रहा है — reframe, effects, रंग, text, music")
             out = beatcut.render(pl=p["plan"], clips=local, music_path=music, out_dir=tmp / "out", name=preset["id"], preset=preset,
-                                 texts=texts, look=look, reframe=p.get("reframe") or "smart",
+                                 texts=texts, look=(f"{look}@{p['look_feel']}" if p.get("look_feel") else look), reframe=p.get("reframe") or "smart",
                                  font=p.get("font") or th.get("font") or "Poppins", text_color=p.get("text_color") or th.get("text_color") or "#FFFFFF",
                                  text_size=float(p.get("text_size") or th.get("text_size") or 0.07), watermark=wm,
                                  encoder_preset=enc_preset, on_progress=prog,

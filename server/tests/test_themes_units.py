@@ -20,6 +20,65 @@ from vividora.service import DEFAULT_RENDER  # noqa: E402
 
 
 class ThemeTests(unittest.TestCase):
+    def test_00_colour_feel_and_beat_colour(self):
+        import subprocess
+        from vividora.engine import beatcut
+        from vividora.engine.catalog import GRADE_PRESETS, grade_filter
+        b = themes.builtin()
+
+        def look(vf: str) -> tuple[float, float]:
+            """(mean brightness 0-255, mean colourfulness 0-255) of a test picture after a filter chain."""
+            src = "testsrc2=s=320x180:d=1,eq=brightness=-0.12:saturation=0.8"     # a slightly dark, normal-coloured picture
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", src, "-vf", (vf + "," if vf else "") + "format=rgb24",
+                                  "-frames:v", "1", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+            px = [raw[i:i + 3] for i in range(0, len(raw), 3)]
+            return (sum(sum(p) / 3 for p in px) / len(px), sum(max(p) - min(p) for p in px) / len(px))
+        base = look("")
+        for tid in ("luxury", "cinematic", "diwali", "bw_classic", "night_neon"):          # dark / one-colour themes
+            g = {k: v for k, v in GRADE_PRESETS[b[tid]["grade_preset"]].items() if k not in ("label", "cat")}
+            theme_l, theme_c = look(grade_filter(g))
+            lv = themes.colour_feel(g, "light_vivid")
+            l, c = look(grade_filter(lv))
+            self.assertGreater(l, base[0] + 4, tid)                 # brighter than the untouched picture …
+            self.assertGreater(l, theme_l, tid)                     # … and than the theme's own grade
+            self.assertGreater(c, base[1], tid)                     # more colourful than the source (also for the B&W theme)
+            self.assertGreaterEqual(lv.get("shadows", 0), 0.25, tid)
+            self.assertNotIn("vignette", lv)
+            for feel in themes.FEEL_IDS:                            # every feel gives a chain ffmpeg accepts
+                look(grade_filter(themes.colour_feel(g, feel)))
+        g = {"temperature": 0.4, "contrast": 0.2, "vignette": 0.4}
+        self.assertEqual(themes.colour_feel(g, "theme"), g)
+        self.assertEqual(themes.colour_feel(g, "nonsense"), g)
+        self.assertEqual(themes.colour_feel(g, "theme_lite")["temperature"], 0.2)
+        self.assertNotIn("temperature", themes.colour_feel(g, "bright_clean"))               # no colour cast at all
+        # applying a theme with a feel
+        rs, _, _ = themes.apply({}, b["luxury"], ["look"], feel="light_vivid")
+        e = rs["effects"]
+        self.assertEqual((e["grade_feel"], e["grade_preset"]), ("light_vivid", ""))
+        self.assertNotIn("vignette", e["extras"])
+        rs, _, _ = themes.apply({}, b["luxury"], ["look"])
+        self.assertEqual((rs["effects"]["grade_feel"], rs["effects"]["grade_preset"]), ("theme", "epic_dark"))
+        self.assertIn("vignette", rs["effects"]["extras"])
+        # colour on the beat follows the song's BPM; choosing "none" later removes it again
+        lib = [{"id": "m1", "kind": "music", "name": "song", "tags": "", "meta": {"bpm": 150, "moods": ["energetic"]}}]
+        rs, _, _ = themes.apply({}, b["viral"], ["effects", "music"], library=lib, beat_colour="pulse")
+        st = [x for x in rs["effects"]["stack"] if x.get("beat_colour")]
+        self.assertEqual((st[0]["id"], st[0]["params"]["bpm"]), ("tr_chroma_pulse", 75))     # 150 bpm → every second beat
+        rs2, _, _ = themes.apply(rs, b["viral"], ["effects"], beat_colour="flash")
+        st = [x for x in rs2["effects"]["stack"] if x.get("beat_colour")]
+        self.assertEqual([x["id"] for x in st], ["flash_pulse"])
+        rs3, _, _ = themes.apply(rs2, b["viral"], ["effects"], beat_colour="none")
+        self.assertFalse([x for x in rs3["effects"]["stack"] if x.get("beat_colour")])
+        self.assertEqual(themes.beat_colour_stack("pulse", None)[0]["params"]["bpm"], 110)
+        # montage: the feel rides on the look string
+        dark = beatcut._grade("grade:epic_dark", 0.5)
+        lite = beatcut._grade("grade:epic_dark@light_vivid", 0.5)
+        self.assertNotEqual(dark, lite)
+        self.assertGreater(look(lite)[0], look(dark)[0])
+        self.assertTrue(beatcut._grade("none@light_vivid", 0.5) and beatcut._grade("auto@punchy", 0.5))
+        self.assertEqual(beatcut._grade("grade:epic_dark", 0.5), dark)
+        self.assertEqual(beatcut._grade("none", 0.5), "")
+
     def test_00_new_themes_and_own_text_colour(self):
         from vividora.engine import beatcut
         from vividora.engine.textfx import _STYLES
