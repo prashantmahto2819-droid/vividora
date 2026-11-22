@@ -87,6 +87,17 @@ def test_switches_and_channel():
     assert sp["presets"] == ["yt-short"] and sp["hook"]["text"] == "क्या आप जानते हैं"
     for it in sp["effects"]["titles"] + sp["effects"]["broll"]:
         assert it["start"] < 40, it
+    # Auto B-roll: the starter pack's abstract backgrounds (bg glow orbs…) and unrelated clips are never dropped over the video
+    lib = [{"id": "bg1", "kind": "broll", "name": "bg glow orbs v", "tags": "starter,background,overlay,broll", "source": "starter", "duration": 8},
+           {"id": "x1", "kind": "broll", "name": "cooking pasta", "tags": "food", "source": "upload", "duration": 8}]
+    full = autopilot.plan(p, {**ch["settings"], "niche": "motivation"}, lib)
+    assert not [b for b in full["effects"]["broll"] if str(b.get("_id", "")).startswith("ap_broll_")], full["effects"]["broll"]
+    # quiet footage (no words, mostly "silence"): cuts are listed but left off; a talking video's pauses are still cut
+    from vividora.engine import autocut
+    e = autocut.build_edl({"segments": []}, 44, [(0, 11), (13, 16), (17, 20.5), (22, 44)])
+    assert e["cuts"] and not any(c["enabled"] for c in e["cuts"]) and e["stats"]["removed_seconds"] == 0 and e["stats"]["quiet_footage"], e["stats"]
+    e = autocut.build_edl({"segments": []}, 120, [(10, 12), (60, 63)])
+    assert all(c["enabled"] for c in e["cuts"]) and not e["stats"]["quiet_footage"]
     return ws, ch
 
 

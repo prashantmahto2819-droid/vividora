@@ -251,7 +251,10 @@ def plan(project: dict, workspace_settings: dict, library: list[dict], clip: dic
                 })
     # Auto B-roll: search library for clips matching transcript keywords and place them on the timeline
     if ap.get("auto_broll") and not clip:
-        broll_clips = [m for m in library if m.get("kind") in ("video", "broll")]
+        # only real footage: the starter pack's "broll" are abstract backgrounds (bg glow orbs, gradients) meant to sit
+        # behind text — as full-screen B-roll they just hide the video
+        broll_clips = [m for m in library if m.get("kind") in ("video", "broll") and (m.get("source") or "") != "starter"
+                       and not {"background", "overlay"} & set(str(m.get("tags") or "").lower().split(","))]
         if broll_clips:
             tr = project.get("transcript") or {}
             segments = tr.get("segments") or []
@@ -274,8 +277,8 @@ def plan(project: dict, workspace_settings: dict, library: list[dict], clip: dic
                 bc_text = bc_name + " " + bc_tags
                 # check if any topic word matches this B-roll
                 matched = any(tw in bc_text for tw in topic_words) if topic_words else False
-                if not matched and placed > 0:
-                    continue  # first one can be random, rest must match
+                if not matched:
+                    continue  # B-roll must be about what is being said — never a random clip
                 # find a good placement time: after the hook, spread across the video
                 place_at = max(6.0, last_broll + broll_interval)
                 if place_at >= out_dur - 4:

@@ -188,6 +188,13 @@ def build_edl(transcript: dict, duration: float, silences: list[tuple[float, flo
         c["reason"] = "retake" if "retake" in c["reasons"] else (
             "filler" if "filler" in c["reasons"] else "silence")
     removed = sum(c["end"] - c["start"] for c in cuts)
+    # No words and most of the video is "silence": this is scenery / music footage, not a talking video with pauses —
+    # cutting would shrink a 44 s montage to 11 s. List the cuts but leave them off; the user can still switch them on.
+    quiet_footage = not words and duration > 0 and removed > 0.5 * duration
+    if quiet_footage:
+        for c in cuts:
+            c["enabled"] = False
+        removed = 0.0
     return {
         "version": 1,
         "duration": round(duration, 3),
@@ -198,6 +205,7 @@ def build_edl(transcript: dict, duration: float, silences: list[tuple[float, flo
             "removed_seconds": round(removed, 2),
             "final_seconds": round(duration - removed, 2),
             "by_reason": {r: sum(1 for c in cuts if c["reason"] == r) for r in ("silence", "filler", "retake")},
+            "quiet_footage": quiet_footage,
         },
     }
 
