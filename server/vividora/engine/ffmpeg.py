@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import os
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -67,6 +69,29 @@ def check_cancel() -> None:
 
 def have(binary: str) -> bool:
     return shutil.which(binary) is not None
+
+
+def still(path: str | Path) -> Path:
+    """A photo that is safe to feed to `-loop 1`.
+
+    Phone photos (iPhone HDR / portrait, Samsung, Pixel "Ultra HDR") are JPEGs with a SECOND picture inside (gain map,
+    depth map — MPF). ffmpeg reads that as a 2-frame stream and `-loop 1 -t …` then never ends. For such files the first
+    picture is written once next to the original and that copy is used; ordinary images are returned unchanged."""
+    path = Path(path)
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-count_packets", "-select_streams", "v:0",
+                              "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", str(path)],
+                             capture_output=True, text=True, timeout=60).stdout.strip().split(",")[0]
+        if int(out or 1) <= 1:
+            return path
+    except (ValueError, OSError, subprocess.SubprocessError):
+        return path
+    fixed = path.with_name(path.name + ".still.jpg")
+    if fixed.exists() and fixed.stat().st_size > 0:
+        return fixed
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(path), "-frames:v", "1", "-update", "1",
+                        "-q:v", "2", str(fixed)], capture_output=True, text=True, timeout=120)
+    return fixed if r.returncode == 0 and fixed.exists() and fixed.stat().st_size > 0 else path
 
 
 def probe(path: str | Path) -> dict:
@@ -143,8 +168,27 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
             pass
     th = threading.Thread(target=_drain, daemon=True)
     th.start()
+    # watchdog: a stuck ffmpeg (e.g. an endless image loop) prints no progress at all, so a reader loop alone would
+    # wait for ever. A side thread kills it when the output position has not moved for FFMPEG_STALL_SECONDS.
+    stall_s = float(os.getenv("FFMPEG_STALL_SECONDS", "900") or 0)
+    moved = [time.monotonic(), ""]
+    stalled = threading.Event()
+
+    def _watch() -> None:
+        while proc.poll() is None:
+            if stall_s and time.monotonic() - moved[0] > stall_s:
+                stalled.set()
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                return
+            time.sleep(1.0)
+    threading.Thread(target=_watch, daemon=True).start()
     try:
         for line in proc.stdout:
+            if line.startswith("out_time_ms=") and line != moved[1]:
+                moved[0], moved[1] = time.monotonic(), line
             if on_progress and duration and line.startswith("out_time_ms="):
                 try:
                     t = int(line.split("=", 1)[1]) / 1_000_000
@@ -168,6 +212,8 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
         untrack(proc)
     if CANCEL.is_set():
         raise Cancelled("रद्द किया")
+    if stalled.is_set():
+        raise FFmpegError(f"{label}: {int(stall_s)}s तक कोई progress नहीं — ffmpeg अटक गया था, रोक दिया")
     if rc != 0:
         tail = "\n".join("".join(err_buf).strip().splitlines()[-15:])
         raise FFmpegError(f"{label} failed:\n{tail}")

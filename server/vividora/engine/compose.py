@@ -32,7 +32,7 @@ import math
 import re
 from pathlib import Path
 
-from . import catalog, colorpro, masks
+from . import catalog, colorpro, ffmpeg, masks
 from . import keyframes as K
 from .ffmpeg import escape_filter_path
 
@@ -319,7 +319,7 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
     min_speed = min(p[2] for p in pieces)
     inputs: list[list[str]] = []
     if is_img:
-        inputs.append(["-loop", "1", "-framerate", f"{fps:.3f}", "-t", f"{dur + 0.2:.3f}", "-i", str(path)])
+        inputs.append(["-loop", "1", "-framerate", f"{fps:.3f}", "-t", f"{dur + 0.2:.3f}", "-i", str(ffmpeg.still(path))])
     else:
         # fast seek to ~1 s before trim_in, then a frame-exact trim in the graph
         seek = max(0.0, trim_in - 1.0)

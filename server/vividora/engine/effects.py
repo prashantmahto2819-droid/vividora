@@ -10,7 +10,7 @@ import math
 
 from pathlib import Path
 
-from .ffmpeg import escape_filter_path
+from .ffmpeg import escape_filter_path, still as _ff_still
 
 # Colour "looks" — pick by name; a LUT file (.cube) from the library can be used instead.
 LOOKS: dict[str, dict] = {
@@ -363,7 +363,7 @@ def overlay_input_args(item: dict, path: Path) -> list[str]:
     """ffmpeg input args for a B-roll clip or image overlay item."""
     dur = max(0.2, float(item["end"]) - float(item["start"]))
     if item.get("type") == "image":
-        return ["-loop", "1", "-t", f"{dur:.3f}", "-i", str(path)]
+        return ["-loop", "1", "-t", f"{dur:.3f}", "-i", str(_ff_still(path))]
     return [*alpha_decoder(path), "-t", f"{dur + 0.5:.3f}", "-i", str(path)]
 
 

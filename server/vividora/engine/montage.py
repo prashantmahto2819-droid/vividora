@@ -125,7 +125,7 @@ def render(*, clips: list[dict], music: Path, out_dir: Path, name: str, preset: 
         ci = n % len(clips)
         c = clips[ci]
         if c.get("type") == "image":
-            inputs += ["-loop", "1", "-t", f"{d + 0.1:.3f}", "-i", str(c["path"])]
+            inputs += ["-loop", "1", "-t", f"{d + 0.1:.3f}", "-i", str(ffmpeg.still(c["path"]))]
             frames = int(math.ceil(d * fps))
             z = rnd.choice(["min(zoom+0.0012,1.18)", "if(eq(on,1),1.18,max(zoom-0.0012,1.0))"])
             chains.append(f"[{n}:v]scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"

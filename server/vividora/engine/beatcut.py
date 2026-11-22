@@ -583,7 +583,7 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
         fx, fy = (s.get("focus") or [.5, .5])[:2]
         margin = 1.1 if s.get("fx") == "shake" else 1.0
         if c["kind"] == "image":
-            inp = ["-loop", "1", "-framerate", str(fps), "-t", f"{d + 0.1:.3f}", "-i", str(c["path"])]
+            inp = ["-loop", "1", "-framerate", str(fps), "-t", f"{d + 0.1:.3f}", "-i", str(ffmpeg.still(c["path"]))]
             pre = f"[0:v]fps={fps},"
         else:
             src = d * speed
