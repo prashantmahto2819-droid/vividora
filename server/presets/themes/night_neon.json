@@ -1,0 +1,54 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 1.0
+ },
+ "voice": "studio",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [],
+ "id": "night_neon",
+ "label": "Night neon",
+ "emoji": "🌃",
+ "hint": "बैंगनी-cyan Tokyo night, neon glow text, glitch",
+ "swatch": [
+  "#7B2FF7",
+  "#00E5FF"
+ ],
+ "caption_style": "neon",
+ "text_style": "lavender",
+ "look": "none",
+ "grade_preset": "tokyo",
+ "transition": "glitch",
+ "transition_duration": 0.2,
+ "stack": [
+  {
+   "id": "tr_neon",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "energetic",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "fast",
+  "effects_level": "strong",
+  "min_cut": 0.35,
+  "max_cut": 1.4,
+  "look": "grade:tokyo",
+  "fx_strong": [
+   "glitch",
+   "rgb",
+   "flash",
+   "zoom_punch"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": false,
+  "outro": true
+ }
+}

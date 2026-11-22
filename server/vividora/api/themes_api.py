@@ -29,11 +29,13 @@ async def apply_theme(request: Request, user: dict):
     _, lib = channel_and_library(p)
     st = dict(p.get("settings") or {})
     rs, applied, skipped = themes.apply(st.get("render") or service.DEFAULT_RENDER, t, parts, has_transcript=has_tr,
-                                        library=lib, seed=p["id"])
+                                        library=lib, seed=p["id"], text_color=data.get("text_color"))
     st["render"] = rs
     if p.get("kind") == "montage" and "montage" in applied:
         mo = dict(st.get("montage") or {})
         mo.update({k: v for k, v in themes.montage_opts(t).items() if k in ("pace", "effects_level", "look", "slowmo", "font", "text_color", "text_size")})
+        if "text" in applied and (rs.get("effects") or {}).get("text_default", {}).get("color"):
+            mo["text_color"] = rs["effects"]["text_default"]["color"]   # the user's own colour, when one was chosen
         mo["theme"] = t["id"]
         st["montage"] = mo
     with db.tx() as c:

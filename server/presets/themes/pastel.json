@@ -1,0 +1,49 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "soft_glow"
+ ],
+ "id": "pastel",
+ "label": "Soft pastel",
+ "emoji": "🌸",
+ "hint": "हल्के गुलाबी-नीले pastel, mint box text, नरम fade",
+ "swatch": [
+  "#F7C6C7",
+  "#B8E0F6"
+ ],
+ "caption_style": "story",
+ "text_style": "mint_box",
+ "look": "none",
+ "grade_preset": "soft_pastel",
+ "transition": "x_fade",
+ "transition_duration": 0.5,
+ "stack": [],
+ "music": {
+  "mood": "happy",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "subtle",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:soft_pastel",
+  "fx_strong": [
+   "white_fade",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

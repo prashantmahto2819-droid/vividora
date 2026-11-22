@@ -1,0 +1,49 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 1.0
+ },
+ "voice": "bright",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [],
+ "id": "festival",
+ "label": "Festival / त्योहार",
+ "emoji": "🎉",
+ "hint": "होली-दीवाली के चटख रंग, flash-punch, तेज़ beat",
+ "swatch": [
+  "#FF3D7F",
+  "#FFC400"
+ ],
+ "caption_style": "pop",
+ "text_style": "sunset",
+ "look": "none",
+ "grade_preset": "holi",
+ "transition": "flashpunch",
+ "transition_duration": 0.25,
+ "stack": [],
+ "music": {
+  "mood": "energetic",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "fast",
+  "effects_level": "strong",
+  "min_cut": 0.35,
+  "max_cut": 1.4,
+  "look": "grade:holi",
+  "fx_strong": [
+   "zoom_punch",
+   "flash",
+   "shake",
+   "rgb"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

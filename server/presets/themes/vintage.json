@@ -1,0 +1,55 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "studio",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "grain",
+  "vignette"
+ ],
+ "id": "vintage",
+ "label": "Vintage film",
+ "emoji": "📼",
+ "hint": "Kodachrome रंग, grain, पुरानी film की खरोंच, typewriter captions",
+ "swatch": [
+  "#C97B4A",
+  "#F3E2C7"
+ ],
+ "caption_style": "typewriter",
+ "text_style": "retro",
+ "look": "none",
+ "grade_preset": "kodachrome",
+ "transition": "x_fadegrays",
+ "transition_duration": 0.5,
+ "stack": [
+  {
+   "id": "tr_old_film",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "story",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.4,
+  "look": "grade:kodachrome",
+  "fx_strong": [
+   "black_fade",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

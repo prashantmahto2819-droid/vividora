@@ -474,17 +474,19 @@ function showThemes(forMontage) {
         ${t.id ? `<div class="box"><b>${t.emoji || ""} ${esc(t.label)}</b> <span class="small muted">${esc(t.hint || "")}</span>
           ${E.montage ? "" : `<div class="chips" style="margin-top:.5rem">${parts.map((p) => { const dis = p.id === "captions" && noTr; return `<label class="chip ${dis ? "" : "on"}" title="${dis ? "transcript नहीं है" : ""}"><input type="checkbox" data-thpart="${p.id}" ${dis ? "disabled" : "checked"}>${esc(p.label)}</label>`; }).join("")}</div>
           ${noTr ? `<p class="small muted">captions: transcript नहीं है — «Transcript बनाएँ» के बाद लगेगा</p>` : ""}`}
+          <label class="chk small" style="margin-top:.5rem;display:flex;align-items:center;gap:.4rem"><input type="checkbox" id="th-owncol" ${E.thOwn ? "checked" : ""}> text का रंग अपना रखें <input type="color" id="th-col" value="${E.thCol || t.text_color || "#FFD400"}" ${E.thOwn ? "" : "disabled"}> <span class="muted">(theme का बाकी सब वैसा ही)</span></label>
           <div class="row" style="margin-top:.6rem;flex-wrap:wrap;gap:.4rem"><button class="btn primary" data-thapply>${E.montage ? "लगाओ और दोबारा plan बनाओ" : "इस project पर लगाएँ"}</button>
           ${E.montage ? `<button class="btn" data-thapply-only>सिर्फ़ settings बदलो</button>` : ""}
           ${t.saved ? `<button class="btn quiet small" data-thdel>🗑 saved theme हटाएँ</button>` : ""}</div></div>` : ""}
         <div class="row between" style="margin-top:.8rem"><span class="small muted">अपनी settings पसंद आईं?</span><button class="btn small" data-thsave>⭐ इस project की settings को theme की तरह save करें</button></div></div>`;
       $("[data-thx]", m).onclick = x;
       $$("[data-theme]", m).forEach((b) => (b.onclick = () => { sel = b.dataset.theme; draw(); }));
+      { const oc = $("#th-owncol", m), cc = $("#th-col", m); if (oc) oc.onchange = () => { E.thOwn = oc.checked; cc.disabled = !oc.checked; }; if (cc) cc.oninput = () => { E.thCol = cc.value; }; }
       const apply = async (replan) => {
         const partsSel = $$("[data-thpart]", m).filter((c) => c.checked && !c.disabled).map((c) => c.dataset.thpart);
         try {
           await flush();
-          const r = await api("POST", `/projects/${E.pid}/theme`, { id: sel, parts: E.montage ? ["montage", "text", "look"] : partsSel });
+          const r = await api("POST", `/projects/${E.pid}/theme`, { id: sel, parts: E.montage ? ["montage", "text", "look"] : partsSel, text_color: E.thOwn ? (E.thCol || $("#th-col", m)?.value) : undefined });
           toast(`theme «${r.theme.label}» लगा${r.skipped?.length ? " · " + r.skipped.join("; ") : ""}`);
           if (E.montage) { const ctx = E.ctx; const mo = r.settings.montage || {}; x(); unmount(); await ctx.load(); ctx.render();
             if (replan && E && E.mo) { E.mo.theme = mo.theme || sel; Object.assign(E.mo, { pace: mo.pace, effects_level: mo.effects_level, look: mo.look });

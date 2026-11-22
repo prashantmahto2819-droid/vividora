@@ -1,0 +1,47 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.9
+ },
+ "voice": "bright",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "kids",
+ "label": "Kids / fun",
+ "emoji": "🎈",
+ "hint": "चटख पीला-हरा, comic text, circle transition, खुश music",
+ "swatch": [
+  "#FFCA3A",
+  "#8AC926"
+ ],
+ "caption_style": "pop",
+ "text_style": "comic",
+ "look": "none",
+ "grade_preset": "pop_vlog",
+ "transition": "x_circleopen",
+ "transition_duration": 0.35,
+ "stack": [],
+ "music": {
+  "mood": "happy",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "medium",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:pop_vlog",
+  "fx_strong": [
+   "zoom_punch",
+   "flash"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

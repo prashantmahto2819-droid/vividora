@@ -1,0 +1,49 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.6
+ },
+ "voice": "studio",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "sharpen"
+ ],
+ "id": "food",
+ "label": "Food / recipe",
+ "emoji": "🍛",
+ "hint": "गरम, भूख जगाने वाले रंग, coral text, नरम dissolve",
+ "swatch": [
+  "#E4572E",
+  "#FFC857"
+ ],
+ "caption_style": "boxed",
+ "text_style": "coral",
+ "look": "none",
+ "grade_preset": "food_warm",
+ "transition": "x_dissolve",
+ "transition_duration": 0.4,
+ "stack": [],
+ "music": {
+  "mood": "happy",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "subtle",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:food_warm",
+  "fx_strong": [
+   "zoom_punch",
+   "flash"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

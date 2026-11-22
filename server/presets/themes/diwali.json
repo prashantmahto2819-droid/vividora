@@ -1,0 +1,55 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "soft_glow",
+  "vignette"
+ ],
+ "id": "diwali",
+ "label": "Diwali glow",
+ "emoji": "🪔",
+ "hint": "गहरा मैरून + सुनहरी चमक, दीयों जैसा warm glow",
+ "swatch": [
+  "#5E0B15",
+  "#F5D27A"
+ ],
+ "caption_style": "center-big",
+ "text_style": "maroon_gold",
+ "look": "none",
+ "grade_preset": "diwali",
+ "transition": "dip",
+ "transition_duration": 0.5,
+ "stack": [
+  {
+   "id": "tr_light_leak",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "devotional",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.4,
+  "look": "grade:diwali",
+  "fx_strong": [
+   "white_fade",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

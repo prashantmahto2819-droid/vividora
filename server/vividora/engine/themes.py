@@ -91,8 +91,26 @@ def pick_music(library: list[dict], mood: str | None, seed: str = "") -> str:
     return random.Random(seed or mood).choice(hit or musics)["id"]
 
 
+def recolor(style: dict, color: str | None) -> dict:
+    """A text style in the user's own colour: boxed styles get the colour as the box (text turns black/white to stay
+    readable), plain styles get it as the letter colour (a too-similar outline flips to black/white)."""
+    c = str(color or "").strip()
+    if not (len(c) == 7 and c.startswith("#") and all(ch in "0123456789abcdefABCDEF" for ch in c[1:])):
+        return style
+    lum = lambda h: (0.299 * int(h[1:3], 16) + 0.587 * int(h[3:5], 16) + 0.114 * int(h[5:7], 16)) / 255  # noqa: E731
+    st = dict(style)
+    if st.get("box"):
+        st["box_color"] = c.upper()
+        st["color"] = "#111111" if lum(c) > 0.6 else "#FFFFFF"
+    else:
+        st["color"] = c.upper()
+        if st.get("outline") and abs(lum(st["outline"]) - lum(c)) < 0.35:
+            st["outline"] = "#000000" if lum(c) > 0.5 else "#FFFFFF"
+    return st
+
+
 def apply(render: dict, theme: dict, parts: list[str] | None = None, *, has_transcript: bool = True,
-          library: list[dict] | None = None, seed: str = "") -> tuple[dict, list[str], list[str]]:
+          library: list[dict] | None = None, seed: str = "", text_color: str | None = None) -> tuple[dict, list[str], list[str]]:
     """render settings (project.settings.render) → new settings, applied parts, skipped parts (with reason)."""
     parts = [p for p in (parts or PART_IDS) if p in PART_IDS]
     rs = json.loads(json.dumps(render or {}))
@@ -120,7 +138,7 @@ def apply(render: dict, theme: dict, parts: list[str] | None = None, *, has_tran
         else:
             skipped.append("captions: style नहीं मिला")
     if "text" in parts:
-        st = text_style(theme.get("text_style"))
+        st = recolor(text_style(theme.get("text_style")), text_color)
         if st:
             e["text_default"] = {**st, "template": theme.get("text_style")}
             for t in e.get("titles") or []:

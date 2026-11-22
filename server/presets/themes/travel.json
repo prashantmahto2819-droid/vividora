@@ -1,0 +1,48 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.7
+ },
+ "voice": "studio",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [],
+ "id": "travel",
+ "label": "Travel vlog",
+ "emoji": "🌍",
+ "hint": "टील-नारंगी tropical रंग, smooth slide, साफ़ pop captions",
+ "swatch": [
+  "#0FB5A6",
+  "#FFB347"
+ ],
+ "caption_style": "pop",
+ "text_style": "teal_pop",
+ "look": "none",
+ "grade_preset": "tropical",
+ "transition": "x_smoothleft",
+ "transition_duration": 0.4,
+ "stack": [],
+ "music": {
+  "mood": "happy",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "medium",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:tropical",
+  "fx_strong": [
+   "zoom_punch",
+   "flash",
+   "blur_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

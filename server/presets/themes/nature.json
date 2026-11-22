@@ -1,0 +1,47 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "nature",
+ "label": "Nature / प्रकृति",
+ "emoji": "🌿",
+ "hint": "हरा-भरा lush रंग, धीमे dissolve, शांत music",
+ "swatch": [
+  "#2E8B57",
+  "#DFF5E1"
+ ],
+ "caption_style": "minimal",
+ "text_style": "emerald_box",
+ "look": "none",
+ "grade_preset": "green_lush",
+ "transition": "x_dissolve",
+ "transition_duration": 0.6,
+ "stack": [],
+ "music": {
+  "mood": "calm",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.9,
+  "max_cut": 2.8,
+  "look": "grade:green_lush",
+  "fx_strong": [
+   "zoom_in",
+   "white_fade"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

@@ -1,0 +1,45 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.5
+ },
+ "voice": "clean",
+ "slowmo": false,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "news",
+ "label": "News / update",
+ "emoji": "📰",
+ "hint": "लाल-नीला news look, साफ़ रंग, wipe transition, boxed captions",
+ "swatch": [
+  "#C8102E",
+  "#0B3D91"
+ ],
+ "caption_style": "boxed",
+ "text_style": "news_red",
+ "look": "none",
+ "grade_preset": "rec709",
+ "transition": "x_wipeleft",
+ "transition_duration": 0.3,
+ "stack": [],
+ "music": {
+  "mood": "news",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "subtle",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:rec709",
+  "fx_strong": [
+   "flash"
+  ],
+  "fx_soft": [
+   "zoom_in"
+  ],
+  "intro": false,
+  "outro": true
+ }
+}

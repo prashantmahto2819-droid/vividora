@@ -1,0 +1,45 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.6
+ },
+ "voice": "clean",
+ "slowmo": false,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "education",
+ "label": "Education / tutorial",
+ "emoji": "📚",
+ "hint": "गहरा नीला + amber, studio साफ़ रंग, slide, boxed captions",
+ "swatch": [
+  "#14213D",
+  "#FCA311"
+ ],
+ "caption_style": "boxed",
+ "text_style": "ink_box",
+ "look": "none",
+ "grade_preset": "studio_clean",
+ "transition": "x_slideleft",
+ "transition_duration": 0.3,
+ "stack": [],
+ "music": {
+  "mood": "calm",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "subtle",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:studio_clean",
+  "fx_strong": [
+   "zoom_punch"
+  ],
+  "fx_soft": [
+   "zoom_in"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

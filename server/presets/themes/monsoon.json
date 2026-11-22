@@ -1,0 +1,49 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "vignette"
+ ],
+ "id": "monsoon",
+ "label": "Monsoon / बारिश",
+ "emoji": "🌧️",
+ "hint": "नीला-स्लेटी भीगा हुआ mood, ice text, blur transition",
+ "swatch": [
+  "#3A6073",
+  "#A8C0D0"
+ ],
+ "caption_style": "minimal",
+ "text_style": "ice",
+ "look": "none",
+ "grade_preset": "monsoon",
+ "transition": "x_hblur",
+ "transition_duration": 0.5,
+ "stack": [],
+ "music": {
+  "mood": "emotional",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.9,
+  "max_cut": 2.8,
+  "look": "grade:monsoon",
+  "fx_strong": [
+   "blur_in",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

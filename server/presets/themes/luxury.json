@@ -1,0 +1,54 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "studio",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "vignette"
+ ],
+ "id": "luxury",
+ "label": "Luxury / premium",
+ "emoji": "👑",
+ "hint": "काला + सोना, गहरा contrast, letterbox, gold text",
+ "swatch": [
+  "#111111",
+  "#D4AF37"
+ ],
+ "caption_style": "minimal",
+ "text_style": "gold",
+ "look": "none",
+ "grade_preset": "epic_dark",
+ "transition": "x_fadeblack",
+ "transition_duration": 0.5,
+ "stack": [
+  {
+   "id": "tr_letterbox",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "cinematic",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.6,
+  "look": "grade:epic_dark",
+  "fx_strong": [
+   "black_fade",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

@@ -1,0 +1,54 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "soft_glow"
+ ],
+ "id": "wedding",
+ "label": "Wedding / शादी",
+ "emoji": "💍",
+ "hint": "सुनहरा-गुलाबी, light leak, सफ़ेद fade, rose-gold text",
+ "swatch": [
+  "#B8860B",
+  "#F7C6C7"
+ ],
+ "caption_style": "story",
+ "text_style": "rose_gold",
+ "look": "none",
+ "grade_preset": "wedding_gold",
+ "transition": "x_fadewhite",
+ "transition_duration": 0.6,
+ "stack": [
+  {
+   "id": "tr_light_leak",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "romantic",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.6,
+  "look": "grade:wedding_gold",
+  "fx_strong": [
+   "white_fade",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

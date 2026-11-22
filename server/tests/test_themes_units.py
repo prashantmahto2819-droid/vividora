@@ -20,6 +20,35 @@ from vividora.service import DEFAULT_RENDER  # noqa: E402
 
 
 class ThemeTests(unittest.TestCase):
+    def test_00_new_themes_and_own_text_colour(self):
+        from vividora.engine import beatcut
+        from vividora.engine.textfx import _STYLES
+        b = themes.builtin()
+        self.assertGreaterEqual(len(b), 27)
+        sty = {x[0] for x in _STYLES}
+        for tid in ("travel", "food", "wedding", "festival", "diwali", "news", "tech", "fitness", "nature", "vintage", "night_neon", "pastel",
+                    "luxury", "kids", "monsoon", "sunset", "education", "bw_classic"):
+            t = b[tid]
+            self.assertIn(t["text_style"], sty, tid)
+            self.assertTrue(all(x in beatcut.FX_ALL for x in t["montage"]["fx_strong"] + t["montage"]["fx_soft"]), tid)
+            self.assertEqual(len(t["swatch"]), 2, tid)
+            _, applied, skipped = themes.apply({}, t, None, has_transcript=True)
+            self.assertEqual(set(applied), set(themes.PART_IDS), (tid, skipped))     # every part of every new theme really applies
+        # own text colour: plain style → letter colour (a too-similar outline flips so it stays readable)
+        d = themes.apply({}, b["viral"], ["text"], text_color="#00ff88")[0]["effects"]["text_default"]
+        self.assertEqual((d["color"], d["outline"]), ("#00FF88", "#000000"))
+        d = themes.apply({}, b["motivational"], ["text"], text_color="#101010")[0]["effects"]["text_default"]
+        self.assertEqual((d["color"], d["outline"]), ("#101010", "#FFFFFF"))
+        # boxed style → the box takes the colour, the letters turn black / white
+        d = themes.apply({}, b["business"], ["text"], text_color="#ffe000")[0]["effects"]["text_default"]
+        self.assertEqual((d["box_color"], d["color"]), ("#FFE000", "#111111"))
+        d = themes.apply({}, b["education"], ["text"], text_color="#102040")[0]["effects"]["text_default"]
+        self.assertEqual((d["box_color"], d["color"]), ("#102040", "#FFFFFF"))
+        # junk is ignored, no colour = the theme's own
+        own = themes.text_style("neon_pink")["color"]
+        self.assertEqual(themes.apply({}, b["viral"], ["text"], text_color="red; drop")[0]["effects"]["text_default"]["color"], own)
+        self.assertEqual(themes.apply({}, b["viral"], ["text"])[0]["effects"]["text_default"]["color"], own)
+
     def test_builtin_themes_reference_real_ids(self):
         from vividora.engine.catalog import EFFECTS, GRADE_PRESETS
         from vividora.engine.effects import TRANSITIONS, VOICE_PRESETS

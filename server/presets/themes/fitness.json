@@ -1,0 +1,53 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 1.2
+ },
+ "voice": "bright",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [],
+ "id": "fitness",
+ "label": "Fitness / gym",
+ "emoji": "🏋️",
+ "hint": "काला + lime, punchy contrast, camera shake, बड़े captions",
+ "swatch": [
+  "#C6FF3D",
+  "#111111"
+ ],
+ "caption_style": "hormozi",
+ "text_style": "lime_punch",
+ "look": "none",
+ "grade_preset": "punchy",
+ "transition": "punch",
+ "transition_duration": 0.2,
+ "stack": [
+  {
+   "id": "tr_camera_shake",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "energetic",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "fast",
+  "effects_level": "strong",
+  "min_cut": 0.3,
+  "max_cut": 1.2,
+  "look": "grade:punchy",
+  "fx_strong": [
+   "zoom_punch",
+   "shake",
+   "flash"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": false,
+  "outro": true
+ }
+}

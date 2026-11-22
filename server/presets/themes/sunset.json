@@ -1,0 +1,54 @@
+{
+ "zoom": {
+  "enabled": false,
+  "strength": 0.6
+ },
+ "voice": "soft",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [
+  "soft_glow"
+ ],
+ "id": "sunset",
+ "label": "Sunset / golden",
+ "emoji": "🌅",
+ "hint": "नारंगी-गुलाबी शाम के रंग, sunset text, नरम dissolve",
+ "swatch": [
+  "#FF7E5F",
+  "#FEB47B"
+ ],
+ "caption_style": "center-big",
+ "text_style": "sunset",
+ "look": "none",
+ "grade_preset": "sunset",
+ "transition": "x_dissolve",
+ "transition_duration": 0.6,
+ "stack": [
+  {
+   "id": "tr_lens_flare",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "romantic",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "slow",
+  "effects_level": "subtle",
+  "min_cut": 0.8,
+  "max_cut": 2.6,
+  "look": "grade:sunset",
+  "fx_strong": [
+   "white_fade",
+   "zoom_in"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

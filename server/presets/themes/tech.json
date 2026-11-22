@@ -1,0 +1,53 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.9
+ },
+ "voice": "bright",
+ "slowmo": true,
+ "speed_ramp": false,
+ "extras": [],
+ "id": "tech",
+ "label": "Tech / gadgets",
+ "emoji": "💻",
+ "hint": "ठंडा नीला + neon cyan, pixel transition, word-box captions",
+ "swatch": [
+  "#00C2FF",
+  "#0B1026"
+ ],
+ "caption_style": "wordbox",
+ "text_style": "neon_cyan",
+ "look": "none",
+ "grade_preset": "neon_blue",
+ "transition": "x_pixelize",
+ "transition_duration": 0.3,
+ "stack": [
+  {
+   "id": "tr_chroma_pulse",
+   "params": {}
+  }
+ ],
+ "music": {
+  "mood": "energetic",
+  "volume": 0.15,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "medium",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:neon_blue",
+  "fx_strong": [
+   "zoom_punch",
+   "rgb",
+   "glitch"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}
