@@ -576,7 +576,13 @@ function bindNew() {
   drop.ondragleave = () => drop.classList.remove("over");
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); chosenAll = [...e.dataTransfer.files]; chosen = chosenAll[0]; pick(); };
   file.onchange = () => { chosenAll = [...file.files]; chosen = chosenAll[0]; pick(); };
-  function pick() { if (!chosen) return; $("#fname").innerHTML = chosenAll.length > 1 ? chosenAll.map((f, i) => `${i + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : `${esc(chosen.name)} · ${gb(chosen.size)}`; $("#start").disabled = false; }
+  const MEDIA_EXT = /\.(mp4|mov|mkv|webm|m4v|avi|mts|m2ts|ts|3gp|3g2|wmv|flv|mpg|mpeg|mxf|ogv|wav|mp3|m4a|aac|flac|ogg|opus|wma)$/i;
+  function pick() { if (!chosen) return;
+    // only video/audio here: photos and other files are set aside and named, so one stray file cannot fail the whole upload
+    const bad = chosenAll.filter((f) => !MEDIA_EXT.test(f.name)); chosenAll = chosenAll.filter((f) => MEDIA_EXT.test(f.name)); chosen = chosenAll[0] || null;
+    const note = bad.length ? `<div class="note err" style="margin-top:.4rem">ये ${bad.length} file नहीं ली गईं (यहाँ सिर्फ़ वीडियो/ऑडियो): <b>${bad.map((f) => esc(f.name)).join(", ")}</b>${bad.some((f) => /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name)) ? "<br>Photos के लिए ऊपर <b>Montage</b> चुनें।" : ""}</div>` : "";
+    if (!chosen) { $("#fname").innerHTML = note; $("#start").disabled = true; return; }
+    $("#fname").innerHTML = (chosenAll.length > 1 ? chosenAll.map((f, i) => `${i + 1}. ${esc(f.name)} · ${gb(f.size)}`).join("<br>") : `${esc(chosen.name)} · ${gb(chosen.size)}`) + note; $("#start").disabled = false; }
   let ptype = "talking_head";
   const moBox = $("#mo-new"), moFiles = []; let moSong = null;
   api("GET", "/presets/themes").then((r) => { const opts = (r.themes || []).map((t) => `<option value="${t.id}">${t.emoji || ""} ${esc(t.label)}${t.saved ? " ⭐" : ""}</option>`).join(""); for (const id of ["#up-theme", "#mo-theme"]) { const el = $(id); if (el) el.innerHTML += opts; } }).catch(() => {});

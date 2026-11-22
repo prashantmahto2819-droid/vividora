@@ -10,7 +10,10 @@ from .. import db, service, storage
 from .deps import ApiError, body, need, ok, own_project, require
 
 MAX_UPLOAD = 20 * 1024 ** 3  # 20 GB
-ALLOWED_EXT = {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".mts", ".3gp", ".wav", ".mp3", ".m4a"}
+# by extension first (cheap, before any byte is sent); the finished file is then checked for real media content
+ALLOWED_EXT = {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".mts", ".m2ts", ".ts", ".3gp", ".3g2", ".wmv", ".flv", ".mpg", ".mpeg",
+               ".mxf", ".ogv", ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"}
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 
 
 @require("editor")
@@ -26,9 +29,17 @@ async def start(request: Request, user: dict):
         raise ApiError(422, "file size out of range")
     from .. import saas
     saas.check_storage(db.conn(), p["workspace_id"], size)
-    name = storage.safe_name(data["filename"], "recording.mp4")
-    if "." + name.rsplit(".", 1)[-1].lower() not in ALLOWED_EXT:
-        raise ApiError(422, "सिर्फ़ वीडियो/ऑडियो फ़ाइलें (mp4, mov, mkv, webm, wav, mp3…)")
+    from pathlib import PurePath
+    orig = str(data["filename"])
+    ext = PurePath(orig.strip()).suffix.lower()
+    shown = orig.strip()[:80]
+    if ext in IMAGE_EXT:
+        raise ApiError(422, f"“{shown}” एक photo है — यहाँ सिर्फ़ वीडियो/ऑडियो चलता है। Photos के लिए नया वीडियो → Montage चुनें।", code="not_media", filename=shown)
+    if ext not in ALLOWED_EXT:
+        raise ApiError(422, f"“{shown}” ({ext or 'बिना extension'}) नहीं चलेगी — सिर्फ़ वीडियो/ऑडियो फ़ाइलें (mp4, mov, mkv, webm, wav, mp3…)", code="not_media", filename=shown)
+    name = storage.safe_name(orig, "recording" + ext)
+    if not name.lower().endswith(ext):          # a name in Hindi etc. loses its letters in safe_name — keep the extension
+        name = (name.replace(".", "_") or "recording")[:100] + ext
     if data.get("clip"):
         # one of several clips: numbered so the merge keeps the order they were added
         n = db.conn().execute("SELECT COUNT(*) FROM assets WHERE project_id = ? AND kind = 'clip'", (p["id"],)).fetchone()[0]
