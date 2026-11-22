@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 from . import llm, tts
+from . import ffmpeg as _ffm
 from .ffmpeg import still as _still
 
 FPS = 30
@@ -242,11 +243,22 @@ def render_scene(src: Path, kind: str, dur: float, out: Path, size: tuple[int, i
     if kind == "image":
         zoom = "min(zoom+0.0007,1.2)" if idx % 2 == 0 else "if(eq(on,0),1.2,max(zoom-0.0007,1.0))"
         vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
-              f"zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={w}x{h}:fps={FPS},{fade},format=yuv420p")
-        _ff(["-loop", "1", "-i", str(_still(src)), "-vf", vf, "-frames:v", str(frames), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", str(out)])
+              f"zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={w}x{h}:fps={FPS},{fade},{_ffm.UNIFORM_VF}")
+        _ff(["-loop", "1", "-i", str(_still(src)), "-vf", vf, "-frames:v", str(frames), "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+             *_ffm.UNIFORM_ENC, str(out)])
     else:
-        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={FPS},{fade},format=yuv420p"
-        _ff(["-stream_loop", "-1", "-i", str(src), "-t", f"{dur:.3f}", "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", str(out)])
+        # scenes are joined with the concat demuxer → every scene must have identical properties (ffmpeg.UNIFORM_VF)
+        def _vf(tonemap: str) -> str:
+            return (f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={FPS},"
+                    f"{tonemap + ',' if tonemap else ''}{fade},{_ffm.UNIFORM_VF}")
+        tm = _ffm.hdr_to_sdr(src)
+        cmd = ["-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", *_ffm.UNIFORM_ENC, str(out)]
+        try:
+            _ff(["-stream_loop", "-1", "-i", str(src), "-t", f"{dur:.3f}", "-vf", _vf(tm), *cmd])
+        except Exception:  # noqa: BLE001 — an HDR file the converter cannot read: keep the scene without the conversion
+            if not tm:
+                raise
+            _ff(["-stream_loop", "-1", "-i", str(src), "-t", f"{dur:.3f}", "-vf", _vf(""), *cmd])
     return out
 
 

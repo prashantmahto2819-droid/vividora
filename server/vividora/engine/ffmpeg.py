@@ -94,6 +94,34 @@ def still(path: str | Path) -> Path:
     return fixed if r.returncode == 0 and fixed.exists() and fixed.stat().st_size > 0 else path
 
 
+# ---- pieces that will be joined with the concat demuxer must look identical to ffmpeg --------------------------------
+# A photo piece (JPEG: full range, centre chroma, bt601) next to a phone-video piece (limited range, left chroma, often
+# HLG/bt2020) makes ffmpeg ≥ 7 "reconfigure the filter graph" in the middle of the join: the audio restarts, timestamps
+# jump, and the encode either stops early or dead-locks for ever. So every piece ends with UNIFORM_VF and is encoded
+# with UNIFORM_ENC — same pixel format, range, colour tags and chroma position — and HDR sources are really converted
+# to SDR (hdr_to_sdr) instead of only being re-labelled.
+UNIFORM_VF = ("scale=in_range=auto:out_range=tv,format=yuv420p,"
+              "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709")
+UNIFORM_ENC = ["-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+               "-chroma_sample_location", "left"]
+_TONEMAP = ("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,"
+            "zscale=t=bt709:m=bt709:r=tv,format=yuv420p")
+
+
+def hdr_to_sdr(path: str | Path) -> str:
+    """Filter chain that turns an HDR video (iPhone HLG / Dolby Vision, HDR10 PQ) into SDR bt709 — "" for SDR sources.
+    Put it after the resize (it works in float, so fewer pixels = much faster)."""
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=color_transfer",
+                              "-of", "csv=p=0", str(path)], capture_output=True, text=True, timeout=60).stdout.strip().lower()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if out.split(",")[0].strip() not in ("arib-std-b67", "smpte2084"):
+        return ""
+    mode = (os.getenv("HDR_TONEMAP") or "hable").lower()   # hable = best highlights · fast = direct conversion · off = only re-label
+    return "" if mode == "off" else ("zscale=t=bt709:m=bt709:p=bt709:r=tv,format=yuv420p" if mode == "fast" else _TONEMAP)
+
+
 def probe(path: str | Path) -> dict:
     out = subprocess.run(
         [
@@ -132,6 +160,23 @@ def probe(path: str | Path) -> dict:
     return info
 
 
+_SCRIPT_OPT: list[str] = []
+
+
+def _script_opt(cmd: list[str]) -> list[str]:
+    """`-filter_complex_script FILE` was deprecated in ffmpeg 7 and removed in 8 (new spelling: `-/filter_complex FILE`).
+    Callers keep the old spelling; it is translated here when the installed ffmpeg no longer knows it."""
+    if "-filter_complex_script" not in cmd:
+        return cmd
+    if not _SCRIPT_OPT:
+        try:
+            helptxt = subprocess.run(["ffmpeg", "-hide_banner", "-h", "full"], capture_output=True, text=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            helptxt = "filter_complex_script"
+        _SCRIPT_OPT.append("-filter_complex_script" if "filter_complex_script" in helptxt else "-/filter_complex")
+    return [_SCRIPT_OPT[0] if x == "-filter_complex_script" else x for x in cmd]
+
+
 def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressFn | None = None,
         label: str = "ffmpeg", is_heavy: bool = False) -> None:
     """Run ffmpeg, reporting progress (0..1) from its -progress output.
@@ -148,7 +193,7 @@ def run(cmd: list[str], *, duration: float | None = None, on_progress: ProgressF
             resource_args = hwaccel.ffmpeg_resource_args(is_heavy=True)
         except Exception:  # noqa: BLE001
             pass
-    full = ["ffmpeg", "-hide_banner", "-y", "-nostats", *resource_args, "-progress", "pipe:1", *cmd]
+    full = ["ffmpeg", "-hide_banner", "-y", "-nostats", *resource_args, "-progress", "pipe:1", *_script_opt(cmd)]
     proc = subprocess.Popen(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     track(proc)
     last = -1.0

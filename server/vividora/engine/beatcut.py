@@ -575,6 +575,8 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
     seg_files: list[Path] = [work / f"seg{n:03d}.mp4" for n in range(len(segs))]
     done_segs = [0]
 
+    sdr = {cid: ffmpeg.hdr_to_sdr(c["path"]) for cid, c in clips.items() if c.get("kind") != "image"}
+
     def _one(n: int) -> None:
         s = segs[n]
         c = clips[s["clip"]]
@@ -598,10 +600,22 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
         fxc = _fx_chain(s, W, H, fps)
         if s.get("outro"):
             fxc = (fxc + "," if fxc else "") + "eq=brightness=-0.22:saturation=0.85"
-        graph = f"{pre}{rf}[r0];[r0]{fxc + ',' if fxc else ''}scale={W}:{H},trim=duration={d:.3f},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v]"
+        # every piece identical for the join (see ffmpeg.UNIFORM_VF); HDR phone video is converted to SDR first
+        tm = "" if c["kind"] == "image" else sdr.get(s["clip"], "")
+
+        def _graph(tonemap: str) -> str:
+            return (f"{pre}{rf}[r0];[r0]{tonemap + ',' if tonemap else ''}{fxc + ',' if fxc else ''}scale={W}:{H},"
+                    f"trim=duration={d:.3f},setpts=PTS-STARTPTS,setsar=1,{ffmpeg.UNIFORM_VF}[v]")
+        enc = ["-map", "[v]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-g", str(fps), "-r", str(fps),
+               *ffmpeg.UNIFORM_ENC, "-t", f"{d:.3f}", str(seg_files[n])]
         ffmpeg.check_cancel()
-        ffmpeg.run([*inp, "-filter_complex", graph, "-map", "[v]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
-                    "-g", str(fps), "-r", str(fps), "-t", f"{d:.3f}", str(seg_files[n])], label=f"segment {n + 1}")
+        try:
+            ffmpeg.run([*inp, "-filter_complex", _graph(tm), *enc], label=f"segment {n + 1}")
+        except ffmpeg.FFmpegError:
+            if not tm:
+                raise
+            ffmpeg.check_cancel()   # an odd HDR file the converter cannot read: keep the piece, just without the conversion
+            ffmpeg.run([*inp, "-filter_complex", _graph(""), *enc], label=f"segment {n + 1}")
         done_segs[0] += 1
         if on_progress:
             on_progress(0.75 * done_segs[0] / len(segs), f"clip {done_segs[0]}/{len(segs)}")
