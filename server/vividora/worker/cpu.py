@@ -121,6 +121,10 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
         else:
             body["enabled"] = False
         e["body"] = body
+    tf = e.get("transform") if isinstance(e.get("transform"), dict) else None
+    if tf and tf.get("bg") in ("image", "video") and tf.get("bg_" + tf["bg"]):   # own background behind a cropped / shrunk main video
+        p = fetch(tf["bg_" + tf["bg"]])
+        tf["bg_" + tf["bg"] + "_path"] = str(p) if p else None
     for key in ("music", "watermark", "frame"):
         d = e.get(key) or {}
         if isinstance(d, dict) and d.get("id"):

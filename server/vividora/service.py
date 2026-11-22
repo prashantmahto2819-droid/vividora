@@ -1066,6 +1066,9 @@ def resolve_effects_local(project: dict, effects: dict, *, audio: bool = False) 
                     p = lib_path(body[key]); body[key + "_path"] = str(p) if p else None
         else:
             body["enabled"] = False
+    tf = e.get("transform") if isinstance(e.get("transform"), dict) else None
+    if tf and tf.get("bg") in ("image", "video") and tf.get("bg_" + tf["bg"]):   # own background behind a cropped / shrunk main video
+        p = lib_path(tf["bg_" + tf["bg"]]); tf["bg_" + tf["bg"] + "_path"] = str(p) if p else None
     # Smart Layout: B-roll items with layout="behind" need the main video's person matte
     from .engine import layout as smart_layout
     if any(smart_layout.needs_main_alpha(it) for it in (e.get("broll") or []) if isinstance(it, dict)):

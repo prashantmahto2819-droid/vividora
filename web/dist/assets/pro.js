@@ -669,7 +669,18 @@ export function bgFill(g, T) {
   const bg = masked ? (String(m.bg || "black").startsWith("#") ? "color" : m.bg || "black") : T?.bg || "blur";
   const need = !!g && (!full || moved || masked);
   cv.hidden = !need; const fr = $("#frame", ed.root);
-  fr.style.background = need && bg === "color" ? (masked ? m.bg : T.bg_color || "#000") : "";
+  // own background behind the main video: gradient / library image / library video (render: transform.bg)
+  const lib = (id) => (ed.lib || []).find((x) => x.id === id); const own = need && !masked ? bg : "";
+  const img = own === "image" ? lib(T.bg_image) : null, vid = own === "video" ? lib(T.bg_video) : null;
+  let bv = $("#pv-bgv", ed.root);
+  if (vid) {
+    if (!bv) { bv = document.createElement("video"); bv.id = "pv-bgv"; bv.muted = true; bv.loop = true; bv.playsInline = true; bv.autoplay = true; bv.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;pointer-events:none"; cv.parentNode.insertBefore(bv, cv); }
+    if (bv.dataset.id !== vid.id) { bv.dataset.id = vid.id; bv.src = vid.url; bv.play().catch(() => {}); }
+    bv.hidden = false;
+  } else if (bv) { bv.pause(); bv.hidden = true; }
+  fr.style.background = need && bg === "color" ? (masked ? m.bg : T.bg_color || "#000")
+    : own === "gradient" ? `linear-gradient(135deg, ${T.bg_color || "#1b1f3a"}, ${T.bg_color2 || "#f2b33d"})`
+    : img ? `center / cover no-repeat url("${img.url}")` : "";
   ed.bgBlur = need && bg === "blur";
   if (!ed.bgBlur) { cv.style.visibility = "hidden"; return; }
   cv.style.visibility = ""; cv.style.cssText = `left:0;top:0;width:${fb.w}px;height:${fb.h}px;position:absolute;filter:blur(${Math.max(6, fb.w / 40).toFixed(0)}px) ${ed.vf || ""};transform:scale(1.08)`;

@@ -76,6 +76,49 @@ def _crop_fit(tf: dict, preset_fit: str) -> tuple[str, str]:
     return preset_fit, "black"
 
 
+def _custom_bg(tf: dict) -> str | None:
+    """'gradient' | 'image' | 'video' when the main video has its own background (transform.bg), else None."""
+    bg = tf.get("bg")
+    if bg == "gradient":
+        return bg
+    if bg in ("image", "video") and tf.get(f"bg_{bg}_path"):
+        return bg
+    return None
+
+
+def _bg_chain(tf: dict, kind: str, in_idx: int | None, w: int, h: int, fps: float) -> str:
+    """The background picture stream [tfbg] (frame-sized) for a main video with its own background."""
+    hexc = lambda v, d: "0x" + str(v or d).lstrip("#")[:6]  # noqa: E731
+    if kind == "gradient":
+        return (f"gradients=s={w}x{h}:c0={hexc(tf.get('bg_color'), '#1b1f3a')}:c1={hexc(tf.get('bg_color2'), '#f2b33d')}"
+                f":x0=0:y0=0:x1={w}:y1={h}:speed=0.02:r={fps},format=yuv420p,setsar=1[tfbg]")
+    return (f"[{in_idx}:v]fps={fps},scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+            f"setsar=1,format=yuv420p[tfbg]")
+
+
+def _frame_on_bg(tf: dict, src_w: int, src_h: int, w: int, h: int, preset_fit: str, focus_x: float, focus_y: float,
+                 place: bool) -> str:
+    """Frame step over [tfbg]: the (cropped) main video is sized — whole when crop_fit='fit' or the preset letter-boxes,
+    otherwise filling the frame — then laid on the background. With place=True the transform's scale / x / y are applied
+    here too (so the picture moves over the background instead of over a blurred copy of itself)."""
+    c = tf.get("crop") or {}
+    cropped = float(c.get("w", 1) or 1) < .999 or float(c.get("h", 1) or 1) < .999
+    whole = (tf.get("crop_fit") == "fit" and cropped) or preset_fit in ("pad", "blur")
+    s = float(tf.get("scale", 1) or 1) if place else 1.0
+    dx, dy = (float(tf.get("x", 0) or 0), float(tf.get("y", 0) or 0)) if place else (0.0, 0.0)
+    even = lambda v: max(16, int(v / 2) * 2)  # noqa: E731
+    if whole:
+        k = min(w / src_w, h / src_h)
+        fg = f"scale={even(src_w * k * s)}:{even(src_h * k * s)}:flags=lanczos"
+    else:
+        fg = (f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,"
+              f"crop={w}:{h}:(iw-{w})*{focus_x:.3f}:(ih-{h})*{focus_y:.3f}")
+        if abs(s - 1) > 1e-3:
+            fg += f",scale={even(w * s)}:{even(h * s)}"
+    return (f"{fg},setsar=1[tffg];[tfbg][tffg]overlay=x='(W-w)/2+{dx * w:.1f}':y='(H-h)/2+{dy * h:.1f}':shortest=1,"
+            f"setsar=1,format=yuv420p")
+
+
 def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: float, focus_y: float,
                   track_cmds: Path | None = None, pad_color: str = "black") -> str:
     src_ratio, dst_ratio = src_w / max(1, src_h), w / h
@@ -524,12 +567,32 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     pre_tf, src_w, src_h = fx.transform_pre(tf, src_w, src_h)
     if pre_tf and (tf.get("crop") or int(tf.get("rotate", 0) or 0) % 360):
         track_cmds = None  # the face track was measured on the uncropped picture
-    fit, pad_color = _crop_fit(tf, preset.get("fit", "crop"))
-    frame = (pre_tf + "," if pre_tf else "") + _frame_filter(src_w, src_h, w, h, fit, focus_x, focus_y, track_cmds, pad_color)
+    own_bg = _custom_bg(tf)
+    kf_tf = protools.transform_kf(tf, w, h, fps, new_dur, work)
+    if own_bg:
+        # the main video sits on the user's own background (gradient / library image / library video)
+        bg_in = None
+        if own_bg != "gradient":
+            inputs += (["-loop", "1", "-i", str(tf["bg_image_path"])] if own_bg == "image"
+                       else ["-stream_loop", "-1", "-i", str(tf["bg_video_path"])])
+            bg_in = next_in
+            next_in += 1
+        chains.append(_bg_chain(tf, own_bg, bg_in, w, h, fps))
+        track_cmds = None
+        # keyframed moves are applied afterwards by transform_kf; plain scale / x / y are placed right here
+        frame = (pre_tf + "," if pre_tf else "") + _frame_on_bg(tf, src_w, src_h, w, h, preset.get("fit", "crop"),
+                                                                 focus_x, focus_y, place=not kf_tf)
+        post_tf = kf_tf
+    else:
+        fit, pad_color = _crop_fit(tf, preset.get("fit", "crop"))
+        frame = (pre_tf + "," if pre_tf else "") + _frame_filter(src_w, src_h, w, h, fit, focus_x, focus_y, track_cmds, pad_color)
+        post_tf = kf_tf or fx.transform_post(tf, w, h)
     pro_pre = protools.pre_grade(e, work)  # denoise + colour wheels/curves/HSL/match LUT
-    if pro_pre:
+    if pro_pre and not own_bg:
         frame += "," + pro_pre
-    post_tf = protools.transform_kf(tf, w, h, fps, new_dur, work) or fx.transform_post(tf, w, h)
+    elif pro_pre:   # grade only the video, not the background it sits on
+        head, tail = frame.split("[tffg];", 1)
+        frame = f"{head},{pro_pre}[tffg];{tail}"
     if post_tf:
         frame += "," + post_tf
     if not use_segments:
