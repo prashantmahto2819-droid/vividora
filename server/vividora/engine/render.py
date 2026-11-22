@@ -64,8 +64,20 @@ def _select_expr(keep: list[tuple[float, float]], fps: float) -> str:
     return "+".join(f"gte(t\\,{a - eps:.4f})*lt(t\\,{b - eps:.4f})" for a, b in keep)
 
 
+def _crop_fit(tf: dict, preset_fit: str) -> tuple[str, str]:
+    """(fit, pad colour) for the frame step. A cropped picture with crop_fit="fit" is shown whole — the empty space is
+    the blurred video, black or the chosen colour (transform.bg) — instead of being zoomed to fill the frame."""
+    c = tf.get("crop") or {}
+    if tf.get("crop_fit") == "fit" and (float(c.get("w", 1) or 1) < .999 or float(c.get("h", 1) or 1) < .999):
+        bg = tf.get("bg") or "blur"
+        if bg == "blur":
+            return "fitblur", "black"
+        return "pad", ("black" if bg != "color" else "0x" + str(tf.get("bg_color") or "#000000").lstrip("#")[:6])
+    return preset_fit, "black"
+
+
 def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: float, focus_y: float,
-                  track_cmds: Path | None = None) -> str:
+                  track_cmds: Path | None = None, pad_color: str = "black") -> str:
     src_ratio, dst_ratio = src_w / max(1, src_h), w / h
     if abs(src_ratio - dst_ratio) / dst_ratio < 0.02:
         return f"scale={w}:{h}:flags=lanczos,setsar=1"
@@ -80,7 +92,7 @@ def _frame_filter(src_w: int, src_h: int, w: int, h: int, fit: str, focus_x: flo
                 f"crop={w}:{h}:(iw-{w})*{focus_x:.3f}:(ih-{h})*{focus_y:.3f},setsar=1")
     if fit == "pad":
         return (f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,"
-                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1")
+                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={pad_color},setsar=1")
     # blur: the same video, blurred and darkened, fills the empty space
     return (f"split[bgsrc][fgsrc];"
             f"[bgsrc]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
@@ -512,7 +524,8 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     pre_tf, src_w, src_h = fx.transform_pre(tf, src_w, src_h)
     if pre_tf and (tf.get("crop") or int(tf.get("rotate", 0) or 0) % 360):
         track_cmds = None  # the face track was measured on the uncropped picture
-    frame = (pre_tf + "," if pre_tf else "") + _frame_filter(src_w, src_h, w, h, preset.get("fit", "crop"), focus_x, focus_y, track_cmds)
+    fit, pad_color = _crop_fit(tf, preset.get("fit", "crop"))
+    frame = (pre_tf + "," if pre_tf else "") + _frame_filter(src_w, src_h, w, h, fit, focus_x, focus_y, track_cmds, pad_color)
     pro_pre = protools.pre_grade(e, work)  # denoise + colour wheels/curves/HSL/match LUT
     if pro_pre:
         frame += "," + pro_pre

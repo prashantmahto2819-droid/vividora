@@ -579,7 +579,10 @@ function mainGeom(W, H) {
   if (Math.abs(sr - dr) / dr < 0.02) { dw = W; dh = H; x0 = 0; y0 = 0; }
   else {
     // 16:9 previews the YouTube (blur-fit) preset; the vertical ones crop to fill
-    const cover = E.ratio !== "16:9" || (sr > dr && dr >= 1);
+    // a cropped picture is shown whole ("fit": what you selected is what you get, empty space = blur/black/colour)
+    // unless the user chose "fill"; old projects without crop_fit keep filling the frame
+    const fitc = t.crop_fit === "fit" && (c.w < 0.999 || c.h < 0.999);
+    const cover = !fitc && (E.ratio !== "16:9" || (sr > dr && dr >= 1));
     const k = cover ? Math.max(W / ew, H / eh) : Math.min(W / ew, H / eh); dw = ew * k; dh = eh * k;
     x0 = cover ? (W - dw) * (E.rs.focus_x ?? 0.5) : (W - dw) / 2; y0 = cover ? (H - dh) * (E.rs.focus_y ?? 0.5) : (H - dh) / 2;
   }
@@ -684,7 +687,7 @@ function canvasDrag(e, mode, opts = {}) {
         if (mode.includes("n")) { const y = clamp(crop0.y + fy_, 0, crop0.y + crop0.h - MIN); c.h = crop0.y + crop0.h - y; c.y = y; }
         if (mode.includes("s")) c.h = clamp(crop0.h + fy_, MIN, 1 - crop0.y);
       }
-      t.crop = Object.fromEntries(Object.entries(c).map(([k, v]) => [k, +v.toFixed(4)]));
+      t.crop = Object.fromEntries(Object.entries(c).map(([k, v]) => [k, +v.toFixed(4)])); if (!t.crop_fit) t.crop_fit = "fit";
     } else if (mode === "move") {
       if (b.kind === "video") { let x = (st.x || 0) + dx / fb.w, y = (st.y || 0) + dy / fb.h;
         if (Math.abs(x * fb.w) < SNAP) { x = 0; guides += "v"; } if (Math.abs(y * fb.h) < SNAP) { y = 0; guides += "h"; }
@@ -1217,7 +1220,7 @@ function _renderInspector() {
         <p class="small muted">◆ = keyframe (zoom-in, pan, fade)। keyframe होने पर preview पर खींचना भी keyframe बनाता है। <b>K</b> = सब एक साथ।</p>
         ${it.kf && Object.keys(it.kf).length ? `<details class="insp sub" open><summary>Keyframes</summary>${PRO.kfListHtml(E.sel, dis)}</details>` : ""}
         ${field("खाली जगह", `<select data-tf="bg" ${dis}>${[["blur", "Blur"], ["black", "काला"], ["color", "रंग"]].map(([v, l]) => `<option value="${v}" ${(it.bg || "blur") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}${it.bg === "color" ? field("रंग", `<input type="color" data-tf="bg_color" value="${it.bg_color || "#000000"}" ${dis}>`) : ""}</details>
-      <details open class="insp"><summary>Crop</summary><div class="chips">${[["free", "Free"], ["9:16", "9:16"], ["16:9", "16:9"], ["1:1", "1:1"], ["4:5", "4:5"], ["reset", "Reset"]].map(([v, l]) => `<button data-cropr="${v}" ${dis}>${l}</button>`).join("")}</div>
+      <details open class="insp"><summary>Crop</summary>${field("Crop के बाद", `<select data-tf="crop_fit" ${dis}>${[["fit", "जितना चुना उतना ही दिखाओ (खाली जगह blur/काला)"], ["fill", "Frame भर दो (zoom होकर किनारे कटेंगे)"]].map(([v, l]) => `<option value="${v}" ${(it.crop_fit || "fill") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}<div class="chips">${[["free", "Free"], ["9:16", "9:16"], ["16:9", "16:9"], ["1:1", "1:1"], ["4:5", "4:5"], ["reset", "Reset"]].map(([v, l]) => `<button data-cropr="${v}" ${dis}>${l}</button>`).join("")}</div>
         <div class="irow">${rng("x", "बाएँ", 0, 0.9, 0.01, 0, 1)}${rng("y", "ऊपर", 0, 0.9, 0.01, 0, 1)}</div><div class="irow">${rng("w", "चौड़ाई", 0.1, 1, 0.01, 1, 1)}${rng("h", "ऊँचाई", 0.1, 1, 0.01, 1, 1)}</div></details>
       <details open class="insp"><summary>Rotate & Mirror</summary><div class="irow">${[0, 90, 180, 270].map((r) => `<button class="btn small ${(+it.rotate || 0) === r ? "primary" : "quiet"}" data-rot="${r}" ${dis}>${r}°</button>`).join("")}</div>
         <div class="irow"><label class="chk small"><input type="checkbox" data-tf="flip_h" ${it.flip_h ? "checked" : ""} ${dis}> ⇋ Mirror</label><label class="chk small"><input type="checkbox" data-tf="flip_v" ${it.flip_v ? "checked" : ""} ${dis}> ⇅ Flip</label></div></details>
@@ -1297,9 +1300,10 @@ function _renderInspector() {
   }));
   $$("[data-plat]", ins).forEach((el) => (el.onchange = () => { if (!E.canEdit) return; it.platforms = $$("[data-plat]", ins).filter((x) => x.checked).map((x) => x.dataset.plat); if (!it.platforms.length) delete it.platforms; touch(); renderOverlay(); renderTimeline(); }));
   $$("[data-tf]", ins).forEach((el) => (el.oninput = el.onchange = () => { if (!E.canEdit) return; const k = el.dataset.tf; const v = el.type === "checkbox" ? el.checked : el.type === "range" ? +el.value : el.value;
-    if (k.startsWith("crop.")) { it.crop = { x: 0, y: 0, w: 1, h: 1, ...(it.crop || {}) }; it.crop[k.slice(5)] = v; it.crop.w = Math.min(it.crop.w, 1 - it.crop.x); it.crop.h = Math.min(it.crop.h, 1 - it.crop.y); } else it[k] = v;
-    const lb = el.closest(".ifield")?.querySelector("label b"); if (lb && el.type === "range") lb.textContent = (+el.value).toFixed(2); applyVideoCss(); touch(); if (k === "bg") renderInspector(); }));
+    if (k.startsWith("crop.")) { it.crop = { x: 0, y: 0, w: 1, h: 1, ...(it.crop || {}) }; it.crop[k.slice(5)] = v; it.crop.w = Math.min(it.crop.w, 1 - it.crop.x); it.crop.h = Math.min(it.crop.h, 1 - it.crop.y); if (!it.crop_fit) it.crop_fit = "fit"; } else it[k] = v;
+    const lb = el.closest(".ifield")?.querySelector("label b"); if (lb && el.type === "range") lb.textContent = (+el.value).toFixed(2); applyVideoCss(); touch(); if (k === "bg") renderInspector(); if (k === "crop_fit") renderHandles(); }));
   $$("[data-cropr]", ins).forEach((b) => (b.onclick = () => { const r = b.dataset.cropr; const vw = E.p.meta?.width || 1280, vh = E.p.meta?.height || 720;
+    if (it && !it.crop_fit && r !== "reset") it.crop_fit = "fit";
     if (r === "reset" || r === "free") { it.crop = r === "reset" ? null : { x: 0.05, y: 0.05, w: 0.9, h: 0.9 }; }
     else { const [a, c] = r.split(":").map(Number); const tr = a / c, sr = vw / vh; it.crop = tr < sr ? { w: +(tr / sr).toFixed(3), h: 1, x: +((1 - tr / sr) / 2).toFixed(3), y: 0 } : { w: 1, h: +(sr / tr).toFixed(3), x: 0, y: +((1 - sr / tr) / 2).toFixed(3) }; }
     touch(); applyVideoCss(); renderInspector(); }));
