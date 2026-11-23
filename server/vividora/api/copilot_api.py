@@ -6,7 +6,6 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.routing import Route
 
-from .. import db
 from ..engine import copilot
 from .channels import get_channel
 from .deps import ApiError, body, ok, require

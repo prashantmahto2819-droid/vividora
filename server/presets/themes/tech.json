@@ -41,11 +41,14 @@
   "fx_strong": [
    "zoom_punch",
    "rgb",
-   "glitch"
+   "glitch",
+   "pixel_in",
+   "blur_punch"
   ],
   "fx_soft": [
    "zoom_in",
-   "zoom_out"
+   "zoom_out",
+   "bw_reveal"
   ],
   "intro": true,
   "outro": true

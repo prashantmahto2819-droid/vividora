@@ -43,11 +43,13 @@
   "look": "grade:diwali",
   "fx_strong": [
    "white_fade",
-   "zoom_in"
+   "zoom_in",
+   "gold_flash"
   ],
   "fx_soft": [
    "zoom_in",
-   "zoom_out"
+   "zoom_out",
+   "spot_reveal"
   ],
   "intro": true,
   "outro": true

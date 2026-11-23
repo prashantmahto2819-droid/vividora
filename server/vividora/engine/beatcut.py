@@ -28,12 +28,18 @@ import numpy as np
 from . import ffmpeg
 from .montage import SR, HOP, _decode, onset_envelope, tempo
 
-FX_STRONG = ["zoom_punch", "flash", "shake", "rgb", "glitch"]
-FX_SOFT = ["zoom_punch", "blur_in", "flash"]
-FX_ALL = ["cut", "zoom_punch", "flash", "shake", "rgb", "glitch", "blur_in", "zoom_in", "zoom_out", "white_fade", "black_fade"]
+FX_STRONG = ["zoom_punch", "flash", "shake", "rgb", "glitch", "blur_punch", "strobe", "bounce", "invert_flash", "vhs", "pixel_in"]
+FX_SOFT = ["zoom_punch", "blur_in", "flash", "hue_pop", "gold_flash", "slide_left", "slide_up", "tilt_in"]
+FX_REVEAL = ["bw_reveal", "spot_reveal"]          # how the very first cut can open
+FX_ALL = ["cut", "zoom_punch", "flash", "shake", "rgb", "glitch", "blur_in", "zoom_in", "zoom_out", "white_fade", "black_fade",
+          "bw_reveal", "spot_reveal", "slide_left", "slide_up", "tilt_in", "bounce", "blur_punch", "pixel_in", "strobe",
+          "hue_pop", "invert_flash", "gold_flash", "vhs"]
 FX_LABELS = {"cut": "सीधा cut", "zoom_punch": "Zoom punch", "flash": "Flash", "shake": "Shake", "rgb": "RGB split",
              "glitch": "Glitch", "blur_in": "Blur in", "zoom_in": "धीरे zoom in", "zoom_out": "धीरे zoom out",
-             "white_fade": "White fade", "black_fade": "Black fade"}
+             "white_fade": "White fade", "black_fade": "Black fade",
+             "bw_reveal": "B&W से रंग (reveal)", "spot_reveal": "Spotlight reveal", "slide_left": "Slide (बाएँ से)", "slide_up": "Slide (नीचे से)",
+             "tilt_in": "Tilt in", "bounce": "Bounce", "blur_punch": "Blur punch", "pixel_in": "Pixel in", "strobe": "Strobe",
+             "hue_pop": "Colour pop", "invert_flash": "Negative flash", "gold_flash": "Gold flash", "vhs": "VHS"}
 
 
 # ------------------------------------------------------------------ music
@@ -284,8 +290,8 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
     limit = t0 + max_seconds
     drops = set(mu.get("drops") or [])
     bar0 = mu.get("bar0", 0)
-    strong_pool = [f for f in (fx_strong or []) if f in FX_ALL] or FX_STRONG
-    soft_pool = [f for f in (fx_soft or []) if f in FX_ALL] or FX_SOFT
+    strong_pool = [f for f in (fx_strong or []) if f in FX_ALL and f not in FX_REVEAL] or FX_STRONG
+    soft_pool = [f for f in (fx_soft or []) if f in FX_ALL and f not in FX_REVEAL] or FX_SOFT
     min_cut, max_cut = max(0.2, float(min_cut)), max(0.5, float(max_cut))
     bar = 4 * period
     # 1) cut points on the beat grid
@@ -412,6 +418,11 @@ def plan(mu: dict, clips: list[dict], *, max_seconds: float = 30, pace: str = "a
         # effect at the start of this cut
         if is_intro or k == 0:
             fxn = "zoom_in" if (is_intro or c["kind"] == "image") else "zoom_out"
+            # the opening: black & white → colour, a spotlight, or the classic push-in. A theme opts in by listing a reveal.
+            themed = fx_strong is not None or fx_soft is not None
+            reveals = [f for f in FX_REVEAL if not themed or f in (fx_strong or []) + (fx_soft or [])]
+            if is_intro and reveals and effects in ("medium", "strong", "auto") and d >= 1.0:
+                fxn = rnd.choice(reveals + ([] if themed else ["zoom_in"]))
         elif is_outro:
             fxn = "zoom_out"
         elif effects == "none":
@@ -503,6 +514,22 @@ def _reframe(W: int, H: int, fx: float, fy: float, mode: str, src_w: int, src_h:
             f"crop={MW}:{MH}:x='min(max(0\\,{fx:.3f}*iw-{MW}/2)\\,iw-{MW})':y='min(max(0\\,{fy:.3f}*ih-{MH}/2)\\,ih-{MH})'")
 
 
+_FILTERS: set[str] = set()
+
+
+def _has_filter(name: str) -> bool:
+    """Is this filter in the installed ffmpeg? (asked once; newer effects fall back to an older one when it is missing)"""
+    if not _FILTERS:
+        import subprocess
+        try:
+            out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, timeout=30).stdout
+            _FILTERS.update(line.split()[1] for line in out.splitlines() if len(line.split()) > 2)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _FILTERS.add("")
+    return name in _FILTERS
+
+
 def _fx_chain(s: dict, W: int, H: int, fps: int) -> str:
     """Effect + beat pulses for one segment (input already W×H, or W*1.1 for shake)."""
     d = s["dur"]
@@ -514,12 +541,18 @@ def _fx_chain(s: dict, W: int, H: int, fps: int) -> str:
         z = f"1+0.10*in_time/{d:.3f}"
     elif fx == "zoom_out":
         z = f"1.12-0.12*in_time/{d:.3f}"
+    elif fx == "bounce":
+        z = "1+0.14*exp(-7*in_time)*abs(cos(20*in_time))*lt(in_time\\,0.6)"
+    elif fx in ("blur_punch", "tilt_in"):
+        z = "1+0.16*max(0\\,1-in_time/0.25)"
     pul = s.get("pulse") or []
     if pul:
         z += "+" + "+".join(f"0.05*exp(-pow((in_time-{p:.3f})/0.07\\,2))" for p in pul[:8])
     out = []
     if fx == "shake":
         out.append(f"crop={W}:{H}:x='(iw-ow)/2+if(lt(t\\,0.35)\\,{W * 0.018:.0f}*sin(t*95)\\,0)':y='(ih-oh)/2+if(lt(t\\,0.35)\\,{H * 0.012:.0f}*cos(t*80)\\,0)'")
+    if fx == "tilt_in":      # a small rotation that settles; the zoom above hides the corners
+        out.append("rotate=a='0.10*max(0\\,1-t/0.25)':c=black:ow=iw:oh=ih")
     if z != "1":
         out.append(f"zoompan=z='{z}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={fps}")
     if fx == "flash":
@@ -534,6 +567,29 @@ def _fx_chain(s: dict, W: int, H: int, fps: int) -> str:
         out.append(f"rgbashift=rh={W // 50}:gv=-{H // 120}:bh=-{W // 50}:enable='lt(t\\,0.14)',noise=alls=45:allf=t:enable='lt(t\\,0.14)'")
     elif fx == "blur_in":
         out.append("gblur=sigma=22:steps=2:enable='lt(t\\,0.12)'")
+    elif fx == "blur_punch":
+        out.append("gblur=sigma=30:steps=2:enable='lt(t\\,0.07)',gblur=sigma=12:steps=1:enable='between(t\\,0.07\\,0.16)'")
+    elif fx == "pixel_in":
+        out.append("pixelize=w=48:h=48:enable='lt(t\\,0.08)',pixelize=w=20:h=20:enable='between(t\\,0.08\\,0.16)'"
+                   if _has_filter("pixelize") else "gblur=sigma=22:steps=2:enable='lt(t\\,0.12)'")
+    elif fx == "bw_reveal":
+        out.append("hue=s='min(1\\,t/0.45)'")
+    elif fx == "spot_reveal":
+        out.append("vignette=a='max(0.001\\,1.5*max(0\\,1-t/0.45))':eval=frame")
+    elif fx == "hue_pop":
+        out.append("hue=h='140*max(0\\,1-t/0.3)'")
+    elif fx == "invert_flash":
+        out.append("negate=enable='lt(t\\,0.07)'")
+    elif fx == "strobe":
+        out.append("eq=brightness='0.22*lt(mod(t\\,0.1)\\,0.05)*lt(t\\,0.4)':eval=frame")
+    elif fx == "gold_flash":
+        out.append("fade=t=in:st=0:d=0.22:color=0xFFC46B")
+    elif fx == "vhs":
+        out.append(f"rgbashift=rh={max(2, W // 180)}:bh=-{max(2, W // 180)}:enable='lt(t\\,0.35)',noise=alls=22:allf=t:enable='lt(t\\,0.35)',"
+                   "eq=saturation=1.25:enable='lt(t\\,0.35)'")
+    elif fx in ("slide_left", "slide_up"):     # the cut slides in over black
+        pos = "x='-W*max(0\\,1-t/0.22)':y=0" if fx == "slide_left" else "x=0:y='H*max(0\\,1-t/0.22)'"
+        out.append(f"split[sla][slb];[sla]drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill[slk];[slk][slb]overlay={pos}")
     return ",".join(out)
 
 

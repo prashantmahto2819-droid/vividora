@@ -42,11 +42,15 @@
    "glitch",
    "rgb",
    "flash",
-   "zoom_punch"
+   "zoom_punch",
+   "vhs",
+   "strobe",
+   "invert_flash"
   ],
   "fx_soft": [
    "zoom_in",
-   "zoom_out"
+   "zoom_out",
+   "spot_reveal"
   ],
   "intro": false,
   "outro": true

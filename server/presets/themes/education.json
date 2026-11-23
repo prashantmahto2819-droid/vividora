@@ -34,7 +34,8 @@
   "max_cut": 2.0,
   "look": "grade:studio_clean",
   "fx_strong": [
-   "zoom_punch"
+   "zoom_punch",
+   "slide_left"
   ],
   "fx_soft": [
    "zoom_in"

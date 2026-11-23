@@ -42,11 +42,13 @@
   "look": "grade:epic_dark",
   "fx_strong": [
    "black_fade",
-   "zoom_in"
+   "zoom_in",
+   "blur_punch"
   ],
   "fx_soft": [
    "zoom_in",
-   "zoom_out"
+   "zoom_out",
+   "spot_reveal"
   ],
   "intro": true,
   "outro": true

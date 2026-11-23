@@ -41,7 +41,10 @@
   "fx_strong": [
    "zoom_punch",
    "shake",
-   "flash"
+   "flash",
+   "bounce",
+   "strobe",
+   "blur_punch"
   ],
   "fx_soft": [
    "zoom_in",

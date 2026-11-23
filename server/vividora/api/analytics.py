@@ -10,7 +10,7 @@ from .. import db, service
 from ..engine import analytics
 from ..engine.presets import caption_styles
 from ..publish.http import PublishError
-from .deps import ApiError, ok, require
+from .deps import ok, require
 
 
 def _rows(workspace_id: str, channel_id: str | None = None) -> list[dict]:

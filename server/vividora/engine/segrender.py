@@ -26,10 +26,10 @@ import time
 from pathlib import Path
 
 from . import effects as fx
-from . import ffmpeg, protools
+from . import ffmpeg
 from .autocut import keep_segments, remap_words, words_of
 from .encode import RENDER_VERSION
-from .render import _cut_points, _snap, out_timeline, render
+from .render import _cut_points, _snap, render
 
 log = logging.getLogger("vividora.segrender")
 

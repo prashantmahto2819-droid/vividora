@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import logging
 import urllib.request
-from datetime import datetime, timezone
 
 import numpy as np
 from PIL import Image, ImageStat

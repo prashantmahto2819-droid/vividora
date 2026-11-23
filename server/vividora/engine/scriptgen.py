@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from . import llm
 from .metadata import voice_text
-from .planner import FORMATS, parse_sections, structured
+from .planner import FORMATS, parse_sections
 
 # ---- script styles: each has its own section structure + prompt guidance ----
 

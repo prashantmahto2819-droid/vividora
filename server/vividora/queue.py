@@ -20,7 +20,6 @@ between users so one person's batch of renders doesn't starve others.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 
 from . import db

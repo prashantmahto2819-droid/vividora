@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import json
-import urllib.parse
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, Response

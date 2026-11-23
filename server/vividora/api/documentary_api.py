@@ -97,7 +97,8 @@ def _run(job_id: str, ws: str, user_id: str, p: dict):
                     used.add(m["id"])
                 elif p.get("ai_images") and aiimage.provider() and (sc.get("visual") or sc.get("narration")):
                     try:
-                        src, prov = aiimage.generate(aiimage.prompt_for(sc.get("visual"), sc["narration"]), work / f"ai{i}", size)
+                        src, prov = aiimage.generate(aiimage.prompt_for(sc.get("visual"), sc["narration"]), work / f"ai{i}",
+                                                         (size[0] * 1280 // max(size), size[1] * 1280 // max(size)))   # providers cap near 1280; the scene step upscales
                         kind = "image"
                         credits.append(f"scene {i + 1}: AI-generated image ({prov}) — synthetic")
                     except Exception as e:  # noqa: BLE001 — falls through to stock / title card

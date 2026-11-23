@@ -84,7 +84,8 @@ export function mount(root, project, ctx) {
   E.montage = project.kind === "montage";
   TABS = E.montage ? TABS_MONTAGE : TABS_ALL;
   if (E.montage) { E.tab = "montage"; E.mo = { mode: "auto", pace: "auto", effects_level: "auto", reframe: "smart", slowmo: true, clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07,
-    theme: "", theme_text: true, intro: false, outro: false, intro_text: "", outro_text: "", text_mode: "bars", pins: [], beat_only: false, keep_clip_audio: false, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); const sp = E.mo.plan; E.moSig = sp ? `${sp.music_start}|${(sp.segments || []).length}|${sp.total}|${sp.bpm}` : ""; }
+    theme: "", theme_text: true, intro: false, outro: false, intro_text: "", outro_text: "", text_mode: "bars", pins: [], beat_only: false, keep_clip_audio: false, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); if (E.mo.quality === "draft") E.mo.quality = "standard"; /* Draft is for one build only — Full HD is the default */ const sp = E.mo.plan; E.moSig = sp ? `${sp.music_start}|${(sp.segments || []).length}|${sp.total}|${sp.bpm}` : ""; }
+  if (E.rs?.export && E.rs.export.quality === "draft") E.rs.export.quality = "final";   // a fast 720p draft is a one-time choice; opening the project is back to Full HD
   E.speed = JSON.parse(JSON.stringify(project.edl?.speed || []));
   E.tr.segments = E.tr.segments || []; syncWords();
   E.locked = isLocked(project); if (E.locked) E.canEdit = false;
@@ -1503,7 +1504,7 @@ function renderPanel() {
     const vert = (S.presets?.platforms || []); const chosen = mo.clips.map((c) => lib.find((x) => x.id === c.id)).filter(Boolean);
     const looks = S.presets?.looks || []; const grades = Object.entries(S.presets?.catalog?.grade_presets || {}); const auto = mo.mode === "auto";
     const job = E.p.jobs?.find((j) => (j.kind === "montage" || j.kind === "montage_plan") && j.status === "running");
-    const pl = mo.plan; const FXL = { cut: "सीधा cut", zoom_punch: "Zoom punch", flash: "Flash", shake: "Shake", rgb: "RGB split", glitch: "Glitch", blur_in: "Blur in", zoom_in: "Zoom in", zoom_out: "Zoom out", white_fade: "White fade", black_fade: "Black fade" };
+    const pl = mo.plan; const FXL = { cut: "सीधा cut", zoom_punch: "Zoom punch", flash: "Flash", shake: "Shake", rgb: "RGB split", glitch: "Glitch", blur_in: "Blur in", zoom_in: "Zoom in", zoom_out: "Zoom out", white_fade: "White fade", black_fade: "Black fade", bw_reveal: "B&W से रंग (reveal)", spot_reveal: "Spotlight reveal", slide_left: "Slide (बाएँ से)", slide_up: "Slide (नीचे से)", tilt_in: "Tilt in", bounce: "Bounce", blur_punch: "Blur punch", pixel_in: "Pixel in", strobe: "Strobe", hue_pop: "Colour pop", invert_flash: "Negative flash", gold_flash: "Gold flash", vhs: "VHS" };
     const sel = (id, opts, v) => `<select id="${id}" ${dis}>${opts.map(([k, l]) => `<option value="${k}" ${String(v) === String(k) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
     const frm = (it, at) => it?.url ? (it.kind === "image" ? it.url : it.url.replace("/file?", "/frame?") + `&at=${(+at + 0.3).toFixed(2)}`) : "";
     const segRow = (sg, i) => { const it = libItem(sg.clip); const src = frm(it, sg.src_in); const tag = sg.intro ? " 🎬intro" : sg.outro ? " 🏁outro" : sg.ramp ? " 🎢ramp" : sg.pinned ? " 📌" : "";

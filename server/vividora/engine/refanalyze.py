@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import math
 import subprocess
-import tempfile
 from pathlib import Path
 
 import numpy as np
 
 from . import ffmpeg, musictag, scenes
-from .analyze import _video_stats, auto_grade
+from .analyze import _video_stats
 from .catalog import GRADE_PRESETS
 
 _GRADE_KEYS = ("exposure", "contrast", "saturation", "vibrance", "temperature", "tint", "highlights", "shadows")

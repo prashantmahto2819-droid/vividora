@@ -24,7 +24,8 @@ from .ffmpeg import still as _still
 FPS = 30
 PAD = 0.45          # seconds of air after each narrated scene
 MIN_SCENE = 2.8
-SIZES = {"landscape": (1280, 720), "portrait": (720, 1280), "square": (1080, 1080)}
+# Full HD by default — it is what YouTube / Instagram / Facebook show; 720p looks soft there
+SIZES = {"landscape": (1920, 1080), "portrait": (1080, 1920), "square": (1080, 1080)}
 
 _PROMPT = """You are a documentary writer. Topic: {topic}
 {facts}

@@ -20,3 +20,5 @@ __pycache__/
 server/media/
 server/data/
 server/models/
+.auto-update.lock
+.auto-update.failed

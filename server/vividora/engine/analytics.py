@@ -8,9 +8,7 @@ length / zoom / look — each group gets an index (1.0 = average).
 
 from __future__ import annotations
 
-import json
 import math
-import urllib.parse
 from datetime import datetime, timezone
 
 from datetime import timedelta

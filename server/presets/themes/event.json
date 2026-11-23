@@ -36,11 +36,16 @@
   "fx_strong": [
    "zoom_punch",
    "blur_in",
-   "flash"
+   "flash",
+   "blur_punch",
+   "gold_flash",
+   "tilt_in"
   ],
   "fx_soft": [
    "zoom_in",
-   "zoom_out"
+   "zoom_out",
+   "bw_reveal",
+   "spot_reveal"
   ],
   "intro": true,
   "outro": true

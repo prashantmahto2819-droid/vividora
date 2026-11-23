@@ -76,6 +76,15 @@ def units():
     for dens in ("low", "normal", "high"):
         used |= {s["id"] for s in autosfx.plan(fx2, big, out_dur=60, cut_times=[46.0, 50.0, 54.0], density=dens)}
     check("uses many different sounds, not the same two", len(used) >= 7, sorted(used))
+    # a long video with many titles walks through the whole title family instead of alternating two sounds
+    many = {"titles": [{"text": str(i), "start": 5 + i * 4, "end": 7 + i * 4} for i in range(10)], "broll": [], "sfx": []}
+    seq = [s["id"] for s in autosfx.plan(many, big, out_dur=120, density="high") if s["auto"] == "title"]
+    check("title sounds rotate through 3+ different sounds", len(set(seq)) >= 3 and all(a != b for a, b in zip(seq, seq[1:])), seq)
+    # every sound a family names exists in the bundled starter pack
+    have = {f.stem.replace("_", " ") for f in (HERE / "starter" / "sfx").iterdir()}
+    missing = sorted({n for names, _, _ in autosfx.FAMILIES.values() for n in names} - have)
+    check("all family sounds ship in the starter pack", not missing, missing)
+    check("starter pack has 60+ sound effects", len(have) >= 60, len(have))
     ap = autosfx.apply(eff, lib, out_dur=60)
     again = autosfx.apply(ap, lib, out_dur=60)
     check("apply is idempotent (replaces only asfx_)", [s["_id"] for s in ap["sfx"]] == [s["_id"] for s in again["sfx"]])

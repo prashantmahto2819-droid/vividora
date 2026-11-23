@@ -37,7 +37,10 @@
    "zoom_punch",
    "flash",
    "shake",
-   "rgb"
+   "rgb",
+   "strobe",
+   "hue_pop",
+   "bounce"
   ],
   "fx_soft": [
    "zoom_in",

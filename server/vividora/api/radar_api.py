@@ -6,7 +6,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.routing import Route
 
-from .. import db, radar_job, service
+from .. import db, radar_job
 from ..config import settings
 from ..engine import radar
 from .channels import get_channel

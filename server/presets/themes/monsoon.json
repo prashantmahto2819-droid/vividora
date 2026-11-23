@@ -41,7 +41,8 @@
   ],
   "fx_soft": [
    "zoom_in",
-   "zoom_out"
+   "zoom_out",
+   "bw_reveal"
   ],
   "intro": true,
   "outro": true

@@ -37,7 +37,8 @@
   "look": "grade:food_warm",
   "fx_strong": [
    "zoom_punch",
-   "flash"
+   "flash",
+   "gold_flash"
   ],
   "fx_soft": [
    "zoom_in",

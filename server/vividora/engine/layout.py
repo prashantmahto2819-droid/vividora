@@ -16,9 +16,7 @@ instead of a hard cut.  feather_px controls the blur width (0 = sharp edge).
 
 from __future__ import annotations
 
-from pathlib import Path
 
-from .ffmpeg import escape_filter_path
 
 # --- layout mode catalog ---------------------------------------------------
 

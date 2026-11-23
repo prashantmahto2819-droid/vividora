@@ -14,7 +14,7 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, RedirectResponse
+from starlette.responses import FileResponse, HTMLResponse
 from starlette.routing import Route
 
 from .. import db, queue, service, storage, thumbs

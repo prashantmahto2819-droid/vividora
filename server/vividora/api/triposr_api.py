@@ -8,17 +8,15 @@ POST /triposr/jobs/{id}/cancel   cancel a running job
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 import uuid
 from pathlib import Path
 
 from starlette.requests import Request
-from starlette.responses import FileResponse
 from starlette.routing import Route
 
-from .. import config, db, queue, service
+from .. import db, service
 from ..engine import triposr
 from .deps import ApiError, body, ok, require
 from .library import _view

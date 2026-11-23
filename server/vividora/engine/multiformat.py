@@ -21,8 +21,6 @@ The engine never re-runs face detection: it reads the keyframes already in
 from __future__ import annotations
 
 import logging
-import math
-from pathlib import Path
 
 log = logging.getLogger("vividora.multiformat")
 

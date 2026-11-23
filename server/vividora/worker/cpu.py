@@ -715,8 +715,29 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
         raise ValueError(f"unknown job kind {kind}")
 
 
+def sweep_tmp(max_age_hours: float = 6.0) -> int:
+    """Delete work folders (vividora_*) left in the temp dir by a job that was killed or crashed — each can hold the
+    source video and half-made renders. Only folders nobody touched for max_age_hours go. Returns how many were removed."""
+    import shutil
+    import time
+    n = 0
+    limit = time.time() - max_age_hours * 3600
+    for d in Path(tempfile.gettempdir()).glob("vividora_*"):
+        try:
+            newest = max([d.stat().st_mtime] + [f.stat().st_mtime for f in d.rglob("*")])
+            if d.is_dir() and newest < limit:
+                shutil.rmtree(d, ignore_errors=True)
+                n += 1
+        except OSError:
+            continue
+    return n
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    swept = sweep_tmp()
+    if swept:
+        log.info("removed %s old work folder(s) from the temp dir", swept)
     base = os.getenv("API_URL", "http://127.0.0.1:8000")
     token = os.getenv("WORKER_TOKEN", "dev-worker-token")
     name = os.getenv("WORKER_NAME", f"cpu@{socket.gethostname()}")

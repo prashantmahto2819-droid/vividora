@@ -22,15 +22,15 @@ DENSITY = {"low": (4, 1.6, False), "normal": (8, 1.0, False), "high": (14, 0.6, 
 
 # event → (sound-name candidates in preference order, base volume, lead-in seconds)
 FAMILIES: dict[str, tuple[tuple[str, ...], float, float]] = {
-    "title": (("pop", "pop soft", "click"), 0.55, 0.0),
+    "title": (("pop", "pop soft", "pop high", "click", "text blip"), 0.55, 0.0),
     "sticker": (("pop", "bubble pop", "pop soft", "ding"), 0.5, 0.0),
-    "broll": (("whoosh", "whoosh soft", "swipe", "swoosh long"), 0.5, 0.12),
-    "photo": (("camera shutter", "slide", "whoosh soft"), 0.45, 0.0),         # a still picture as B-roll
-    "cta": (("ding", "notification", "bell chime"), 0.5, 0.0),               # subscribe / follow / bell popups
-    "hook": (("impact boom", "hit deep", "drop bass"), 0.6, 0.0),            # the opening title of the video
-    "transition": (("swipe", "whoosh fast", "whoosh"), 0.45, 0.10),
-    "glitch": (("glitch", "whoosh fast", "swipe"), 0.4, 0.05),               # cuts when the transition is a glitch
-    "cut": (("tick", "click"), 0.3, 0.0),
+    "broll": (("whoosh", "whoosh soft", "swipe", "swoosh long", "whoosh deep"), 0.5, 0.12),
+    "photo": (("camera shutter", "slide", "page flip", "whoosh soft"), 0.45, 0.0),         # a still picture as B-roll
+    "cta": (("ding", "notification", "bell chime", "notification soft", "success chime", "coin"), 0.5, 0.0),               # subscribe / follow / bell popups
+    "hook": (("impact boom", "hit deep", "drop bass", "braam", "bass hit", "stinger"), 0.6, 0.0),            # the opening title of the video
+    "transition": (("swipe", "whoosh fast", "swoosh up", "swoosh down", "whoosh"), 0.45, 0.10),
+    "glitch": (("glitch", "zap", "whoosh fast", "swipe"), 0.4, 0.05),               # cuts when the transition is a glitch
+    "cut": (("tick", "click", "click soft", "snap"), 0.3, 0.0),
     "hit": (("impact boom", "hit deep", "drop bass"), 0.6, 0.0),
 }
 
@@ -99,6 +99,7 @@ def plan(effects: dict, library: list[dict], *, out_dur: float, cut_times: list[
     chosen: list[dict] = []
     times: list[float] = []
     last_name: dict[str, str] = {}
+    turn: dict[str, int] = {}
     budget = max(1, int(round(per_min * out_dur / 60.0)) + 1)
     # important events first when the budget is tight, but keep timeline order in the result
     ranked = sorted(events(effects, cut_times, library), key=lambda e: -e[2])
@@ -117,7 +118,8 @@ def plan(effects: dict, library: list[dict], *, out_dur: float, cut_times: list[
         at = max(0.0, t - lead)
         if at >= out_dur - 0.2 or not free_at(at, times):
             continue
-        pick = next((n for n in avail if n != last_name.get(kind)), avail[0])
+        turn[kind] = turn.get(kind, -1) + 1           # walk through the whole family, so a long video does not ping-pong two sounds
+        pick = avail[turn[kind] % len(avail)]
         last_name[kind] = pick
         times.append(at)
         chosen.append({"_id": f"{PREFIX}{len(chosen)}_{kind}", "id": lib[pick], "at": round(at, 3),

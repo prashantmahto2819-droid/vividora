@@ -34,7 +34,8 @@
   "max_cut": 2.0,
   "look": "grade:rec709",
   "fx_strong": [
-   "flash"
+   "flash",
+   "slide_left"
   ],
   "fx_soft": [
    "zoom_in"

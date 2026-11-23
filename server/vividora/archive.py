@@ -21,7 +21,6 @@ import os
 import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from . import db, storage
 from .config import settings

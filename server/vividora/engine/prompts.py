@@ -12,7 +12,6 @@ set; otherwise topic rules build them.
 
 from __future__ import annotations
 
-import re
 
 from . import llm, shorts
 

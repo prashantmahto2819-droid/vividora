@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 from starlette.requests import Request
 from starlette.routing import Route
