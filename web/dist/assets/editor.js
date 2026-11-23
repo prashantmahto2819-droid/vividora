@@ -2864,7 +2864,8 @@ const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook",
 function exportSig() {
   const p = E.p; const job = p.jobs?.find((j) => j.kind === "render" && ["running", "queued"].includes(j.status));
   return JSON.stringify([p.status, job ? [job.id, job.status] : 0, p.assets.filter((a) => ["render", "subtitle"].includes(a.kind)).map((a) => [a.id, a.meta?.signature || ""]),
-    (E.pubs || []).map((x) => [x.id, x.status]), (p.meta?.publish_plan || []).length, p.meta?.archived_at || "", JSON.stringify(p.render_sigs || {}), !!E.pubFor]);
+    (E.pubs || []).map((x) => [x.id, x.status]), (p.meta?.publish_plan || []).length, p.meta?.archived_at || "", JSON.stringify(p.render_sigs || {}), !!E.pubFor,
+    (p.jobs || []).filter((j) => ["montage", "montage_plan"].includes(j.kind) && ["running", "queued"].includes(j.status)).map((j) => j.id)]);
 }
 function renderExport(fromPoll) {
   const m = $("#ed-modal", E.root); const { esc, S, api, toast, load } = E.ctx; const p = E.p;
@@ -2886,6 +2887,13 @@ function renderExport(fromPoll) {
   m.innerHTML = `<div class="modal exportbox"><div class="row between"><h2>Export</h2><button class="ibtn" id="mx">✕</button></div>
     <p class="small muted">${esc(summary)} · output ${fmt(outDur())}</p>
     ${E.montage ? "" : exportAdvHtml().split("\u0000")[0]}
+    ${E.montage && E.mo ? (() => { const mo = E.mo; const o = (v, cur, l) => `<option value="${v}" ${String(cur || "") === String(v) ? "selected" : ""}>${l}</option>`; const dis = E.canEdit ? "" : "disabled";
+      const plats = (S.presets?.platforms || []); const busy = p.jobs?.some((j) => ["montage", "montage_plan"].includes(j.kind) && ["running", "queued"].includes(j.status));
+      return `<div class="box" id="mox-main" style="margin:.4rem 0"><b>Video का size और quality</b>
+        <div class="irow" style="margin-top:.4rem">${field("Format (platform)", `<select id="mox-preset" ${dis}>${plats.map((x) => o(x.id, mo.preset, esc(x.label))).join("")}</select>`)}
+          ${field("Size (pixel)", `<select id="mox-size" ${dis}>${o("", mo.size, "platform की (default)")}${o("720p", mo.size, "720p")}${o("1080p", mo.size, "1080p (Full HD)")}${o("1440p", mo.size, "1440p (2K)")}${o("2160p", mo.size, "2160p (4K)")}</select>`)}
+          ${field("Quality", `<select id="mox-quality" ${dis}>${o("draft", mo.quality || "standard", "Draft — 720p, जल्दी")}${o("standard", mo.quality || "standard", "Standard")}${o("high", mo.quality || "standard", "High — सबसे साफ़, धीमा")}</select>`)}</div>
+        <div class="row" style="margin-top:.5rem;gap:.5rem;flex-wrap:wrap"><button class="btn primary" id="mox-go" ${dis} ${busy ? "disabled" : ""}>${busy ? "बन रहा है…" : "इन settings से video बनाओ"}</button><span class="small muted">cut और effects वही रहते हैं, सिर्फ़ size / quality / format बदलता है। Draft में size हमेशा 720p रहता है।</span></div></div>`; })() : ""}
     ${E.montage ? "" : `<div class="box pfbox"><div class="row between"><b>✈ Platform check</b><button class="btn small quiet" id="pf-run">जाँचें</button></div><div id="pf-list" class="small">${pfHtml()}</div></div>`}
     ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए <button class="btn small quiet" id="prs-all" style="margin-left:.5rem;padding:2px 8px;font-size:.75rem">सब चुनें</button><button class="btn small quiet" id="prs-none" style="padding:2px 8px;font-size:.75rem">कोई नहीं</button></label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
     <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option><option value="auto" ${E.rs.focus_x === "auto" ? "selected" : ""}>🎯 Auto (smart)</option></select>`)}<button class="btn small quiet" id="mf-analyze" title="AI-powered per-format smart reframing analysis">🎯 Analyze</button></div>
@@ -2917,6 +2925,11 @@ function renderExport(fromPoll) {
   const prsAll = $("#prs-all", m); if (prsAll) prsAll.onclick = () => { $$(".chip input[name=preset]", m).forEach((i) => { i.checked = true; i.closest(".chip").classList.add("on"); }); exportEstimate(m); };
   const prsNone = $("#prs-none", m); if (prsNone) prsNone.onclick = () => { $$(".chip input[name=preset]", m).forEach((i) => { i.checked = false; i.closest(".chip").classList.remove("on"); }); exportEstimate(m); };
   bindExportAdv(m);
+  { const go = $("#mox-go", m); if (go) { const mo = E.mo; const rd = () => { mo.preset = $("#mox-preset", m).value || mo.preset; mo.size = $("#mox-size", m).value; mo.quality = $("#mox-quality", m).value; };
+    ["#mox-preset", "#mox-size", "#mox-quality"].forEach((q) => { const el = $(q, m); if (el) el.onchange = () => { rd(); if (E.tab === "montage") renderPanel(); }; });
+    go.onclick = async () => { rd(); if (!mo.clips.length) return toast("पहले clips डालें"); if (!mo.music) return toast("song/music चुनें");
+      const body = { ...mo, texts: String(mo.texts || "").split("\n").map((x) => x.trim()).filter(Boolean), ...(mo.mode === "auto" ? (mo.plan ? { mode: "auto", replan: false, plan: mo.plan } : { mode: "auto", replan: true, auto_render: true, plan: null }) : { mode: "classic" }) };
+      go.disabled = true; try { await api("POST", `/projects/${E.pid}/montage`, body); E.moDirty = false; toast("video बन रहा है 🎬"); await load(); } catch (err) { toast(err.message); go.disabled = false; } }; } }
   const mfBtn = $("#mf-analyze", m); if (mfBtn) mfBtn.onclick = async () => {
     mfBtn.disabled = true; mfBtn.textContent = "analyzing…";
     try { const presets = $$("input[name=preset]:checked", m).map((i) => i.value);

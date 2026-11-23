@@ -965,6 +965,7 @@ def request_montage(c, project: dict, opts: dict) -> dict:
                "reframe": opts.get("reframe") or "smart", "slowmo": bool(opts.get("slowmo", True)),
                "auto_render": bool(opts.get("auto_render", False)),
                "look_feel": opts.get("look_feel") if opts.get("look_feel") in ("light_vivid", "bright_clean", "soft_light", "punchy", "theme_lite") else "",
+               "size": opts.get("size") if opts.get("size") in ("720p", "1080p", "1440p", "2160p") else "",
                "quality": opts.get("quality") if opts.get("quality") in ("draft", "standard", "high") else "standard",
                # upgrade: theme feel, pinned clips, on-beat words, intro/outro
                "theme": theme["id"] if theme else "", "theme_opts": themes_eng.montage_opts(theme) if theme else {},

@@ -208,10 +208,17 @@ def _qa(project: dict, p: dict, preset: dict, vid: dict, out: dict) -> dict:
                     encoder_preset=os.getenv("X264_PRESET") or None)
 
 
-def _montage_quality(preset: dict, quality: str | None) -> tuple[dict, str | None]:
+_MONTAGE_SIZES = {"720p": 720, "1080p": 1080, "1440p": 1440, "2160p": 2160}
+
+
+def _montage_quality(preset: dict, quality: str | None, size: str | None = None) -> tuple[dict, str | None]:
     """Montage export quality → (platform preset to render with, x264 preset override).
     draft: 720p + fast encode (to check the cut quickly) · standard: the platform's own settings · high: sharper, slower."""
     env = os.getenv("X264_PRESET") or None
+    if size in _MONTAGE_SIZES and quality != "draft":       # chosen pixel size: the short side becomes 720 / 1080 / 1440 / 2160
+        w, h = int(preset["width"]), int(preset["height"])
+        k = _MONTAGE_SIZES[size] / min(w, h)
+        preset = {**preset, "width": int(round(w * k)) // 2 * 2, "height": int(round(h * k)) // 2 * 2}
     if quality == "draft":
         w, h = int(preset["width"]), int(preset["height"])
         k = 720 / min(w, h)
@@ -534,7 +541,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 except Exception:  # noqa: BLE001
                     pass
             wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None
-            preset, enc_preset = _montage_quality(platform(p.get("preset", "ig-reel")), p.get("quality"))
+            preset, enc_preset = _montage_quality(platform(p.get("preset", "ig-reel")), p.get("quality"), p.get("size"))
             texts = list(p.get("texts") or [])
             if p.get("text_mode") == "names" or (p.get("text_mode") == "beats" and not texts):
                 # words from the clip names: "bike_ride.mp4" → "bike ride"
@@ -573,7 +580,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 clips.append({"path": path, "type": kind_, "duration": item.get("duration")})
             music = client.download_library(p["music"], lib / p["music"])
             wm = client.download_library(p["watermark"], lib / p["watermark"]) if p.get("watermark") else None
-            preset, enc_preset = _montage_quality(platform(p.get("preset", "ig-reel")), p.get("quality"))
+            preset, enc_preset = _montage_quality(platform(p.get("preset", "ig-reel")), p.get("quality"), p.get("size"))
             out = montage.render(clips=clips, music=music, out_dir=tmp / "out", name=preset["id"], preset=preset,
                                  texts=p.get("texts") or [], look=p.get("look", "none"), every=int(p.get("every", 2)),
                                  max_seconds=float(p.get("max_seconds", 30)), flash=bool(p.get("flash", True)),
