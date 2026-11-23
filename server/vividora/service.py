@@ -318,6 +318,12 @@ def after_job(c, job: dict, result: dict) -> None:
                 queue.enqueue(c, pid, "autocut", {"options": project.get("settings", {}).get("autocut", {})})
             else:
                 set_status(c, pid, "review_cuts", "3D explainer तैयार — captions script से; render करें")
+        elif (project.get("settings") or {}).get("as_is"):
+            # a finished video opened for more editing (a montage → full editor): keep every frame, no auto-cut, no Whisper
+            meta["transcript_skipped"] = True
+            db.update(c, "projects", pid, {"meta": meta, "transcript": dict(SKIPPED_TRANSCRIPT),
+                                           "edl": autocut.build_edl({"segments": []}, float(meta.get("duration") or 0)), "updated_at": db.now()})
+            set_status(c, pid, "review_cuts", "तैयार — text, sticker, sound, B-roll, effect जो चाहें जोड़ें")
         elif skip:
             # "Transcript छोड़ें": no speech-to-text — cuts from silence + scene changes, captions/AI text later on request
             meta["transcript_skipped"] = True
@@ -989,6 +995,12 @@ def request_montage(c, project: dict, opts: dict) -> dict:
             kind = "montage_plan"
         else:
             payload["plan"] = _clean_plan(opts["plan"])
+            # a cut may only use a clip that is part of this montage (the worker downloads exactly those)
+            known = {cl["id"] for cl in clips}
+            payload["plan"]["segments"] = [s for s in payload["plan"]["segments"] if s["clip"] in known]
+            payload["plan"]["total"] = round(sum(s["dur"] for s in payload["plan"]["segments"] if s["keep"]), 3)
+            if not any(s["keep"] for s in payload["plan"]["segments"]):
+                raise ValueError("plan में कोई cut नहीं बचा — कम से कम एक cut रखें")
     if kind == "montage_plan":
         payload.pop("plan", None)
     elif payload["mode"] != "auto":

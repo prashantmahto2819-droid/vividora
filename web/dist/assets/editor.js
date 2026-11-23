@@ -149,7 +149,7 @@ function update(project) {
     const rsig = activeJobs(project).map(jobRange).filter(Boolean).map((r) => `${r.start}-${r.end}`).join(",");
     if (rsig !== (E.rangeSig || "") || finished.length) { E.rangeSig = rsig; if (E.tab === "captions") { const pn = $("#ed-panel", E.root); const sc = pn.scrollTop; renderPanel(); pn.scrollTop = sc; } renderTimeline(); if (E.sel?.type === "caption") renderInspector(); }
   }
-  if (E.montage) { const sp = project.settings?.montage?.plan; const sig = sp ? `${sp.music_start}|${(sp.segments || []).length}|${sp.total}|${sp.bpm}` : ""; if (sig !== E.moSig) { E.moSig = sig; if (sp && !E.moDirty) E.mo.plan = sp; } }
+  if (E.montage) { const sp = project.settings?.montage?.plan; const sig = sp ? `${sp.music_start}|${(sp.segments || []).length}|${sp.total}|${sp.bpm}` : ""; if (sig !== E.moSig) { E.moSig = sig; if (sp && !E.moDirty) { E.mo.plan = sp; E.moLast = ""; E.moHist = []; E.moRedo = []; if (E.moSel != null && E.moSel >= sp.segments.length) E.moSel = null; renderTimeline(); renderInspector(); } } }
   if (E.montage) { const r = project.assets.find((a) => a.kind === "render"); const v = $("#pv", E.root); if (r && v && !v.src.includes(r.id)) { v.src = r.url; E.dur = project.meta?.duration || E.dur; renderTimeline(); } if (E.tab === "montage") renderPanel(); }
   const fresh = JSON.stringify(project.meta?.shorts || []);
   if (fresh !== E.shortsSeen) { E.shortsSeen = fresh; if (!E.shortsDirty) { E.shorts = JSON.parse(fresh); if (E.tab === "shorts") renderPanel(); renderTimeline(); } }
@@ -519,6 +519,14 @@ function showKeys() {
 function onKey(e) {
   if (!E || e.target.closest("input,textarea,select,[contenteditable=true]")) return;
   if (PRO.onKey(e)) return;
+  if (E.montage && moPlan()) { const pl = moPlan(); const i = E.moSel; const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); return moUndo(); }
+    if (mod && (e.key === "y" || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); return moUndo(true); }
+    if (i != null && E.canEdit && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); return moOp("keep", i, false); }
+    if (i != null && E.canEdit && mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); return moOp("dup", i); }
+    if (i != null && E.canEdit && !mod && (e.key === "s" || e.key === "S" || e.key === "c" || e.key === "C")) { e.preventDefault(); return moOp("split", i); }
+    if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return moSelect(clamp((i ?? -1) + (e.key === "ArrowRight" ? 1 : -1), 0, pl.segments.length - 1)); }
+    if (e.key === "Escape" && i != null && !E.exportOpen) { e.preventDefault(); return moSelect(null); } }
   const v = $("#pv", E.root); const fps = E.p.meta?.fps || 30;
   if (e.key === "?" || (e.shiftKey && e.key === "/")) { e.preventDefault(); return showKeys(); }
   if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { if (PRO.jumpKey(e.key === "ArrowRight" ? 1 : -1)) { e.preventDefault(); return; } }
@@ -772,6 +780,7 @@ function splitItem(it, type) {
   const b = { ...JSON.parse(JSON.stringify(it)), _id: uid(), start: ot }; it.end = ot; ({ title: fx.titles, broll: fx.broll, fxclip: fx.fxclips })[type].push(b); return b;
 }
 function tool(name) {
+  if (E.montage && ["split", "dup", "del", "video", "crop", "rot", "mirror"].includes(name)) { if (!moPlan() || E.moSel == null) return E.ctx.toast("पहले timeline में कोई cut चुनें"); if (name === "split") moOp("split", E.moSel); else if (name === "dup") moOp("dup", E.moSel); else if (name === "del") moOp("keep", E.moSel, false); return; }
   const fx = E.rs.effects; const sel = E.sel; const it = sel && selItem();
   if (name === "full") return toggleFull();
   if (name === "fit") { const sc = $("#tl-scroll", E.root); E.pps = Math.max(4, Math.min(160, (sc.clientWidth - 140) / Math.max(1, E.dur))); const z = $("#tl-zoom", E.root); if (z) z.value = E.pps; renderTimeline(); return; }
@@ -1181,7 +1190,7 @@ function renderInspector() {
 function _renderInspector() {
   const ins = $("#inspector", E.root); const { esc } = E.ctx; let it = selItem(); const dis = E.canEdit ? "" : "disabled";
   if (!E.sel || !it) {
-    if (E.montage) { ins.innerHTML = `<h3>Montage</h3><div class="ikv"><span>लंबाई</span><b>${fmt(E.p.meta?.duration || 0)}</b></div><div class="ikv"><span>BPM</span><b>${E.p.meta?.bpm || "—"}</b></div><div class="ikv"><span>cuts</span><b>${E.p.meta?.segments || "—"}</b></div><p class="small muted" style="margin-top:1rem">clips/music/text बाएँ panel में बदलकर "Montage बनाएँ" दबाएँ; फिर Export से download/publish।</p>`; return; }
+    if (E.montage) return moInspector(ins);
     ins.innerHTML = `<h3>Project</h3><div class="ikv"><span>लंबाई</span><b>${fmt(E.dur)} → ${fmt(outDur())}</b></div><div class="ikv"><span>कट</span><b>${E.cuts.filter((c) => c.enabled !== false).length}</b></div>
       <div class="ikv"><span>भाषा</span><b>${{ hi: "हिंदी", en: "English", auto: "पहचान बाकी" }[E.p.language] || E.p.language}</b></div><div class="ikv"><span>source</span><b>${E.p.meta?.width}×${E.p.meta?.height} · ${E.p.meta?.fps} fps</b></div>
       <p class="small muted" style="margin-top:1rem">timeline पर किसी कट, caption, title या B-roll पर क्लिक करें — उसकी settings यहाँ आएँगी।<br><br><b>Keys:</b> Space चलाएँ · I/O हिस्सा चुनें · X हटाएँ · ←/→ frame · Del चुना हुआ हटाएँ · Ctrl+Z/Y undo/redo · Ctrl+S सेव · M marker · K keyframe · <b>?</b> सारे shortcuts</p>
@@ -1543,7 +1552,7 @@ function renderPanel() {
     const vert = (S.presets?.platforms || []); const chosen = mo.clips.map((c) => lib.find((x) => x.id === c.id)).filter(Boolean);
     const looks = S.presets?.looks || []; const grades = Object.entries(S.presets?.catalog?.grade_presets || {}); const auto = mo.mode === "auto";
     const job = E.p.jobs?.find((j) => (j.kind === "montage" || j.kind === "montage_plan") && j.status === "running");
-    const pl = mo.plan; const FXL = { cut: "सीधा cut", zoom_punch: "Zoom punch", flash: "Flash", shake: "Shake", rgb: "RGB split", glitch: "Glitch", blur_in: "Blur in", zoom_in: "Zoom in", zoom_out: "Zoom out", white_fade: "White fade", black_fade: "Black fade", bw_reveal: "B&W से रंग (reveal)", spot_reveal: "Spotlight reveal", slide_left: "Slide (बाएँ से)", slide_up: "Slide (नीचे से)", tilt_in: "Tilt in", bounce: "Bounce", blur_punch: "Blur punch", pixel_in: "Pixel in", strobe: "Strobe", hue_pop: "Colour pop", invert_flash: "Negative flash", gold_flash: "Gold flash", vhs: "VHS" };
+    const pl = mo.plan; const FXL = MOFX;
     const sel = (id, opts, v) => `<select id="${id}" ${dis}>${opts.map(([k, l]) => `<option value="${k}" ${String(v) === String(k) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
     const frm = (it, at) => it?.url ? (it.kind === "image" ? it.url : it.url.replace("/file?", "/frame?") + `&at=${(+at + 0.3).toFixed(2)}`) : "";
     const segRow = (sg, i) => { const it = libItem(sg.clip); const src = frm(it, sg.src_in); const tag = sg.intro ? " 🎬intro" : sg.outro ? " 🏁outro" : sg.ramp ? " 🎢ramp" : sg.pinned ? " 📌" : "";
@@ -1868,9 +1877,9 @@ function bindPanel() {
     on("#mo-auto", "onclick", () => send({ mode: "auto", replan: true, auto_render: true, plan: null }, "clips देखे जा रहे हैं → plan → video ⏳"));
     on("#mo-plan", "onclick", () => send({ mode: "auto", replan: true, auto_render: false, plan: null }, "beat plan बन रहा है ⏳"));
     on("#mo-rerender", "onclick", () => send({ mode: "auto", replan: false, plan: mo.plan }, "आपके plan से video बन रहा है 🎬"));
-    const pl = mo.plan; const dirty = () => { E.moDirty = true; renderPanel(); };
+    const pl = mo.plan; const dirty = () => moTouch();
     if (pl) {
-      $$("[data-mosel]", panel).forEach((li) => (li.onclick = (e) => { if (e.target.closest("select,button,input")) return; E.moSel = +li.dataset.mosel; renderPanel(); }));
+      $$("[data-mosel]", panel).forEach((li) => (li.onclick = (e) => { if (e.target.closest("select,button,input")) return; moSelect(+li.dataset.mosel); }));
       $$("[data-mokeep]", panel).forEach((c) => (c.onchange = () => { pl.segments[+c.dataset.mokeep].keep = c.checked; dirty(); }));
       // move the boundary between cut i and i+1 by a quarter beat (total length and the beat grid after them stay)
       $$("[data-mobd]", panel).forEach((b) => (b.onclick = () => { const [i, d] = b.dataset.mobd.split(":").map(Number); const a = pl.segments[i], n = pl.segments[i + 1]; if (!a || !n) return;
@@ -1973,7 +1982,7 @@ function injectFonts() {
   if (!st) { st = document.createElement("style"); st.id = "vivid-user-fonts"; document.head.appendChild(st); }
   st.textContent = fonts.map((f) => `@font-face{font-family:"${(f.meta?.family || f.name).replace(/"/g, "")}";src:url("${f.url}");}`).join("\n");
 }
-async function loadLib() { try { E.lib = await E.ctx.api("GET", "/library"); } catch { E.lib = []; } injectFonts(); if (E && ["media", "audio", "overlay", "montage"].includes(E.tab)) renderPanel(); else renderOverlay(); }
+async function loadLib() { try { E.lib = await E.ctx.api("GET", "/library"); } catch { E.lib = []; } injectFonts(); if (E && E.montage) { renderTimeline(); renderInspector(); } if (E && ["media", "audio", "overlay", "montage"].includes(E.tab)) renderPanel(); else renderOverlay(); }
 async function libUpload(kind, file) {
   const { toast } = E.ctx; const prog = $("#lib-progress", E.root) || document.createElement("div");
   prog.innerHTML = `<p class="small muted">${file.name} upload हो रहा…</p><div class="progress"><i style="width:30%"></i></div>`;
@@ -2730,9 +2739,146 @@ function rowsOf(items, span) {
 }
 const LANE_H = 46;
 function fxClipLabel(c) { return c.kind === "filter" ? (E.ctx.S.presets?.catalog?.grade_presets?.[c.preset]?.label || "Filter") : (fxDef(c.id)?.label || c.id); }
+// ── Montage timeline ─────────────────────────────────────────────────────────────────────────────
+// After the auto beat-edit every cut is a block: pick, drag to another place, trim on the beat grid, change the clip /
+// the part / effect / speed / focus, duplicate, split, add a new cut, remove or bring back. Undo with Ctrl+Z.
+const MOFX = { cut: "सीधा cut", zoom_punch: "Zoom punch", flash: "Flash", shake: "Shake", rgb: "RGB split", glitch: "Glitch", blur_in: "Blur in", zoom_in: "Zoom in", zoom_out: "Zoom out", white_fade: "White fade", black_fade: "Black fade", bw_reveal: "B&W से रंग (reveal)", spot_reveal: "Spotlight reveal", slide_left: "Slide (बाएँ से)", slide_up: "Slide (नीचे से)", tilt_in: "Tilt in", bounce: "Bounce", blur_punch: "Blur punch", pixel_in: "Pixel in", strobe: "Strobe", hue_pop: "Colour pop", invert_flash: "Negative flash", gold_flash: "Gold flash", vhs: "VHS" };
+function moPlan() { const pl = E.montage && E.mo?.plan; return pl && Array.isArray(pl.segments) && pl.segments.length ? pl : null; }
+function moFrame(it, at) { return it?.url ? (it.kind === "image" ? it.url : it.url.replace("/file?", "/frame?") + `&at=${(+at + 0.3).toFixed(2)}`) : ""; }
+function moStarts(pl) { let t = 0; return pl.segments.map((s) => { const a = t; if (s.keep !== false) t += +s.dur; return a; }); }
+function moTotal(pl) { return pl.segments.reduce((a, s) => a + (s.keep !== false ? +s.dur : 0), 0); }
+function moQ(pl) { return +Math.max(0.1, (pl.period || 0.5) / 4).toFixed(3); }
+function moSrcMax(sg) { const it = libItem(sg.clip); if (!it || it.kind === "image") return 0; const d = +it.meta?.duration || 0; return d ? Math.max(0, d - sg.dur * (sg.speed || 1) - 0.05) : 0; }
+function moFit(sg) { const it = libItem(sg.clip); sg.kind = it?.kind === "image" ? "image" : "video"; if (sg.kind === "image") { sg.src_in = 0; sg.speed = 1; return; } const mx = moSrcMax(sg); const d = +it?.meta?.duration || 0; if (d) sg.src_in = +clamp(+sg.src_in || 0, 0, mx).toFixed(2); }
+function moSnapStr() { const pl = moPlan(); return pl ? JSON.stringify({ s: pl.segments, a: pl.alts || [] }) : ""; }
+function moTouch() {   // call after any change to the plan
+  const now = moSnapStr(); if (E.moLast && E.moLast === now) return moRefresh();   // nothing really changed
+  if (E.moLast && E.moLast !== now) { (E.moHist = E.moHist || []).push(E.moLast); if (E.moHist.length > 80) E.moHist.shift(); E.moRedo = []; }
+  E.moLast = now; E.moDirty = true; const pl = moPlan(); if (pl && E.moSel != null) E.moSel = pl.segments.length ? clamp(E.moSel, 0, pl.segments.length - 1) : null;
+  moRefresh();
+}
+function moRefresh() { renderTimeline(); renderInspector(); if (E.tab === "montage") { const pn = $("#ed-panel", E.root); const sc = pn?.scrollTop || 0; renderPanel(); if (pn) pn.scrollTop = sc; } }
+function moUndo(redo) { const pl = moPlan(); const from = redo ? E.moRedo : E.moHist; if (!pl || !from?.length) return E.ctx.toast(redo ? "आगे कुछ नहीं" : "पीछे कुछ नहीं");
+  const cur = moSnapStr(); const st = JSON.parse(from.pop()); (redo ? (E.moHist = E.moHist || []) : (E.moRedo = E.moRedo || [])).push(cur); pl.segments = st.s; pl.alts = st.a; E.moLast = moSnapStr(); E.moDirty = true; if (E.moSel != null) E.moSel = clamp(E.moSel, 0, pl.segments.length - 1); moRefresh(); }
+function moSelect(i, doSeek = true) { const pl = moPlan(); if (!pl) return; E.moSel = i; if (i != null && doSeek && !E.moDirty && pl.segments[i]?.keep !== false) seek(moStarts(pl)[i] + 0.02); E.root.classList.toggle("has-sel", i != null); moRefresh(); }
+// the boundary between cut i and the next kept cut moves by `steps` quarter-beats (the total length stays)
+function moBoundary(i, steps, base) { const pl = moPlan(); const a = pl.segments[i]; let j = i + 1; while (pl.segments[j] && pl.segments[j].keep === false) j++; const n = pl.segments[j]; if (!a || !n) return false;
+  const b = base || { ad: a.dur, nd: n.dur, ns: n.src_in }; const q = +(moQ(pl) * steps).toFixed(3); if (b.ad + q < 0.2 || b.nd - q < 0.2) return false;
+  a.dur = +(b.ad + q).toFixed(3); n.dur = +(b.nd - q).toFixed(3); if (n.kind !== "image") n.src_in = +Math.max(0, b.ns + q * (n.speed || 1)).toFixed(2); return true; }
+const MO_KEYS = ["clip", "src_in", "speed", "focus", "face", "highlight", "kind", "score", "pinned"];
+// move the *moment* of cut i to position j — the lengths stay on the beat grid, the pictures shift
+function moMove(i, j) { const a = moPlan().segments; if (i === j || !a[i] || !a[j]) return; const pick = (s) => Object.fromEntries(MO_KEYS.map((k) => [k, s[k]])); const c = a.map(pick); const [m] = c.splice(i, 1); c.splice(j, 0, m);
+  a.forEach((s, k) => { MO_KEYS.forEach((key) => { if (c[k][key] === undefined) delete s[key]; else s[key] = c[k][key]; }); if (s.kind === "image") s.speed = 1; moFit(s); }); E.moSel = j; }
+function moOp(op, i, arg) {
+  const pl = moPlan(); if (!pl || !E.canEdit) return; const sg = pl.segments[i]; const beat = +(pl.period || 0.5).toFixed(3); const T = E.ctx.toast;
+  if (op === "add") { const it = libItem(arg); if (!it) return T("पहले clip चुनें"); const at = i == null ? pl.segments.length : i + 1; const d = beat * 2 < 0.4 ? beat * 4 : beat * 2; const used = pl.segments.filter((x) => x.clip === it.id).map((x) => +x.src_in + x.dur * (x.speed || 1));
+    const n = { clip: it.id, src_in: 0, dur: +d.toFixed(3), speed: 1, fx: "cut", pulse: [], focus: [.5, .5], face: false, score: 0, keep: true, kind: it.kind === "image" ? "image" : "video", energy: .5 };
+    if (n.kind === "video" && used.length) n.src_in = Math.max(...used); moFit(n); pl.segments.splice(at, 0, n); E.moSel = at; return moTouch(); }
+  if (!sg) return;
+  if (op === "keep") sg.keep = arg ?? (sg.keep === false);
+  else if (op === "del") { if (pl.segments.length < 2) return T("आख़िरी cut नहीं मिटा सकते"); pl.segments.splice(i, 1); }
+  else if (op === "dup") { pl.segments.splice(i + 1, 0, JSON.parse(JSON.stringify({ ...sg, intro: undefined, outro: undefined, ramp: undefined }))); E.moSel = i + 1; }
+  else if (op === "split") { const q = moQ(pl); const h = Math.max(q, Math.round(sg.dur / 2 / q) * q); if (sg.dur - h < 0.2 || h < 0.2) return T("यह cut बाँटने के लिए बहुत छोटा है");
+    const b = JSON.parse(JSON.stringify({ ...sg, intro: undefined, ramp: undefined })); b.dur = +(sg.dur - h).toFixed(3); b.fx = "cut"; if (b.kind !== "image") b.src_in = +(sg.src_in + h * (sg.speed || 1)).toFixed(2); sg.dur = +h.toFixed(3); delete sg.outro; pl.segments.splice(i + 1, 0, b); }
+  else if (op === "move") { const j = i + arg; if (j < 0 || j >= pl.segments.length) return; moMove(i, j); }
+  else if (op === "bd") { if (!moBoundary(i, arg)) return T("cut इससे छोटा नहीं हो सकता / आगे कोई cut नहीं"); }
+  else if (op === "len") { const d = +(sg.dur + arg * beat).toFixed(3); if (d < 0.2) return T("cut इससे छोटा नहीं हो सकता"); if (d > 10) return T("एक cut 10 सेकंड से लंबा नहीं"); sg.dur = d; moFit(sg); }
+  else if (op === "fx") sg.fx = arg;
+  else if (op === "speed") { sg.speed = +arg || 1; delete sg.ramp; moFit(sg); }
+  else if (op === "clip") { const it = libItem(arg); if (!it) return; sg.clip = it.id; sg.src_in = 0; sg.focus = [.5, .5]; sg.face = false; sg.highlight = false; moFit(sg); }
+  else if (op === "src") { sg.src_in = +(+arg).toFixed(2); moFit(sg); }
+  else if (op === "focus") sg.focus = arg;
+  else if (op === "alt") { const k = (pl.alts || []).findIndex((a) => a.clip === sg.clip); const k2 = k >= 0 ? k : (pl.alts || []).findIndex((a) => libItem(a.clip)?.kind !== "image"); if (k2 < 0) return T("और हिस्से नहीं बचे");
+    const a = pl.alts[k2]; pl.alts.splice(k2, 1, { clip: sg.clip, src_in: sg.src_in, score: sg.score, focus: sg.focus, face: sg.face }); Object.assign(sg, { clip: a.clip, src_in: a.src_in, focus: a.focus, face: a.face, score: a.score, speed: 1, kind: "video" }); }
+  moTouch();
+}
+async function moRender() { const mo = E.mo; const { api, toast } = E.ctx; if (!mo.clips.length) return toast("पहले clips डालें"); if (!mo.music) return toast("song/music चुनें");
+  try { await api("POST", `/projects/${E.pid}/montage`, { ...mo, texts: String(mo.texts || "").split("\n").map((x) => x.trim()).filter(Boolean), mode: "auto", replan: false, plan: mo.plan }); E.moDirty = false; toast("आपके बदलावों से video बन रहा है 🎬"); await E.ctx.load(); moRefresh(); } catch (err) { toast(err.message); } }
+async function moToEditor() { const { api, toast } = E.ctx; if (E.moDirty && !confirm("आपके बदलाव अभी video में नहीं बने हैं। पुराने बने हुए video को ही पूरे editor में खोलें?")) return;
+  try { const r = await api("POST", `/projects/${E.pid}/montage/to-editor`, {}); toast("नया project बना — पूरे editor में खुल रहा है"); location.hash = `#/projects/${r.project.id}`; } catch (err) { toast(err.message); } }
+function moHasRender() { return (E.p.assets || []).some((a) => a.kind === "render"); }
+function renderMoTimeline(body, labels) {
+  E.root.classList.add("is-montage");
+  const { esc } = E.ctx; const pl = moPlan(); const info = $("#tl-info", E.root); const openBtn = moHasRender() && E.canEdit ? `<button class="btn small" data-mo-full title="text, sticker, photo, sound, B-roll, caption, effect — सब जोड़ने और खिसकाने के लिए">🎛 पूरे editor में खोलें</button>` : "";
+  if (!pl) { labels.innerHTML = ""; body.style.width = ""; body.innerHTML = `<div class="mo-empty"><p class="small muted">यहाँ हर cut एक block बनकर दिखेगा — बाएँ panel में <b>🤖 Auto beat-edit</b> चलाएँ, फिर यहीं से कोई भी cut खिसकाएँ, बदलें, जोड़ें या हटाएँ।</p>${openBtn}</div>`;
+    info.textContent = E.p.meta?.bpm ? `${E.p.meta.bpm} BPM · ${fmt(E.p.meta.duration || 0)}` : ""; const b = $("[data-mo-full]", body); if (b) b.onclick = moToEditor; return; }
+  if (!E.moLast) E.moLast = moSnapStr();
+  const pps = E.pps; const st = moStarts(pl); const T = moTotal(pl); const span = Math.max(T, E.moDirty ? 0 : E.dur); const W = Math.ceil(span * pps) + 120; const X = (t) => (t * pps).toFixed(1);
+  const step = pps >= 80 ? 0.5 : pps >= 40 ? 1 : pps >= 16 ? 2 : pps >= 8 ? 5 : 10;
+  let ruler = ""; for (let t = 0; t <= span; t += step) ruler += `<span style="left:${X(t)}px" class="${t % (step * 5) === 0 ? "maj" : ""}">${t % (step * 5) === 0 ? fmt(t).replace(/\.0$/, "") : ""}</span>`;
+  const per = +pl.period || 0; let beats = ""; if (per > 0.05 && per * pps >= 5) for (let k = 0, t = 0; t <= T + 1e-6 && k < 2000; k++, t = k * per) beats += `<i class="${k % 4 === 0 ? "bar" : ""}" style="left:${X(t)}px"></i>`;
+  const cuts = pl.segments.map((sg, i) => { if (sg.keep === false) return ""; const it = libItem(sg.clip); const w = Math.max(8, sg.dur * pps); const src = moFrame(it, sg.src_in);
+    const tag = (sg.intro ? "🎬" : sg.outro ? "🏁" : "") + (sg.ramp ? "🎢" : sg.speed && sg.speed !== 1 ? (sg.speed < 1 ? "🐢" : "⏩") : "") + (sg.highlight ? "⭐" : "");
+    return `<div class="mocut ${E.moSel === i ? "sel" : ""} ${it ? "" : "missing"}" data-moc="${i}" style="left:${X(st[i])}px;width:${w.toFixed(1)}px${src ? `;background-image:url('${src}')` : ""}" title="${i + 1}. ${esc(it?.name || "clip नहीं मिली")} · ${(+sg.dur).toFixed(2)}s · ${MOFX[sg.fx] || sg.fx}">${w >= 26 ? `<i class="h l"></i>` : ""}<span><b>${i + 1}</b>${w >= 54 ? ` ${tag}` : ""}</span>${w >= 60 && sg.fx && sg.fx !== "cut" ? `<em>${esc(MOFX[sg.fx] || sg.fx)}</em>` : ""}${w >= 26 ? `<i class="h r"></i>` : ""}</div>`; }).join("");
+  let run = 0, lastX = -99; const gone = pl.segments.map((sg, i) => { if (sg.keep !== false) { run = 0; return ""; } let x = st[i] * pps + run * 30; if (x < lastX + 30) x = lastX + 30; lastX = x; run++; const it = libItem(sg.clip); const src = moFrame(it, sg.src_in);
+    return `<div class="mogone ${E.moSel === i ? "sel" : ""}" data-moc="${i}" style="left:${x.toFixed(1)}px${src ? `;background-image:url('${src}')` : ""}" title="हटाया हुआ cut ${i + 1} — चुनकर “वापस लाओ” दबाएँ"><span>↩</span></div>`; }).join("");
+  const nGone = pl.segments.filter((s) => s.keep === false).length; const mus = libItem(E.mo.music);
+  const lanes = [["cuts", `V1 Cuts · ${pl.segments.length - nGone}`, cuts, 76], ...(nGone ? [["gone", `हटाए गए · ${nGone}`, gone, 34]] : []), ["beats", `Beat · ${pl.bpm || "—"} BPM`, `<div class="mobeatln" style="width:${X(T)}px">${beats}</div>`, 22],
+    ["music", "A1 Music", mus ? `<div class="itm music" data-momusic style="left:0;width:${X(T)}px"><span>♪ ${esc(mus.name)}${pl.music_start ? ` · ${fmt(pl.music_start)} से` : ""}</span></div>` : `<span class="small muted lanehint">music बाएँ panel से चुनें</span>`, 40]];
+  labels.innerHTML = `<div class="tl-ruler-l"><span class="small muted">${E.canEdit ? "खींचें = जगह बदलें" : ""}</span></div>` + lanes.map(([id, l, , hh]) => `<div class="tl-l" data-lane="${id}" style="height:${hh}px"><span class="grow">${l}</span></div>`).join("");
+  body.style.width = W + "px";
+  body.innerHTML = `<div class="tl-ruler" id="tl-ruler">${ruler}<div class="tl-phead" id="tl-phead" style="left:${X(E.t)}px" title="playhead — खींचें"></div></div>`
+    + lanes.map(([id, , html, hh]) => `<div class="tl-track mo-${id}" data-track="${id}" style="height:${hh}px">${html}</div>`).join("")
+    + `<div class="tl-play" id="tl-play" style="left:${X(E.t)}px"><b class="tl-grip" title="playhead — खींचें"></b></div>`;
+  info.innerHTML = `${pl.segments.length - nGone} cuts · ${fmt(T)} · ${pl.bpm || "—"} BPM${E.moDirty ? ` · <b style="color:var(--amber)">बदलाव बाकी — ऊपर का video पुराना है</b> <button class="btn small primary" data-mo-go>🎬 video बनाओ</button>` : ""} <button class="btn small quiet" data-mo-undo title="Ctrl+Z" ${E.moHist?.length ? "" : "disabled"}>↶</button><button class="btn small quiet" data-mo-redo title="Ctrl+Y" ${E.moRedo?.length ? "" : "disabled"}>↷</button> ${openBtn}`;
+  const ib = (q, fn) => { const b = $(q, info); if (b) b.onclick = fn; }; ib("[data-mo-go]", moRender); ib("[data-mo-undo]", () => moUndo()); ib("[data-mo-redo]", () => moUndo(true)); ib("[data-mo-full]", moToEditor);
+  // pointer work
+  const tAt = (e) => clamp((e.clientX - body.getBoundingClientRect().left) / E.pps, 0, Math.max(span, 0.1));
+  const scrub = (e) => { const v = $("#pv", E.root); const was = v && !v.paused; if (was) v.pause(); seek(tAt(e)); track(e, (ev) => seek(tAt(ev)), () => { if (was) v.play(); }, 0); };
+  const idxAt = (t) => { let best = null; pl.segments.forEach((s, k) => { if (s.keep === false) return; if (t >= st[k] - 1e-6) best = k; }); return best; };
+  body.onpointerdown = (e) => {
+    // touch: the bottom-sheet inspector opens under the finger — swallow the "ghost" click that follows the tap
+    if (e.pointerType && e.pointerType !== "mouse" && E.moSel == null) { const eat = (ev) => { ev.stopPropagation(); ev.preventDefault(); }; document.addEventListener("click", eat, true); const off = () => setTimeout(() => document.removeEventListener("click", eat, true), 450); document.addEventListener("pointerup", off, { once: true }); document.addEventListener("pointercancel", off, { once: true }); }
+    if (e.button > 0) return; const blk = e.target.closest("[data-moc]"); if (e.target.closest("#tl-ruler,#tl-phead,.tl-grip") || !blk) { if (!e.target.closest("[data-momusic]")) scrub(e); else { E.tab = "montage"; moSelect(null); } return; }
+    const i = +blk.dataset.moc; const sg = pl.segments[i]; const hl = e.target.classList.contains("h") && e.target.classList.contains("l"), hr = e.target.classList.contains("h") && e.target.classList.contains("r");
+    if (!E.canEdit || sg.keep === false) return moSelect(i);
+    if (hl || hr) { // trim: the edge shared with the neighbour moves in quarter-beat steps
+      let a = i; if (hl) { a = i - 1; while (a >= 0 && pl.segments[a].keep === false) a--; if (a < 0) return E.ctx.toast("पहले cut का बायाँ सिरा नहीं खिसकता — दायाँ सिरा खींचें"); }
+      let j = a + 1; while (pl.segments[j] && pl.segments[j].keep === false) j++; const n = pl.segments[j];
+      if (!n) { // the very last edge: the cut itself gets longer/shorter (the video length changes)
+        const d0 = sg.dur; const q = moQ(pl); let last = 0; return track(e, (ev, dx) => { const k = Math.round(dx / E.pps / q); if (k === last) return; const d = +(d0 + k * q).toFixed(3); if (d < 0.2 || d > 10) return; last = k; sg.dur = d; moFit(sg); renderTimeline(); }, (moved) => { if (moved && last) moTouch(); else moSelect(i); }, 2); }
+      const A = pl.segments[a]; const base = { ad: A.dur, nd: n.dur, ns: n.src_in }; const q = moQ(pl); let last = 0;
+      return track(e, (ev, dx) => { const k = Math.round(dx / E.pps / q); if (k === last) return; if (moBoundary(a, k, base)) { last = k; renderTimeline(); } }, (moved) => { if (moved && last) { E.moSel = i; moTouch(); } else moSelect(i); }, 2); }
+    let to = null; track(e, (ev, dx) => { const el = $(`[data-moc="${i}"]`, body); if (el) { el.style.transform = `translateX(${dx}px)`; el.classList.add("drag"); } to = idxAt(tAt(ev)); $$(".mocut.dropto", body).forEach((x) => x.classList.remove("dropto")); if (to != null && to !== i) $(`.mocut[data-moc="${to}"]`, body)?.classList.add("dropto"); },
+      (moved) => { if (moved && to != null && to !== i) { moMove(i, to); moTouch(); } else moSelect(i); });
+  };
+}
+function moInspector(ins) {
+  const { esc } = E.ctx; const pl = moPlan(); const dis = E.canEdit ? "" : "disabled"; const i = E.moSel; const sg = pl && i != null ? pl.segments[i] : null;
+  const full = moHasRender() && E.canEdit ? `<div class="box" style="margin-top:.8rem"><b>🎛 और जोड़ना है?</b><p class="small muted">text, sticker, photo, sound effect, B-roll, caption, effect — सब कुछ जोड़ने और स्क्रीन पर कहीं भी खिसकाने के लिए बने हुए video को पूरे editor में खोलें (यह montage जैसा है वैसा रहेगा)।</p><button class="btn" id="mo-full">पूरे editor में खोलें</button></div>` : "";
+  if (!sg) { ins.innerHTML = `<h3>Montage</h3><div class="ikv"><span>लंबाई</span><b>${fmt(pl ? moTotal(pl) : E.p.meta?.duration || 0)}</b></div><div class="ikv"><span>BPM</span><b>${pl?.bpm || E.p.meta?.bpm || "—"}</b></div><div class="ikv"><span>cuts</span><b>${pl ? pl.segments.filter((x) => x.keep !== false).length : E.p.meta?.segments || "—"}</b></div>
+      <p class="small muted" style="margin-top:.8rem">${pl ? "नीचे timeline में किसी cut पर click करें — यहाँ उसके सारे option खुलेंगे। block को खींचकर जगह बदलें, किनारा खींचकर छोटा/लंबा करें।" : "clips/music बाएँ panel में चुनकर “Auto beat-edit” चलाएँ।"}</p>
+      ${pl && E.canEdit ? `<div class="box" style="margin-top:.6rem"><b>＋ नया cut (आख़िर में)</b><div class="irow"><select id="mo-addclip">${E.mo.clips.map((c) => `<option value="${c.id}">${esc((libItem(c.id)?.name || "clip").slice(0, 26))}</option>`).join("")}</select><button class="btn small" id="mo-addgo">जोड़ें</button></div></div>` : ""}
+      ${pl && E.moDirty ? `<button class="btn primary" id="mo-go" style="margin-top:.6rem" ${dis}>🎬 बदलावों से video बनाओ</button>` : ""}${full}`;
+    const g = $("#mo-addgo", ins); if (g) g.onclick = () => moOp("add", null, $("#mo-addclip", ins).value); const r = $("#mo-go", ins); if (r) r.onclick = moRender; const f = $("#mo-full", ins); if (f) f.onclick = moToEditor; return; }
+  const it = libItem(sg.clip); const img = it?.kind === "image" || sg.kind === "image"; const mx = moSrcMax(sg); const off = sg.keep === false; const beat = +(pl.period || 0.5); const kept = pl.segments.filter((x) => x.keep !== false).length;
+  const opt = (v, cur, l) => `<option value="${v}" ${String(cur) === String(v) ? "selected" : ""}>${l}</option>`; const foc = sg.focus || [.5, .5];
+  ins.innerHTML = `<button class="ibtn insp-x" id="mo-insx" title="बंद (Esc)">✕</button><h3>Cut ${i + 1} <span class="small muted">/ ${pl.segments.length}</span>${off ? ` <span class="small" style="color:var(--rose)">हटाया हुआ</span>` : ""}</h3>
+    <div class="mo-prev">${it ? (img ? `<img src="${it.url}" alt="">` : `<video id="mo-srcv" src="${it.url}" poster="${moFrame(it, sg.src_in)}" muted playsinline preload="none"></video><button class="ibtn" id="mo-srcplay" title="यह हिस्सा चलाकर देखें">▶</button>`) : `<p class="small" style="color:var(--rose);padding:.6rem">यह clip library में नहीं मिली — नीचे से दूसरी clip चुनें</p>`}</div>
+    <div class="ikv"><span>${img ? "photo" : "शुरू " + fmt(sg.src_in)}</span><b>${(+sg.dur).toFixed(2)}s · ${(sg.dur / beat).toFixed(2).replace(/\.?0+$/, "")} beat</b></div>
+    ${field("Clip / photo", `<select id="mo-i-clip" ${dis}>${E.mo.clips.map((c) => opt(c.id, sg.clip, esc((libItem(c.id)?.name || "clip").slice(0, 28)))).join("")}${E.mo.clips.some((c) => c.id === sg.clip) ? "" : opt(sg.clip, sg.clip, "— (हटाई गई clip)")}</select>`)}
+    ${img ? "" : field(`clip का कौन-सा हिस्सा <span class="small muted" id="mo-i-srcv">${fmt(sg.src_in)}</span>`, `<div class="irow"><input type="range" id="mo-i-src" min="0" max="${Math.max(0.1, mx).toFixed(2)}" step="0.05" value="${sg.src_in}" ${dis} ${mx <= 0 ? "disabled" : ""}><button class="btn small quiet" data-moop="alt" title="AI का चुना दूसरा अच्छा हिस्सा" ${dis}>↻ दूसरा</button></div>`)}
+    ${field("लंबाई", `<div class="irow" style="flex-wrap:wrap;gap:.3rem"><button class="btn small" data-moop="bd:-1" title="¼ beat छोटा — अगला cut उतना लंबा (video की लंबाई वही)" ${dis}>− ¼</button><button class="btn small" data-moop="bd:1" title="¼ beat लंबा — अगला cut उतना छोटा" ${dis}>+ ¼</button><button class="btn small quiet" data-moop="len:-1" title="1 beat छोटा — पूरा video 1 beat छोटा" ${dis}>− 1 beat</button><button class="btn small quiet" data-moop="len:1" title="1 beat लंबा — पूरा video 1 beat लंबा" ${dis}>+ 1 beat</button></div>`)}
+    <div class="irow">${field("Effect", `<select id="mo-i-fx" ${dis}>${Object.entries(MOFX).map(([k, l]) => opt(k, sg.fx || "cut", l)).join("")}</select>`)}${img ? "" : field("Speed", `<select id="mo-i-speed" ${dis}>${[[0.5, "0.5× slow-mo"], [0.75, "0.75×"], [1, "1× normal"], [1.5, "1.5×"], [2, "2× fast"], [3, "3×"]].map(([v, l]) => opt(v, sg.speed || 1, l)).join("")}</select>`)}</div>
+    ${field(`Frame में क्या दिखे (focus) <span class="small muted">— crop होने पर</span>`, `<div class="irow"><span class="small muted">↔</span><input type="range" id="mo-i-fx0" min="0" max="1" step="0.02" value="${foc[0]}" ${dis}><span class="small muted">↕</span><input type="range" id="mo-i-fy0" min="0" max="1" step="0.02" value="${foc[1]}" ${dis}></div>`)}
+    <div class="mo-acts"><button class="btn small" data-moop="move:-1" ${dis} ${i === 0 ? "disabled" : ""}>◀ पहले</button><button class="btn small" data-moop="move:1" ${dis} ${i >= pl.segments.length - 1 ? "disabled" : ""}>बाद में ▶</button><button class="btn small" data-moop="dup" ${dis}>⧉ Duplicate</button><button class="btn small" data-moop="split" ${dis}>✂ दो हिस्से</button>
+      <button class="btn small" data-moop="keep" ${dis} ${!off && kept < 2 ? "disabled" : ""}>${off ? "↩ वापस लाओ" : "🗑 हटाओ"}</button><button class="btn small quiet" data-moop="del" title="plan से पूरी तरह मिटाओ" ${dis}>✕ मिटाओ</button></div>
+    ${E.canEdit ? `<div class="box" style="margin-top:.6rem"><b>＋ इसके बाद नया cut</b><div class="irow"><select id="mo-addclip">${E.mo.clips.map((c) => `<option value="${c.id}">${esc((libItem(c.id)?.name || "clip").slice(0, 26))}</option>`).join("")}</select><button class="btn small" id="mo-addgo">जोड़ें</button></div><p class="small muted">नई clip/photo चाहिए? बाएँ panel में “+ upload” से जोड़ें, वह इस list में आ जाएगी।</p></div>` : ""}
+    <p class="small muted" style="margin-top:.5rem">Delete = हटाओ · Ctrl+Z = वापस · ← → = अगला/पिछला cut (Alt के साथ)</p>
+    ${E.moDirty ? `<button class="btn primary" id="mo-go" style="margin-top:.4rem" ${dis}>🎬 बदलावों से video बनाओ</button>` : ""}${full}`;
+  $$("[data-moop]", ins).forEach((b) => (b.onclick = () => { const [op, a] = b.dataset.moop.split(":"); moOp(op, i, a == null ? undefined : +a); }));
+  const on = (q, ev, fn) => { const el = $(q, ins); if (el) el[ev] = fn; };
+  on("#mo-i-clip", "onchange", (e) => moOp("clip", i, e.target.value)); on("#mo-i-fx", "onchange", (e) => moOp("fx", i, e.target.value)); on("#mo-i-speed", "onchange", (e) => moOp("speed", i, e.target.value));
+  on("#mo-i-src", "oninput", (e) => { const lab = $("#mo-i-srcv", ins); if (lab) lab.textContent = fmt(+e.target.value); const v = $("#mo-srcv", ins); if (v) { v.pause(); if (v.preload === "none") { v.preload = "metadata"; v.load(); } try { v.currentTime = +e.target.value; } catch { /* not ready yet */ } v.removeAttribute("poster"); } });
+  on("#mo-i-src", "onchange", (e) => moOp("src", i, +e.target.value));
+  const focus = () => moOp("focus", i, [+$("#mo-i-fx0", ins).value, +$("#mo-i-fy0", ins).value]); on("#mo-i-fx0", "onchange", focus); on("#mo-i-fy0", "onchange", focus);
+  on("#mo-srcplay", "onclick", () => { const v = $("#mo-srcv", ins); if (!v) return; if (!v.paused) return v.pause(); const a = +sg.src_in, b = a + sg.dur * (sg.speed || 1); v.playbackRate = clamp(sg.speed || 1, 0.25, 4); const start = () => { v.currentTime = a; v.play().catch(() => {}); }; v.ontimeupdate = () => { if (v.currentTime >= b) v.pause(); }; if (v.readyState >= 1) start(); else { v.preload = "auto"; v.onloadedmetadata = start; v.load(); } });
+  on("#mo-insx", "onclick", () => moSelect(null));
+  on("#mo-addgo", "onclick", () => moOp("add", i, $("#mo-addclip", ins).value)); on("#mo-go", "onclick", moRender); on("#mo-full", "onclick", moToEditor);
+}
 function renderTimeline() {
   const body = $("#tl-body", E.root), labels = $("#tl-labels", E.root); if (!body) return;
-  if (E.montage) { labels.innerHTML = ""; body.innerHTML = `<p class="small muted" style="padding:1rem">Montage beat पर अपने-आप कटता है — settings बाएँ panel में। Export से platform चुनें।</p>`; $("#tl-info", E.root).textContent = E.p.meta?.bpm ? `${E.p.meta.bpm} BPM · ${fmt(E.p.meta.duration || 0)}` : ""; return; }
+  if (E.montage) { renderMoTimeline(body, labels); const d = $("#t-dur", E.root); if (d) d.textContent = fmt(E.dur); return; }
   const { esc } = E.ctx; const pps = E.pps; const W = Math.ceil(E.dur * pps) + 80; const fx = E.rs.effects;
   const X = (src) => (src * pps).toFixed(1); const OX = (out) => X(srcOf(out)); const OW = (a, b) => Math.max(6, (srcOf(b) - srcOf(a)) * pps).toFixed(1);
   const step = pps >= 80 ? 0.5 : pps >= 40 ? 1 : pps >= 16 ? 2 : pps >= 8 ? 5 : 10;

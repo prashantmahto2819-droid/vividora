@@ -535,3 +535,25 @@ extra passes are analysis-only: vidstab detect, face scan, beat analysis).
   `--only name1,name2`, `--list`.
 * `cd server && python3 tests/test_pro_api.py --media /tmp/pro_tests/media` — boots the API on a temp
   data dir and exercises every new endpoint.
+
+## Montage: editing after the auto beat-edit
+
+The montage page has its own timeline (`renderMoTimeline` in `web/dist/assets/editor.js`). It draws
+`settings.montage.plan.segments` — one block per cut — and edits that plan in place:
+
+| Action | Where | What changes in the plan |
+| --- | --- | --- |
+| pick / seek | click a block | `E.moSel` |
+| move a cut | drag the block onto another | the *moment* (`clip, src_in, speed, focus…`) moves; lengths stay on the beat grid |
+| trim | drag a block's edge | the shared edge moves in ¼-beat steps (`dur` of both, `src_in` of the next) |
+| change | inspector | `clip`, `src_in`, `fx`, `speed`, `focus`, `dur` (± 1 beat) |
+| add / duplicate / split | inspector, toolbar, `Ctrl+D`, `S` | a new segment |
+| remove / bring back | `Delete`, inspector | `keep: false` / `true` (removed cuts sit in their own lane) |
+| undo / redo | `Ctrl+Z` / `Ctrl+Y` | snapshots of `segments` + `alts` |
+
+“video बनाओ” posts `{mode: "auto", replan: false, plan}` to `POST /projects/{id}/montage`. The server keeps only known
+fields (`service._clean_plan`), drops cuts whose clip is not in the montage's clip list and refuses a plan with no cut left.
+
+`POST /projects/{id}/montage/to-editor` copies the newest render into a **new normal project** (`settings.as_is = true`:
+no Whisper, no auto-cut, `edl.cuts = []`), so titles, stickers, photos, B-roll, sounds, captions and effects can be added
+and moved in the full editor. The montage project itself is not changed.

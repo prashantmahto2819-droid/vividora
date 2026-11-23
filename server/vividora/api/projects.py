@@ -822,6 +822,36 @@ async def presets(request: Request, user: dict):
 
 
 @require("editor")
+async def montage_to_editor(request: Request, user: dict):
+    """A finished montage → a normal project (its video is the recording), so the full editor works on it:
+    text, stickers, B-roll, sounds, effects, cuts, captions — every object movable. The montage itself stays."""
+    import shutil
+    from starlette.concurrency import run_in_threadpool
+    p = own_project(request, user)
+    data = await body(request)
+    renders = [a for a in db.rows(db.conn().execute(
+        "SELECT * FROM assets WHERE project_id = ? AND kind = 'render' AND archived = 0 ORDER BY created_at DESC", (p["id"],)))
+        if storage.abs_path(a["path"]).exists()]
+    if data.get("asset_id"):
+        renders = [a for a in renders if a["id"] == data["asset_id"]]
+    if not renders:
+        raise ApiError(400, "पहले video बनाएँ — फिर उसे पूरे editor में खोलें")
+    src = renders[0]
+    np_ = new_project_row(user, {"title": (str(data.get("title") or "").strip() or f"{p['title']} — edit")[:200],
+                                 "channel_id": p.get("channel_id"), "language": p.get("language")})
+    np_["settings"]["as_is"] = True
+    np_["settings"]["from_montage"] = p["id"]
+    rel = str(storage.project_dir(p["workspace_id"], np_["id"]) / "raw" / f"montage{Path(src['path']).suffix or '.mp4'}")
+    await run_in_threadpool(lambda: shutil.copy2(storage.abs_path(src["path"]), storage.ensure_parent(rel)))
+    with db.tx() as c:
+        db.insert(c, "projects", np_)
+        service.add_asset(c, np_["id"], "raw", rel)
+        job = service.start_pipeline(c, np_)
+        service.log(c, user["workspace_id"], "montage.to_editor", user_id=user["id"], project_id=np_["id"], detail={"from": p["id"]})
+    return ok({"project": service.project_view(db.get("projects", np_["id"])), "job": job}, 201)
+
+
+@require("editor")
 async def duplicate(request: Request, user: dict):
     """Copy a project: settings, cuts, transcript, meta and every file (real copies on disk)."""
     import shutil
@@ -898,6 +928,7 @@ routes = [
     Route("/projects/{project_id}/jobs/{job_id}/pause", job_pause, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
+    Route("/projects/{project_id}/montage/to-editor", montage_to_editor, methods=["POST"]),
     Route("/projects/{project_id}/matte", matte_now, methods=["POST"]),
     Route("/projects/{project_id}/matte_lib", matte_lib_now, methods=["POST"]),
     Route("/projects/{project_id}/frame", preview_frame, methods=["POST"]),
