@@ -1,0 +1,48 @@
+{
+ "zoom": {
+  "enabled": true,
+  "strength": 0.7
+ },
+ "voice": "studio",
+ "slowmo": true,
+ "speed_ramp": true,
+ "extras": [],
+ "id": "event",
+ "label": "Event / conference",
+ "emoji": "🎤",
+ "hint": "सुनहरी hall lights + teal, गहरे काले, तेज़ contrast — function, meeting, stage के वीडियो",
+ "swatch": [
+  "#D9952B",
+  "#0E5A63"
+ ],
+ "caption_style": "minimal",
+ "text_style": "gold",
+ "look": "none",
+ "grade_preset": "event_gold",
+ "transition": "x_fadeblack",
+ "transition_duration": 0.4,
+ "stack": [],
+ "music": {
+  "mood": "cinematic",
+  "volume": 0.16,
+  "duck_amount": 0.6
+ },
+ "montage": {
+  "pace": "medium",
+  "effects_level": "medium",
+  "min_cut": 0.5,
+  "max_cut": 2.0,
+  "look": "grade:event_gold",
+  "fx_strong": [
+   "zoom_punch",
+   "blur_in",
+   "flash"
+  ],
+  "fx_soft": [
+   "zoom_in",
+   "zoom_out"
+  ],
+  "intro": true,
+  "outro": true
+ }
+}

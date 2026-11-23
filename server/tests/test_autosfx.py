@@ -52,6 +52,30 @@ def units():
     lo = autosfx.plan({**eff, "sfx": []}, lib, out_dur=60, cut_times=[30.0, 40.0], density="low")
     check("low density ≤ normal", len(lo) <= len(autosfx.plan({**eff, "sfx": []}, lib, out_dur=60, cut_times=[30, 40])), lo)
     check("min gap respected", all(b2["at"] - a["at"] >= 0.59 for a, b2 in zip(hi, hi[1:])), hi)
+    # ---- richer sound families: hook hit, CTA ding, photo shutter, glitch cuts — and fall-backs for a small library
+    names = ["pop", "pop soft", "click", "ding", "bubble pop", "whoosh", "whoosh soft", "swipe", "swoosh long", "whoosh fast", "slide", "tick",
+             "impact boom", "hit deep", "drop bass", "notification", "bell chime", "camera shutter", "glitch"]
+    big = [{"id": "s_" + n.replace(" ", "_"), "kind": "sfx", "name": n} for n in names] + [
+        {"id": "img1", "kind": "image", "name": "photo of temple"}, {"id": "vid1", "kind": "broll", "name": "city drone"},
+        {"id": "st1", "kind": "sticker", "name": "subscribe button", "tags": "starter,popup"}, {"id": "st2", "kind": "sticker", "name": "fire emoji", "tags": "emoji"}]
+    fx2 = {"titles": [{"text": "Hook", "start": 0.3, "end": 2}, {"text": "Second", "start": 8, "end": 10}],
+           "broll": [{"id": "img1", "start": 14, "end": 17}, {"id": "vid1", "start": 22, "end": 26},
+                     {"id": "st1", "fit": "free", "start": 30, "end": 33}, {"id": "st2", "fit": "free", "start": 38, "end": 40}],
+           "transition": "glitch", "sfx": []}
+    out2 = autosfx.plan(fx2, big, out_dur=60, cut_times=[46.0], density="high")
+    kinds = {s["auto"]: s["id"] for s in out2}
+    check("opening title gets a deep hit, later titles a pop", kinds.get("hook") in ("s_impact_boom", "s_hit_deep", "s_drop_bass") and kinds.get("title") in ("s_pop", "s_pop_soft", "s_click"), kinds)
+    check("still photo → shutter/slide, video B-roll → whoosh", kinds.get("photo") in ("s_camera_shutter", "s_slide") and kinds.get("broll", "").startswith(("s_whoosh", "s_swipe", "s_swoosh")), kinds)
+    check("subscribe popup → ding/notification/bell, emoji → pop", kinds.get("cta") in ("s_ding", "s_notification", "s_bell_chime") and kinds.get("sticker") in ("s_pop", "s_bubble_pop", "s_pop_soft"), kinds)
+    check("glitch transition → glitch sound on the cut", kinds.get("glitch") == "s_glitch", kinds)
+    small = [x for x in big if x["kind"] != "sfx" or x["name"] in ("pop", "whoosh", "swipe")]
+    out3 = autosfx.plan(fx2, small, out_dur=60, cut_times=[46.0], density="high")
+    k3 = {s["auto"]: s["id"] for s in out3}
+    check("small library: every event still gets a basic sound", k3.get("hook") == "s_pop" and k3.get("cta") == "s_pop" and k3.get("photo") in ("s_whoosh", "s_swipe") and k3.get("glitch") in ("s_swipe", "s_whoosh"), k3)
+    used = set()
+    for dens in ("low", "normal", "high"):
+        used |= {s["id"] for s in autosfx.plan(fx2, big, out_dur=60, cut_times=[46.0, 50.0, 54.0], density=dens)}
+    check("uses many different sounds, not the same two", len(used) >= 7, sorted(used))
     ap = autosfx.apply(eff, lib, out_dur=60)
     again = autosfx.apply(ap, lib, out_dur=60)
     check("apply is idempotent (replaces only asfx_)", [s["_id"] for s in ap["sfx"]] == [s["_id"] for s in again["sfx"]])

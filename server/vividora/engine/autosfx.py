@@ -23,12 +23,19 @@ DENSITY = {"low": (4, 1.6, False), "normal": (8, 1.0, False), "high": (14, 0.6, 
 # event → (sound-name candidates in preference order, base volume, lead-in seconds)
 FAMILIES: dict[str, tuple[tuple[str, ...], float, float]] = {
     "title": (("pop", "pop soft", "click"), 0.55, 0.0),
-    "sticker": (("pop", "pop soft", "ding"), 0.5, 0.0),
+    "sticker": (("pop", "bubble pop", "pop soft", "ding"), 0.5, 0.0),
     "broll": (("whoosh", "whoosh soft", "swipe", "swoosh long"), 0.5, 0.12),
+    "photo": (("camera shutter", "slide", "whoosh soft"), 0.45, 0.0),         # a still picture as B-roll
+    "cta": (("ding", "notification", "bell chime"), 0.5, 0.0),               # subscribe / follow / bell popups
+    "hook": (("impact boom", "hit deep", "drop bass"), 0.6, 0.0),            # the opening title of the video
     "transition": (("swipe", "whoosh fast", "whoosh"), 0.45, 0.10),
+    "glitch": (("glitch", "whoosh fast", "swipe"), 0.4, 0.05),               # cuts when the transition is a glitch
     "cut": (("tick", "click"), 0.3, 0.0),
     "hit": (("impact boom", "hit deep", "drop bass"), 0.6, 0.0),
 }
+
+
+_FALLBACK = {"hook": "title", "cta": "sticker", "photo": "broll", "glitch": "transition"}
 
 
 def _library_sfx(library: list[dict]) -> dict[str, str]:
@@ -36,22 +43,38 @@ def _library_sfx(library: list[dict]) -> dict[str, str]:
             for m in library if m.get("kind") == "sfx" and m.get("id")}
 
 
-def events(effects: dict, cut_times: list[float] | None = None) -> list[tuple[float, str, float]]:
-    """Timeline events → [(time, event kind, weight)] sorted by time. Weight 1 = normal importance."""
+_CTA_WORDS = ("subscribe", "follow", "like", "bell", "share", "comment", "cta", "popup")
+
+
+def events(effects: dict, cut_times: list[float] | None = None, library: list[dict] | None = None) -> list[tuple[float, str, float]]:
+    """Timeline events → [(time, event kind, weight)] sorted by time. Weight 1 = normal importance.
+    With the library the event can be told apart further: a still photo, a subscribe/follow popup."""
     ev: list[tuple[float, str, float]] = []
+    by_id = {m.get("id"): m for m in library or []}
+    starts = sorted(float(t["start"]) for t in effects.get("titles") or [] if t.get("start") is not None and t.get("_id") != "ap_lower_third")
     for t in effects.get("titles") or []:
         if t.get("_id") == "ap_lower_third":
             continue  # a calm name-plate, no sound
         if t.get("start") is not None:
-            ev.append((float(t["start"]), "title", 1.0))
+            first = float(t["start"]) == starts[0] and starts[0] <= 2.0      # the hook: a deep hit instead of a pop
+            ev.append((float(t["start"]), "hook" if first else "title", 1.3 if first else 1.0))
     for b in effects.get("broll") or []:
         if b.get("start") is None:
             continue
         free = b.get("fit") == "free"  # stickers / emoji / CTA popups
-        ev.append((float(b["start"]), "sticker" if free else "broll", 0.9 if free else 1.1))
+        item = by_id.get(b.get("id")) or {}
+        blob = f"{b.get('_id') or ''} {item.get('name') or ''} {item.get('tags') or ''}".lower()
+        if free and (str(b.get("_id") or "").startswith(("ap_cta", "ap_bell"))
+                     or any(w in blob for w in _CTA_WORDS)):
+            ev.append((float(b["start"]), "cta", 1.0))
+        elif free:
+            ev.append((float(b["start"]), "sticker", 0.9))
+        else:
+            ev.append((float(b["start"]), "photo" if item.get("kind") == "image" else "broll", 1.1))
     if effects.get("transition") not in (None, "", "none"):
+        kind = "glitch" if "glitch" in str(effects.get("transition")) else "transition"
         for c in cut_times or []:
-            ev.append((float(c), "transition", 0.8))
+            ev.append((float(c), kind, 0.8))
     else:
         for c in cut_times or []:
             ev.append((float(c), "cut", 0.5))
@@ -78,7 +101,7 @@ def plan(effects: dict, library: list[dict], *, out_dur: float, cut_times: list[
     last_name: dict[str, str] = {}
     budget = max(1, int(round(per_min * out_dur / 60.0)) + 1)
     # important events first when the budget is tight, but keep timeline order in the result
-    ranked = sorted(events(effects, cut_times), key=lambda e: -e[2])
+    ranked = sorted(events(effects, cut_times, library), key=lambda e: -e[2])
     for t, kind, weight in ranked:
         if len(chosen) >= budget:
             break
@@ -86,6 +109,9 @@ def plan(effects: dict, library: list[dict], *, out_dur: float, cut_times: list[
             continue
         names, vol, lead = FAMILIES[kind]
         avail = [n for n in names if n in lib]
+        if not avail and kind in _FALLBACK:      # an older / smaller sound library: fall back to the basic family
+            names, vol, lead = FAMILIES[_FALLBACK[kind]]
+            avail = [n for n in names if n in lib]
         if not avail:
             continue
         at = max(0.0, t - lead)
