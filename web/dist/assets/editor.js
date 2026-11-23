@@ -157,7 +157,7 @@ function update(project) {
   if (!E.montage) { cutSync(); lutSync(); const st = $("#bd-status", E.root); if (st) { const h2 = bodyStatus(); if (st._h !== h2) { st._h = h2; st.innerHTML = h2; bindBodyStatus(st); } } }
   if (E.sel?.type === "broll" && activeJobs(project).concat(finished).some((j) => j.kind === "matte_lib")) renderInspector();
   renderTop();
-  if (E.exportOpen) renderExport();
+  if (E.exportOpen) renderExport(true);
   if (was !== project.status && project.status === "review_output") { E.exportOpen = true; renderExport(); }
 }
 
@@ -2859,21 +2859,39 @@ async function loadPublishData() {
   if (E.exportOpen && (E.pubs || []).some((x) => x.status === "queued")) E.pubT = setTimeout(loadPublishData, 4000);
 }
 const PLAT = { youtube: "YouTube", instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok" };
-function renderExport() {
+// what the Export dialog shows, as a string: a background refresh (job progress polling) rebuilds the dialog only when
+// this changes — otherwise the list would jump back to the top, close "Advanced" and restart a playing video every few seconds
+function exportSig() {
+  const p = E.p; const job = p.jobs?.find((j) => j.kind === "render" && ["running", "queued"].includes(j.status));
+  return JSON.stringify([p.status, job ? [job.id, job.status] : 0, p.assets.filter((a) => ["render", "subtitle"].includes(a.kind)).map((a) => [a.id, a.meta?.signature || ""]),
+    (E.pubs || []).map((x) => [x.id, x.status]), (p.meta?.publish_plan || []).length, p.meta?.archived_at || "", JSON.stringify(p.render_sigs || {}), !!E.pubFor]);
+}
+function renderExport(fromPoll) {
   const m = $("#ed-modal", E.root); const { esc, S, api, toast, load } = E.ctx; const p = E.p;
-  if (!E.exportOpen) { m.hidden = true; m.innerHTML = ""; E.pubFor = null; return; }
+  if (!E.exportOpen) { m.hidden = true; m.innerHTML = ""; E.pubFor = null; E.expSig = ""; return; }
+  const sig = exportSig(); const oldBox = m.querySelector(".modal.exportbox");
+  if (fromPoll === true && oldBox && sig === E.expSig) {   // nothing new: just move the progress bar
+    const job = p.jobs?.find((j) => j.kind === "render" && ["running", "queued"].includes(j.status)); const bar = $("#exp-job-bar", m), sub = $("#exp-job-sub", m);
+    if (job && bar) bar.style.width = (job.progress || 0) + "%"; if (job && sub) sub.textContent = jobSub(job);
+    return;
+  }
+  E.expSig = sig;
+  // a real rebuild keeps the user's place and what they ticked but have not rendered yet
+  const keepTop = oldBox ? oldBox.scrollTop : 0;
+  if (oldBox && !E.montage) { const cb = $$("input[name=preset]", m); if (cb.length) E.rs.presets = cb.filter((i) => i.checked).map((i) => i.value); const fo = $("#focus", m); if (fo) E.rs.focus_x = fo.value === "auto" ? "auto" : +fo.value; }
   if (!E.conns) { E.conns = { connections: [], setup: {} }; E.pubs = []; loadPublishData(); }
   const outs = p.assets.filter((a) => a.kind === "render"); const job = p.jobs?.find((j) => j.kind === "render" && ["running", "queued"].includes(j.status));
   const fx = E.rs.effects; const summary = [E.cuts.filter((c) => c.enabled !== false).length + " कट", styleOf()?.label, fx.zoom.enabled && "zoom", fx.look !== "none" && ("look " + fx.look.replace(/^lut:.*/, "LUT")), fx.music.id && "music", fx.broll.length && fx.broll.length + " B-roll", fx.titles.length && fx.titles.length + " text", fx.watermark.id && "logo"].filter(Boolean).join(" · ");
   m.hidden = false;
-  m.innerHTML = `<div class="modal"><div class="row between"><h2>Export</h2><button class="ibtn" id="mx">✕</button></div>
+  m.innerHTML = `<div class="modal exportbox"><div class="row between"><h2>Export</h2><button class="ibtn" id="mx">✕</button></div>
     <p class="small muted">${esc(summary)} · output ${fmt(outDur())}</p>
+    ${E.montage ? "" : exportAdvHtml().split("\u0000")[0]}
     ${E.montage ? "" : `<div class="box pfbox"><div class="row between"><b>✈ Platform check</b><button class="btn small quiet" id="pf-run">जाँचें</button></div><div id="pf-list" class="small">${pfHtml()}</div></div>`}
     ${E.montage ? "" : `<div class="ifield"><label>कहाँ के लिए <button class="btn small quiet" id="prs-all" style="margin-left:.5rem;padding:2px 8px;font-size:.75rem">सब चुनें</button><button class="btn small quiet" id="prs-none" style="padding:2px 8px;font-size:.75rem">कोई नहीं</button></label><div class="choices">${(S.presets?.platforms || []).map((pl) => `<label class="chip ${E.rs.presets.includes(pl.id) ? "on" : ""}"><input type="checkbox" name="preset" value="${pl.id}" ${E.rs.presets.includes(pl.id) ? "checked" : ""}>${esc(pl.label)}</label>`).join("")}</div></div>
     <div class="irow">${field("9:16 में चेहरा", `<select id="focus"><option value="0.5" ${E.rs.focus_x == 0.5 ? "selected" : ""}>बीच</option><option value="0.25" ${E.rs.focus_x == 0.25 ? "selected" : ""}>बाएँ</option><option value="0.75" ${E.rs.focus_x == 0.75 ? "selected" : ""}>दाएँ</option><option value="auto" ${E.rs.focus_x === "auto" ? "selected" : ""}>🎯 Auto (smart)</option></select>`)}<button class="btn small quiet" id="mf-analyze" title="AI-powered per-format smart reframing analysis">🎯 Analyze</button></div>
     <div id="mf-info" class="small muted" style="margin:-0.3rem 0 0.5rem 0">${E.mfAnalysis ? mfInfoHtml() : "Auto: हर format के लिए face-tracking से best crop लगेगा"}</div>
-    ${exportAdvHtml()}`}
-    ${job ? `<div class="box" style="background:var(--blue-bg,#e8f0fe);color:var(--blue-fg,#1a73e8);padding:0.5rem 1rem;border-radius:8px;margin:0.5rem 0"><div class="row between"><span>⏳ Render चल रहा है — editing जारी रखें</span>${E.canEdit ? `<button class="btn small quiet" data-jcancel="${job.id}">✕ रद्द</button>` : ""}</div><div class="progress" style="margin-top:0.3rem"><i style="width:${job.progress || 0}%"></i></div><p class="small muted">${esc(jobSub(job))}</p></div>` : ""}
+    ${exportAdvHtml().split("\u0000")[1]}`}
+    ${job ? `<div class="box" style="background:var(--blue-bg,#e8f0fe);color:var(--blue-fg,#1a73e8);padding:0.5rem 1rem;border-radius:8px;margin:0.5rem 0"><div class="row between"><span>⏳ Render चल रहा है — editing जारी रखें</span>${E.canEdit ? `<button class="btn small quiet" data-jcancel="${job.id}">✕ रद्द</button>` : ""}</div><div class="progress" style="margin-top:0.3rem"><i id="exp-job-bar" style="width:${job.progress || 0}%"></i></div><p class="small muted" id="exp-job-sub">${esc(jobSub(job))}</p></div>` : ""}
     ${outs.length ? `<h3>तैयार वीडियो</h3><div class="outputs">${outs.map((a) => { const pl = S.presets?.platforms.find((x) => x.id === a.label); const srt = p.assets.find((s) => s.kind === "subtitle" && s.label === a.label);
       return `<div class="output ${a.meta.height > a.meta.width ? "vertical" : ""}"><video src="${a.url}" controls playsinline preload="metadata"></video><div class="row between"><b>${esc(a.label?.startsWith("short-") ? (a.meta.title || a.label) : pl ? pl.label : a.label)}</b><span class="muted small">${fmt(a.meta.duration)}${a.meta.height ? ` · ${a.meta.height > a.meta.width ? a.meta.width : a.meta.height}p` : ""}${a.meta.codec && a.meta.codec !== "h264" ? ` · ${a.meta.codec.toUpperCase()}` : ""}${a.size ? ` · ${mb(a.size)}` : ""}</span></div>${sigBadge(a)}<div class="row"><a class="btn small" href="${a.url}&download=1">download</a>${srt ? `<a class="btn quiet small" href="${srt.url}&download=1">SRT</a>` : ""}${p.status === "approved" && E.canEdit && (E.conns?.connections || []).length ? `<button class="btn small primary" data-pub="${a.id}">Publish</button>` : ""}</div>
         ${(E.pubs || []).filter((x) => x.asset_id === a.id).map((x) => `<div class="small pubrow ${x.status}">${PLAT[x.platform] || x.platform}: ${x.status === "done" ? `<a href="${x.url}" target="_blank" rel="noopener">${esc(x.url || "हो गया")}</a>` : x.status === "failed" ? `<span class="muted">असफल — ${esc((x.error || "").slice(0, 120))}</span>` : "upload हो रहा…"}</div>`).join("")}</div>`; }).join("")}</div>` : ""}
@@ -2884,6 +2902,7 @@ function renderExport() {
     ${E.pubFor ? publishForm(E.pubFor) : ""}
     <div class="row between" style="margin-top:1rem"><span class="small muted">${p.status === "review_output" && S.user.role !== "admin" ? "मंज़ूरी admin देंगे" : p.status === "approved" ? `मंज़ूर ✓ ${p.meta?.archived_at ? `· archived (${esc(p.meta.archive || "")}) <button class="btn small quiet" id="restore">raw वापस लाएँ</button>` : E.canEdit ? `<button class="btn small quiet" id="archive" title="raw files को Drive/archive पर भेजें, server खाली">☁ archive</button>` : ""}` : ""}</span>
       <span class="row">${p.status === "review_output" && S.user.role === "admin" ? `<button class="btn" id="approve">मंज़ूरी दें</button>` : ""}${E.canEdit && !E.montage ? `<button class="btn primary" id="go-render">${allFresh(outs) ? "दोबारा render (बदलाव नहीं)" : outs.length ? "दोबारा render" : "render करें"}</button>` : ""}</span></div></div>`;
+  { const nb = m.querySelector(".modal.exportbox"); if (nb && keepTop) nb.scrollTop = keepTop; }
   $("#mx", m).onclick = () => { E.exportOpen = false; renderExport(); };
   $$("[data-jcancel]", m).forEach((b) => (b.onclick = () => cancelJob(b.dataset.jcancel, b)));
   $$("[data-pub]", m).forEach((b) => (b.onclick = () => { const a = p.assets.find((x) => x.id === b.dataset.pub); E.pubFor = { asset: a, title: "", description: "", tags: "", conn: "", privacy: "private", when: "" }; renderExport(); $("#pubform", m)?.scrollIntoView({ behavior: "smooth" }); }));
@@ -2936,7 +2955,7 @@ function mfInfoHtml() {
 }
 
 // ---- export options (resolution / fps / codec / quality / audio) — server: engine/encode.py
-const EXP_DEF = { resolution: "source", width: 0, height: 0, fps: "source", container: "mp4", codec: "h264", mode: "crf", crf: 0, bitrate_kbps: 0, two_pass: false, audio_codec: "aac", audio_kbps: 192, sample_rate: 48000, mono: false, upscale: false, quality: "final" };
+const EXP_DEF = { resolution: "source", width: 0, height: 0, fps: "source", container: "mp4", codec: "h264", mode: "crf", crf: 0, bitrate_kbps: 0, two_pass: false, audio_codec: "aac", audio_kbps: 192, sample_rate: 48000, mono: false, upscale: false, quality: "final" , level: "standard" };
 function expOpts() { if (!E.rs.export || typeof E.rs.export !== "object") E.rs.export = { ...EXP_DEF }; return E.rs.export; }
 function mb(bytes) { return bytes >= 1e9 ? (bytes / 1e9).toFixed(2) + " GB" : (bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0) + " MB"; }
 function sigBadge(a) {
@@ -2948,11 +2967,16 @@ function allFresh(outs) { const main = outs.filter((a) => a.label && !a.label.st
 function exportAdvHtml() {
   const { esc } = E.ctx; const x = expOpts(); const enc = E.encoders || { codecs: ["h264"], audio: ["aac"], labels: {} };
   const isCustom = x.resolution === "custom"; const opt = (v, cur, l) => `<option value="${v}" ${String(cur) === String(v) ? "selected" : ""}>${l ?? v}</option>`;
-  const open = E.expAdvOpen || Object.keys(x).some((k) => k !== "upscale" && JSON.stringify(x[k]) !== JSON.stringify(EXP_DEF[k]));
-  return `<details class="insp" id="exp-adv" ${open ? "open" : ""}><summary>Advanced — resolution, fps, codec, quality <span class="muted small" id="exp-sum">${esc(expSummary())}</span></summary>
-    <div class="irow">${field("Mode", `<select id="x-q">${opt("final", x.quality || "final", "Final (पूरी quality)")}${opt("draft", x.quality || "final", "Fast draft — 720p, जल्दी देखने के लिए")}</select>`)}</div>
-    <div class="irow">${field("Resolution", `<select id="x-res">${["source", "360p", "480p", "720p", "1080p", "1440p", "2160p", "custom"].map((r) => opt(r, x.resolution, r === "source" ? "platform की (default)" : r === "2160p" ? "2160p (4K)" : r === "custom" ? "custom" : r)).join("")}</select>`)}
+  // size / quality / mode sit in the always-visible box; "Advanced" opens by itself only for its own settings
+  const open = E.expAdvOpen || Object.keys(x).some((k) => !["upscale", "resolution", "width", "height", "quality", "crf", "level"].includes(k) && JSON.stringify(x[k]) !== JSON.stringify(EXP_DEF[k]));
+  const ql = x.mode === "bitrate" || x.crf ? "custom" : (x.level || "standard");
+  return `<div class="box" id="exp-main" style="margin:.4rem 0"><b>Video का size और quality</b>
+    <div class="irow" style="margin-top:.4rem">${field("Size (pixel)", `<select id="x-res">${["source", "360p", "480p", "720p", "1080p", "1440p", "2160p", "custom"].map((r) => opt(r, x.resolution, r === "source" ? "platform की (default)" : r === "2160p" ? "2160p (4K)" : r === "custom" ? "custom" : r)).join("")}</select>`)}
       ${isCustom ? field("W × H", `<span class="row"><input type="number" id="x-w" value="${x.width || ""}" min="64" max="7680" step="2" style="width:80px"> × <input type="number" id="x-h" value="${x.height || ""}" min="64" max="4320" step="2" style="width:80px"></span>`) : ""}
+      ${field("Quality", `<select id="x-ql">${opt("high", ql, "High — सबसे साफ़, बड़ी file")}${opt("standard", ql, "Standard — platform के हिसाब से")}${opt("small", ql, "Small — छोटी file, हल्की quality")}${ql === "custom" ? opt("custom", ql, "Custom (Advanced में सेट)") : ""}</select>`)}
+      ${field("Mode", `<select id="x-q">${opt("final", x.quality || "final", "Final (पूरी quality)")}${opt("draft", x.quality || "final", "Fast draft — 720p, जल्दी देखने के लिए")}</select>`)}</div>
+    <p class="small muted" style="margin:.2rem 0 0">Size = कितने pixel का video बने (1080p = Full HD, 2160p = 4K)। «platform की» = हर platform का अपना सही size। source से बड़ा size तभी बनेगा जब नीचे Advanced में «upscale भी» चुनें।</p></div>\u0000<details class="insp" id="exp-adv" ${open ? "open" : ""}><summary>Advanced — fps, codec, bitrate, audio <span class="muted small" id="exp-sum">${esc(expSummary())}</span></summary>
+    <div class="irow">
       ${field("Frame rate", `<select id="x-fps">${["source", "23.976", "24", "25", "29.97", "30", "50", "59.94", "60"].map((f) => opt(f, x.fps, f === "source" ? "recording की" : f)).join("")}</select>`)}
       <label class="chk small" style="align-self:end" title="source से बड़ा size चुनने पर ही लागू"><input type="checkbox" id="x-up" ${x.upscale ? "checked" : ""}> upscale भी</label></div>
     <div class="irow">${field("Codec", `<select id="x-codec">${enc.codecs.map((c) => opt(c, x.codec, enc.labels?.[c] || c)).join("")}</select>`)}
@@ -2973,8 +2997,8 @@ function bindExportAdv(m) {
   d.ontoggle = () => { E.expAdvOpen = d.open; };
   const rerender = () => { E.expAdvOpen = true; E.dirty = true; renderExport(); };
   const set = (k, v) => { x[k] = v; E.dirty = true; $("#exp-sum", m).textContent = expSummary(); exportEstimate(m); };
-  $("#x-q", m) && ($("#x-q", m).onchange = (e) => { x.quality = e.target.value; rerender(); });
-  $("#x-res", m).onchange = (e) => { x.resolution = e.target.value; if (x.resolution === "custom" && !x.width) { x.width = 1080; x.height = 1920; } rerender(); };
+  $("#x-q", m) && ($("#x-q", m).onchange = (e) => { x.quality = e.target.value; E.dirty = true; renderExport(); });
+  $("#x-res", m).onchange = (e) => { x.resolution = e.target.value; if (x.resolution === "custom" && !x.width) { x.width = 1080; x.height = 1920; } E.dirty = true; renderExport(); };
   $("#x-w", m) && ($("#x-w", m).onchange = (e) => set("width", +e.target.value | 0)); $("#x-h", m) && ($("#x-h", m).onchange = (e) => set("height", +e.target.value | 0));
   $("#x-fps", m).onchange = (e) => set("fps", e.target.value); $("#x-up", m).onchange = (e) => set("upscale", e.target.checked);
   $("#x-codec", m).onchange = (e) => { x.codec = e.target.value; const ok = { h264: ["mp4", "mov"], h265: ["mp4", "mov"], vp9: ["webm", "mp4"], av1: ["mp4", "webm"] }[x.codec] || ["mp4"]; if (!ok.includes(x.container)) x.container = ok[0]; if (x.container === "webm") x.audio_codec = "opus"; else if (x.audio_codec === "opus" && x.container === "mov") x.audio_codec = "aac"; rerender(); };
@@ -2982,6 +3006,7 @@ function bindExportAdv(m) {
   $("#x-mode", m).onchange = (e) => { x.mode = e.target.value; if (x.mode === "bitrate" && !x.bitrate_kbps) x.bitrate_kbps = 6000; rerender(); };
   $("#x-br", m) && ($("#x-br", m).onchange = (e) => set("bitrate_kbps", +e.target.value | 0)); $("#x-2p", m) && ($("#x-2p", m).onchange = (e) => set("two_pass", e.target.checked));
   $("#x-crf", m) && ($("#x-crf", m).onchange = (e) => set("crf", +e.target.value | 0));
+  $("#x-ql", m) && ($("#x-ql", m).onchange = (e) => { if (e.target.value === "custom") return; x.mode = "crf"; x.crf = 0; x.level = e.target.value; E.dirty = true; renderExport(); });
   $("#x-ac", m).onchange = (e) => set("audio_codec", e.target.value); $("#x-ak", m).onchange = (e) => set("audio_kbps", +e.target.value); $("#x-sr", m).onchange = (e) => set("sample_rate", +e.target.value); $("#x-mono", m).onchange = (e) => set("mono", e.target.checked);
   $("#x-reset", m).onclick = () => { E.rs.export = { ...EXP_DEF }; rerender(); };
   exportEstimate(m);

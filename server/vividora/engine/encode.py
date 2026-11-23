@@ -32,7 +32,9 @@ _KBPS = {360: 700, 480: 1200, 720: 2600, 1080: 5500, 1440: 9500, 2160: 17000}
 
 DEFAULT = {"resolution": "source", "width": 0, "height": 0, "fps": "source", "container": "mp4", "codec": "h264",
            "mode": "crf", "crf": 0, "bitrate_kbps": 0, "two_pass": False, "audio_codec": "aac", "audio_kbps": 192,
-           "sample_rate": 48000, "mono": False, "upscale": False, "quality": "final"}
+           "sample_rate": 48000, "mono": False, "upscale": False, "quality": "final", "level": "standard"}
+# the simple "Quality" choice in the Export box: an offset on the codec's / platform's own CRF (lower CRF = cleaner, bigger)
+LEVELS = {"high": -3, "standard": 0, "small": 6}
 
 
 @functools.lru_cache(maxsize=1)
@@ -65,6 +67,7 @@ def normalize(raw: dict | None) -> dict:
         e["container"] = CODECS[e["codec"]]["containers"][0]
     e["mode"] = "bitrate" if r.get("mode") == "bitrate" else "crf"
     e["crf"] = max(0, min(51, int(r.get("crf") or 0)))
+    e["level"] = r.get("level") if r.get("level") in LEVELS else "standard"
     e["bitrate_kbps"] = max(0, min(200_000, int(r.get("bitrate_kbps") or 0)))
     if e["mode"] == "bitrate" and not e["bitrate_kbps"]:
         e["mode"] = "crf"
@@ -114,6 +117,8 @@ def plan(export: dict | None, preset: dict, src_meta: dict, fps_now: float) -> d
     crf = e["crf"] or codec["crf"]
     if e["codec"] == "h264" and e["mode"] == "crf" and not e["crf"]:
         crf = int(preset.get("video", {}).get("crf", 20))
+    if not e["crf"]:                                   # an exact CRF typed in Advanced wins over the simple level
+        crf = max(8, min(51, crf + LEVELS.get(e.get("level") or "standard", 0)))
     vargs: list[str] = ["-c:v", codec["enc"]]
     if e["codec"] == "h264":
         vargs += ["-profile:v", "high", "-pix_fmt", "yuv420p"]
