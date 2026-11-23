@@ -303,7 +303,7 @@ function srcOf(out) { let o = 0; for (const [a, b] of keeps()) { if (out <= o + 
 function cutAt(t) { return E.cuts.find((c) => c.enabled !== false && c.start <= t && t < c.end); }
 // a cut is morphed when it says so, or when morph cut is on for all cuts and it did not opt out (editor-schema §10)
 function morphOn(c) { const g = E.rs.effects.pro?.morph_cut || {}; return c.morph === true || (c.morph !== false && !!g.enabled && !!g.all); }
-const fmt = (t) => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t % 60; return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`; };
+const fmt = (t) => { t = Math.round(Math.max(0, t || 0) * 10) / 10; const m = Math.floor(t / 60), s = t % 60; return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`; };
 const fmtF = (t) => { const fps = E.p.meta?.fps || 30; const f = Math.round((t % 1) * fps); return `${fmt(Math.floor(t))}`.replace(/\.\d$/, "") + `:${f < 10 ? "0" : ""}${f}`; };
 
 // ---------- skeleton ----------
@@ -550,8 +550,8 @@ function seek(t) { const v = $("#pv", E.root); E.t = clamp(t, 0, E.dur); if (v) 
 function tick() {
   const v = $("#pv", E.root); if (!v) return;
   E.t = v.currentTime;
-  if (E.skipCuts && !v.paused) { const c = cutAt(E.t); if (c) { v.currentTime = Math.min(E.dur, c.end + 0.02); E.t = v.currentTime; } }
-  if (E.stopAt != null && E.t >= E.stopAt) { v.pause(); E.stopAt = null; }
+  if (E.skipCuts && !v.paused && !E.playCut) { const c = cutAt(E.t); if (c) { v.currentTime = Math.min(E.dur, c.end + 0.02); E.t = v.currentTime; } }
+  if (E.stopAt != null && E.t >= E.stopAt) { v.pause(); E.stopAt = null; E.playCut = false; }
   MIX.tick(E.t);
   renderOverlay(); renderPlayhead(true); PRO.drawBg();
   if (!v.paused) E.raf = requestAnimationFrame(tick);
@@ -1209,6 +1209,13 @@ function _renderInspector() {
       ${it.text ? `<p class="small muted">“${esc(it.text)}”</p>` : ""}
       <div class="irow">${field("से", num("start", it.start, 0.05, 0, E.dur))}${field("तक", num("end", it.end, 0.05, 0, E.dur))}</div>
       <label class="chk"><input type="checkbox" data-k="enabled" ${it.enabled !== false ? "checked" : ""} ${dis}> यह हिस्सा हटेगा</label>
+      <div class="box" style="margin:.4rem 0;padding:.5rem .6rem"><div class="row between"><b class="small">कुछ हिस्सा वापस जोड़ें</b><span class="small muted">${(it.end - it.start).toFixed(2)}s कट रहा है</span></div>
+        <div class="chips" style="margin-top:.3rem"><button data-cutfix="play" title="कटा हुआ हिस्सा सुनें / देखें">▶ सुनें</button><button data-cutfix="all" ${dis}>↩ पूरा वापस</button></div>
+        <div class="small muted" style="margin-top:.3rem">शुरू की तरफ़ से वापस</div><div class="chips"><button data-cutfix="s+0.2" ${dis}>0.2s</button><button data-cutfix="s+0.5" ${dis}>0.5s</button><button data-cutfix="s+1" ${dis}>1s</button><button data-cutfix="h1" ${dis}>पहला आधा</button><button data-cutfix="phb" ${dis} title="playhead से पहले का हिस्सा वीडियो में रहेगा">playhead तक</button></div>
+        <div class="small muted" style="margin-top:.3rem">आख़िर की तरफ़ से वापस</div><div class="chips"><button data-cutfix="e-0.2" ${dis}>0.2s</button><button data-cutfix="e-0.5" ${dis}>0.5s</button><button data-cutfix="e-1" ${dis}>1s</button><button data-cutfix="h2" ${dis}>दूसरा आधा</button><button data-cutfix="pha" ${dis} title="playhead के बाद का हिस्सा वीडियो में रहेगा">playhead से आगे</button></div>
+        <div class="small muted" style="margin-top:.3rem">और</div><div class="chips"><button data-cutfix="split" ${dis} title="playhead पर इस कट के दो कट बनेंगे — हर एक को अलग से चालू/बंद करें">✂ playhead पर दो कट</button><button data-cutfix="s-0.2" ${dis} title="कट 0.2s पहले से शुरू">◀ 0.2s और काटो</button><button data-cutfix="e+0.2" ${dis} title="कट 0.2s बाद तक">0.2s और काटो ▶</button></div>
+        ${(() => { const ws = (E.words || []).filter((w) => w.end > it.start + 0.01 && w.start < it.end - 0.01); return ws.length ? `<div class="small muted" style="margin-top:.4rem">कटे हुए शब्द — जिस शब्द पर click करेंगे वह वापस आ जाएगा</div><div class="chips">${ws.slice(0, 40).map((w) => `<button data-cutword="${(+w.start).toFixed(3)}|${(+w.end).toFixed(3)}" ${dis}>${esc(w.w)}</button>`).join("")}</div>` : ""; })()}
+      </div>
       <label class="chk" title="jump cut को optical-flow से smooth करें (Pro → Morph cut की settings)"><input type="checkbox" data-morph ${it.morph === true || (it.morph !== false && E.rs.effects.pro?.morph_cut?.enabled && E.rs.effects.pro?.morph_cut?.all) ? "checked" : ""} ${dis}> 🌗 Morph cut (smooth jump cut)</label>
       ${field("इस कट पर transition", `<select data-k="transition" ${dis}><option value="">default (${esc((E.ctx.S.presets?.transitions || []).find((t) => t.id === (E.rs.effects.transition || "none"))?.label || "none")})</option>${(E.ctx.S.presets?.transitions || []).map((t) => `<option value="${t.id}" ${it.transition === t.id ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>`)}
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} कट मिटाएँ</button></div>`;
@@ -1330,6 +1337,25 @@ function _renderInspector() {
   const mc = $("[data-morph]", ins); if (mc) mc.onchange = () => { if (!E.canEdit) return; const g = E.rs.effects.pro?.morph_cut || {};
     if (mc.checked) it.morph = true; else if (g.enabled && g.all) it.morph = false; else delete it.morph; touch(); renderTimeline(); if (E.tab === "cuts") renderPanel(); };
   const lm = $("[data-libmatte]", ins); if (lm) lm.onclick = () => { lm.disabled = true; ensureLibMatte(lm.dataset.libmatte, true); };
+  // ---- a cut: give part of it back (or take a bit more) without touching the numbers
+  const cutEdit = (parts) => {     // parts = the [start, end] pieces that stay cut; shorter than 0.08s are dropped
+    const keep = parts.filter(([a, b]) => b - a >= 0.08).map(([a, b]) => [+clamp(a, 0, E.dur).toFixed(3), +clamp(b, 0, E.dur).toFixed(3)]);
+    if (!keep.length) { it.enabled = false; touch(); renderTimeline(); renderPanel(); renderInspector(); return E.ctx.toast("पूरा हिस्सा वापस — कट बंद किया (Ctrl+Z से वापस)"); }
+    [it.start, it.end] = keep[0];
+    const extra = keep.slice(1).map(([a, b]) => ({ ...JSON.parse(JSON.stringify(it)), id: uid(), start: a, end: b }));
+    E.cuts.push(...extra); touch(); renderTimeline(); renderPanel(); renderInspector();
+  };
+  $$("[data-cutfix]", ins).forEach((b) => (b.onclick = () => { const a = b.dataset.cutfix; const t = E.t, mid = (it.start + it.end) / 2;
+    if (a === "play") { E.playCut = true; seek(Math.max(0, it.start - 0.6)); E.stopAt = Math.min(E.dur, it.end + 0.6); return $("#pv", E.root).play(); }
+    if (!E.canEdit) return;
+    if (a === "all") return cutEdit([]);
+    if (a === "h1") return cutEdit([[mid, it.end]]);
+    if (a === "h2") return cutEdit([[it.start, mid]]);
+    if (a === "phb" || a === "pha" || a === "split") { if (!(t > it.start + 0.04 && t < it.end - 0.04)) return E.ctx.toast("पहले playhead को इस कट के अंदर रखें (timeline पर लाल हिस्से में click करें)");
+      return cutEdit(a === "phb" ? [[t, it.end]] : a === "pha" ? [[it.start, t]] : [[it.start, t], [t, it.end]]); }
+    const n = parseFloat(a.slice(1)); if (a[0] === "s") cutEdit([[it.start + n, it.end]]); else cutEdit([[it.start, it.end + n]]); }));
+  $$("[data-cutword]", ins).forEach((b) => (b.onclick = () => { if (!E.canEdit) return; const [ws, we] = b.dataset.cutword.split("|").map(Number); const pad = 0.04;
+    cutEdit([[it.start, ws - pad], [we + pad, it.end]]); E.ctx.toast(`“${b.textContent}” वापस जोड़ा`); }));
   $$("[data-act]", ins).forEach((b) => (b.onclick = () => {
     const a = b.dataset.act;
     if (a === "del") deleteSel();
@@ -1439,7 +1465,20 @@ function renderPanel() {
       <h4>Timeline पर</h4><ul class="plist">${fx.titles.map((ti) => `<li class="${E.sel?.type === "title" && E.sel.id === ti._id ? "sel" : ""}" data-title-id="${ti._id}"><span class="grow small">${esc(ti.text)}</span><span class="small muted">${fmt(ti.start)}</span></li>`).join("") || `<li class="muted small">अभी कोई text नहीं</li>`}</ul>`;
   } else if (t === "ai") {
     const A = E.ai; const K = { hook: "🎬 Hook video (शुरुआत)", broll: "🎞 B-roll", background: "🖼 Cutout background", thumbnail: "🏷 Thumbnail background" };
-    h = `<div class="ph"><h3>AI Prompt Studio</h3><span class="small muted">Grok · ChatGPT · Veo</span></div>
+    const V = E.vz, vp = V?.providers || {}; const SRC = [["stock_video", "Stock video (Pixabay)", vp.stock], ["stock_photo", "Stock photo (Pixabay)", vp.stock], ["ai_image", "AI तस्वीर", !!vp.ai_image], ["ai_video", `AI video${vp.ai_video_usd ? " ≈ $" + vp.ai_video_usd + "/clip" : ""}`, !!vp.ai_video && !!vp.ai_image], ["library", "मेरी Library से", true]];
+    h = `<div class="ph"><h3>🎬 आवाज़ से visuals</h3><span class="small muted">अपने-आप</span></div>
+      <p class="small muted">आप जो बोलते हैं उसके हिसाब से Vividora लाइनें चुनता है, हर लाइन के लिए खोज के शब्द और AI prompt पहले से तैयार करता है, और आपके चुने source से video/तस्वीर लाकर उसी जगह timeline पर लगा देता है। हर चीज़ बदली जा सकती है।</p>
+      <div class="irow"><select id="vz-n" title="कितनी लाइनें">${[4, 6, 8, 12].map((n) => `<option ${n === (E.vzN || 6) ? "selected" : ""}>${n}</option>`).join("")}</select><button class="btn small primary" id="vz-go" ${dis}>✨ सुझाव बनाएँ</button>${V?.items?.length ? `<button class="btn small" id="vz-all" ${dis}>सब लगाएँ</button>` : ""}</div>
+      ${V ? `<label class="chk small"><input type="checkbox" id="vz-sfx" ${E.vzSfx !== false ? "checked" : ""}> हर visual के साथ हल्की whoosh आवाज़</label>
+        ${V.items.length ? "" : `<p class="note">कोई लाइन नहीं मिली — वीडियो बहुत छोटा है या transcript में बोलने वाली लाइनें नहीं हैं।</p>`}
+        ${!vp.stock && !vp.ai_image ? `<p class="note">अभी सिर्फ़ “मेरी Library से” चलेगा। Stock के लिए <code>.env</code> में <code>PIXABAY_API_KEY</code>, AI तस्वीर के लिए <code>CLOUDFLARE_ACCOUNT_ID</code> + <code>CLOUDFLARE_API_TOKEN</code>, AI video के लिए <code>FAL_KEY</code> डालें।</p>` : ""}
+        ${V.items.some((x) => x.by === "words") ? `<p class="small muted">⚠ AI (Gemini) नहीं मिला, इसलिए खोज के शब्द आपकी लाइन से ही लिए गए हैं। Stock खोज English में बेहतर चलती है — शब्द English में बदल लें।</p>` : ""}
+        ${V.items.map((x, i) => { const ai = x.src === "ai_image" || x.src === "ai_video"; return `<div class="box aicard" data-vzrow="${i}"><div class="row between"><b>⏱ ${fmt(x.start)}</b><span class="small ${x.status === "error" ? "err" : "muted"}">${esc(x.msg || "")}</span></div>
+          <p class="small muted">“${esc(x.text.slice(0, 140))}”</p>
+          <div class="irow"><select data-vz="src" ${dis}>${SRC.map(([v, l, ok]) => `<option value="${v}" ${x.src === v ? "selected" : ""} ${ok ? "" : "disabled"}>${esc(l)}${ok ? "" : " — set नहीं"}</option>`).join("")}</select><select data-vz="layout" ${dis}><option value="cover" ${x.layout !== "pip" ? "selected" : ""}>पूरी screen</option><option value="pip" ${x.layout === "pip" ? "selected" : ""}>छोटी window (कोने में)</option></select></div>
+          ${ai ? `<textarea data-vz="image_prompt" rows="3" title="AI तस्वीर का prompt" ${dis}>${esc(x.image_prompt)}</textarea>${x.src === "ai_video" ? `<input data-vz="video_prompt" value="${esc(x.video_prompt || "")}" title="AI video में क्या हिले" ${dis}>` : ""}` : `<input data-vz="query" value="${esc(x.query)}" title="खोज के शब्द (English बेहतर)" ${dis}>`}
+          <div class="irow"><button class="btn small primary" data-vzgo="${i}" ${dis} ${x.status === "busy" ? "disabled" : ""}>${x.status === "busy" ? "⏳ ला रहे हैं…" : x.status === "done" ? "✓ लगा — दोबारा" : "लगाएँ"}</button><button class="btn small quiet" data-vzseek="${i}">यहाँ जाएँ</button>${ai ? `<button class="btn small quiet" data-vzcopy="${i}">prompt copy</button>` : ""}<button class="btn small quiet" data-vzdel="${i}">हटाएँ</button></div></div>`; }).join("")}` : ""}
+      <div class="ph" style="margin-top:1rem"><h3>AI Prompt Studio</h3><span class="small muted">Grok · ChatGPT · Veo</span></div>
       <p class="small muted">Transcript से prompts बनते हैं। Copy करके Grok Imagine / ChatGPT में बनाएँ, फिर बना हुआ file यहीं “लगाएँ” से upload करें — सही जगह अपने-आप लग जाएगा।</p>
       <div class="irow"><select id="ai-plat"><option value="">platform: auto</option><option value="short">9:16 Shorts/Reels</option><option value="long">16:9 YouTube</option></select><select id="ai-n">${[2, 4, 6, 8].map((n) => `<option ${n === (E.aiN || 4) ? "selected" : ""}>${n}</option>`).join("")}</select><button class="btn small primary" id="ai-go">✨ prompts बनाएँ</button></div>
       ${A?.batch ? `<div class="box"><b>⚡ सब एक बार में</b><p class="small muted">${A.batch.count} prompts एक ही message में — ChatGPT/Grok में एक बार paste करें, सारी images/clips एक ही chat में बनेंगी (बार-बार credit नहीं)।</p>
@@ -1703,6 +1742,42 @@ function bindPanel() {
   $$("[data-tcat]", panel).forEach((b) => (b.onclick = () => { E.tCat = b.dataset.tcat; renderPanel(); }));
   $$("[data-tlang]", panel).forEach((b) => (b.onclick = () => { E.tLang = b.dataset.tlang; renderPanel(); }));
   on("#t-blank", "onclick", () => addTemplate(null));
+  // ---- visuals from the voice: plan → per-line source → fetch (background job) → B-roll on the timeline
+  const vzVertical = () => E.ratio !== "16:9";
+  const vzApply = async (i) => { const x = E.vz.items[i]; if (!x || x.status === "busy" || !E.canEdit) return;
+    x.status = "busy"; x.msg = ""; renderPanel();
+    try {
+      const { job } = await api("POST", `/projects/${E.pid}/visuals/fetch`, { source: x.src, query: x.query, prompt: x.image_prompt, video_prompt: x.video_prompt, text: x.text, vertical: vzVertical() });
+      let j; for (let k = 0; k < 260; k++) { await new Promise((r) => setTimeout(r, k < 5 ? 700 : 2000)); j = await api("GET", `/visuals/jobs/${job}`); if (j.status !== "running") break; if (j.message && j.message !== x.msg) { x.msg = j.message; if (E.tab === "ai") renderPanel(); } }
+      if (!j || j.status === "running") throw new Error("बहुत देर लग रही है — थोड़ी देर बाद Library में देखें");
+      if (j.status === "error") throw new Error(j.error || "नहीं हो पाया");
+      const it = j.item; E.lib = E.lib || []; if (!E.lib.some((y) => y.id === it.id)) E.lib.unshift(it);
+      const st = +outOf(x.start).toFixed(2); const len = Math.max(1.5, Math.min(x.end - x.start, it.kind === "image" ? 4 : (it.meta?.duration || 4.5)));
+      fx.broll = fx.broll.filter((b) => b._vz !== x.id);            // "दोबारा" replaces this line's earlier visual
+      fx.sfx = (fx.sfx || []).filter((q) => q._vz !== x.id);
+      fx.broll.push({ _id: "vz_" + uid(), _vz: x.id, id: it.id, start: st, end: +Math.min(outDur(), st + len).toFixed(2), fit: x.layout === "pip" ? "pip" : "cover", pos: "tr" });
+      const wh = E.vzSfx !== false && (E.lib || []).find((y) => y.kind === "sfx" && /^whoosh( soft)?$/i.test(y.name || ""));
+      if (wh) fx.sfx.push({ _id: "vzs_" + uid(), _vz: x.id, id: wh.id, at: +Math.max(0, st - 0.12).toFixed(2), volume: 0.45, duck: true });
+      x.status = "done"; x.msg = `${it.source === "pixabay" ? "Pixabay" : it.source === "ai" ? "AI" : "Library"}: ${it.name || ""}`.slice(0, 60); touch(); renderTimeline();
+    } catch (er) { x.status = "error"; x.msg = er.message; }
+    if (E.tab === "ai") renderPanel(); };
+  on("#vz-go", "onclick", async (e) => { e.target.disabled = true; e.target.textContent = "सोच रहे हैं…"; E.vzN = +$("#vz-n", panel).value;
+    try { await flush(); const r = await api("POST", `/projects/${E.pid}/visuals/plan`, { max_items: E.vzN }); const pv = r.providers || {};
+      const def = pv.stock ? "stock_video" : pv.ai_image ? "ai_image" : "library";
+      E.vz = { providers: pv, items: (r.items || []).map((x) => ({ ...x, src: def, status: "", msg: "" })) }; } catch (er) { toast(er.message); }
+    renderPanel(); });
+  on("#vz-sfx", "onchange", (e) => { E.vzSfx = e.target.checked; });
+  on("#vz-all", "onclick", async () => { const todo = E.vz.items.map((x, i) => i).filter((i) => E.vz.items[i].status !== "done" && E.vz.items[i].status !== "busy");
+    const paid = todo.filter((i) => E.vz.items[i].src === "ai_video").length; const usd = E.vz.providers?.ai_video_usd;
+    if (paid && !confirm(`${paid} AI video बनेंगी${usd ? ` — लगभग $${(paid * usd).toFixed(2)}` : ""} (fal.ai का खर्च)। आगे बढ़ें?`)) return;
+    for (const i of todo) await vzApply(i); toast("visuals लग गए — timeline देखें (Ctrl+Z से वापस)"); });
+  $$("[data-vzrow]", panel).forEach((row) => { const i = +row.dataset.vzrow; const x = E.vz.items[i];
+    $$("[data-vz]", row).forEach((el) => (el.onchange = () => { x[el.dataset.vz] = el.value; if (el.dataset.vz === "src") { x.status = ""; x.msg = ""; renderPanel(); } })); });
+  $$("[data-vzgo]", panel).forEach((b) => (b.onclick = () => { const x = E.vz.items[+b.dataset.vzgo]; const usd = E.vz.providers?.ai_video_usd;
+    if (x.src === "ai_video" && !confirm(`AI video बनेगी${usd ? ` — लगभग $${usd}` : ""} (fal.ai का खर्च), 1–3 मिनट लगेंगे। आगे बढ़ें?`)) return; vzApply(+b.dataset.vzgo); }));
+  $$("[data-vzseek]", panel).forEach((b) => (b.onclick = () => seek(E.vz.items[+b.dataset.vzseek].start)));
+  $$("[data-vzcopy]", panel).forEach((b) => (b.onclick = () => { navigator.clipboard?.writeText(E.vz.items[+b.dataset.vzcopy].image_prompt).then(() => toast("prompt copy हुआ")).catch(() => {}); }));
+  $$("[data-vzdel]", panel).forEach((b) => (b.onclick = () => { E.vz.items.splice(+b.dataset.vzdel, 1); renderPanel(); }));
   on("#ai-go", "onclick", async (e) => { e.target.disabled = true; e.target.textContent = "बन रहे…"; E.aiN = +$("#ai-n", panel).value; try { await flush(); E.ai = await api("GET", `/projects/${E.pid}/prompts?broll=${E.aiN}${$("#ai-plat", panel).value ? "&platform=" + $("#ai-plat", panel).value : ""}`); E.aiPack = await api("GET", `/projects/${E.pid}/aipack`).catch(() => null); } catch (er) { toast(er.message); } renderPanel(); });
   $$("[data-aiall]", panel).forEach((b) => (b.onclick = () => { const w = b.dataset.aiall; navigator.clipboard?.writeText(E.ai.batch[w]); window.open(w === "grok" ? "https://grok.com/imagine" : "https://chatgpt.com/", "_blank", "noopener"); toast("सारे prompts copy हुए — वहाँ एक बार paste करें"); }));
   on("#ai-pin", "onclick", () => { navigator.clipboard?.writeText(E.aiPack.pack.pinned_comment); toast("copy हुआ"); });

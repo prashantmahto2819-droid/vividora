@@ -160,21 +160,22 @@ def pick_visual(scene: dict, library: list[dict], used: set[str]) -> dict | None
     return best
 
 
-def stock_candidates(query: str, key: str, http_json) -> list[dict]:
+def stock_candidates(query: str, key: str, http_json, want: str = "any", orientation: str = "horizontal") -> list[dict]:
     """Pixabay for a query (safe-search on): videos first, photos when there are no videos.
-    Returns [{url, kind: broll|image, license, creator, page, id}]."""
+    want = "video" | "photo" limits it to one kind. Returns [{url, kind: broll|image, license, creator, page, id}]."""
     import urllib.parse
     q = urllib.parse.quote(query)
     out = []
-    data = http_json(f"https://pixabay.com/api/videos/?key={key}&q={q}&per_page=5&safesearch=true")
+    data = http_json(f"https://pixabay.com/api/videos/?key={key}&q={q}&per_page=5&safesearch=true") if want != "photo" else {}
     for r in data.get("hits", []):
         v = (r.get("videos") or {}).get("medium") or (r.get("videos") or {}).get("small") or {}
         if v.get("url"):
             out.append({"url": v["url"], "kind": "broll", "license": "Pixabay Content License", "creator": r.get("user"),
                         "page": r.get("pageURL"), "id": str(r.get("id"))})
-    if out:
+    if out or want == "video":
         return out
-    data = http_json(f"https://pixabay.com/api/?key={key}&q={q}&per_page=5&safesearch=true&image_type=photo&orientation=horizontal")
+    data = http_json(f"https://pixabay.com/api/?key={key}&q={q}&per_page=5&safesearch=true&image_type=photo"
+                     f"&orientation={'vertical' if orientation == 'vertical' else 'horizontal'}")
     for r in data.get("hits", []):
         u = r.get("largeImageURL") or r.get("webformatURL")
         if u:
