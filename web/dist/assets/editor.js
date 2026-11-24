@@ -1206,7 +1206,7 @@ function supHtml(dis) {
   const { esc } = E.ctx; const S = supState(); const pool = (E.lib || []).filter((x) => (x.kind === "broll" || x.kind === "image") && x.source !== "starter" && !S.clips.some((c) => c.id === x.id));
   const R = S.res; const placed = R ? R.filter((r) => r.start != null).length : 0;
   return `<div class="ph"><h3>📎 Podcast की supporting clips</h3><span class="small muted">अपने-आप सही जगह</span></div>
-    <p class="small muted">मुख्य video यह रहा। अब उससे जुड़ी <b>clips और photos</b> यहाँ डालें — Vividora आपकी बात सुनकर (transcript से) हर clip को वहीं लगाता है जहाँ आप उसके बारे में बोल रहे हैं। File का नाम साफ़ रखें (<code>taj mahal.jpg</code>) या नीचे एक-दो शब्द लिख दें; बिल्कुल पक्का समय चाहिए तो <code>1:23</code> लिख दें।</p>
+    <p class="small muted">मुख्य video यह रहा। अब उससे जुड़ी <b>clips और photos</b> यहाँ डालें — Vividora आपकी बात सुनकर (transcript से) हर clip को वहीं लगाता है जहाँ आप उसके बारे में बोल रहे हैं। Gemini की key हो तो Vividora हर clip को <b>खोलकर देखता</b> भी है (उसमें क्या दिख रहा है), इसलिए <code>IMG_5521.jpg</code> जैसा नाम भी चल जाता है। key न हो तो file का नाम साफ़ रखें (<code>taj mahal.jpg</code>) या नीचे एक-दो शब्द लिख दें; बिल्कुल पक्का समय चाहिए तो <code>1:23</code> लिख दें।</p>
     <div class="irow" style="flex-wrap:wrap;gap:.35rem"><label class="btn small primary ${dis ? "disabled" : ""}">＋ clips / photos upload<input type="file" id="sup-up" accept="video/*,image/*" multiple hidden ${dis}></label>
       ${pool.length ? `<select id="sup-pick" ${dis}><option value="">Library से जोड़ें…</option>${pool.slice(0, 200).map((x) => `<option value="${x.id}">${x.kind === "image" ? "🖼" : "🎞"} ${esc(x.name.slice(0, 40))}</option>`).join("")}</select>` : ""}</div>
     <div id="lib-progress"></div>
@@ -1217,6 +1217,7 @@ function supHtml(dis) {
       <div class="irow" style="margin-top:.4rem"><button class="btn primary" id="sup-go" ${dis} ${S.busy ? "disabled" : ""}>${S.busy ? "⏳ बात से मिला रहे हैं…" : "🔍 सही जगह ढूँढो"}</button>${R && placed ? `<button class="btn" id="sup-apply" ${dis}>✅ ${placed} को timeline पर लगाओ</button>` : ""}</div>` : `<p class="small muted">अभी कोई supporting clip नहीं चुनी।</p>`}
     ${R ? `<p class="small ${placed === R.length ? "muted" : ""}">${placed}/${R.length} की जगह मिली${S.ai ? " · AI ने बात समझकर मिलाया" : S.aiOn ? " · शब्दों से मिलाया" : ` · AI की key नहीं है (<a href="#/api">API & Keys</a> में Gemini डालें तो बात का मतलब समझकर मिलाएगा), अभी सिर्फ़ शब्दों से मिलाया`}। समय बदलना हो तो नीचे बदलें, फिर “लगाओ” दबाएँ।</p>
       ${[...R.keys()].sort((a, b) => (R[a].start ?? 1e9) - (R[b].start ?? 1e9)).map((i) => { const r = R[i]; const [lab, cls] = SUP_HOW[r.how] || SUP_HOW.none; return `<div class="box aicard suprow ${r.start == null ? "off" : ""}" data-supr="${i}"><div class="row between"><b class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${r.kind === "image" ? "🖼" : "🎞"} ${esc(r.name)}</b><span class="small sup-how ${cls}">${lab}</span></div>
+        ${r.seen ? `<p class="small" style="margin:.15rem 0;opacity:.85">👁 दिखता है: ${esc(r.seen.slice(0, 110))}</p>` : ""}
         ${r.line ? `<p class="small muted">“${esc(r.line.slice(0, 130))}”</p>` : ""}
         <div class="irow" style="align-items:center;gap:.35rem"><span class="small muted">कब</span><input type="number" class="supr-t" min="0" step="0.5" value="${r.start == null ? "" : (+r.start).toFixed(1)}" placeholder="—" style="width:76px" ${dis}><span class="small muted">s · ${r.start == null ? "" : fmt(r.start)}</span><span class="grow"></span>${r.start != null ? `<button class="btn small quiet supr-seek">यहाँ जाएँ</button>` : ""}</div></div>`; }).join("")}` : ""}`;
 }
@@ -1539,7 +1540,13 @@ function renderPanel() {
     h = `<div class="ph"><h3>Auto-cut</h3><span class="small muted">${on.length} कट · ${on.reduce((s, c) => s + c.end - c.start, 0).toFixed(1)}s हटेंगे</span></div>
       <div class="irow"><label class="small muted grow">रुकावट की सीमा <input type="number" id="max-pause" step="0.1" min="0.2" max="3" value="${E.p.edl?.options?.max_pause ?? 0.55}"> s</label><button class="btn small" id="recut" ${dis}>दोबारा ढूँढें</button></div>
       <div class="irow"><button class="btn small quiet" id="cuts-all-on" ${dis}>सब चालू</button><button class="btn small quiet" id="cuts-all-off" ${dis}>सब बंद</button></div>
-      <ul class="plist">${[...E.cuts].sort((a, b) => a.start - b.start).map((c) => `<li class="${c.enabled === false ? "off" : ""} ${E.sel?.type === "cut" && E.sel.id === c.id ? "sel" : ""}" data-cut="${c.id}">
+      ${(() => { const L = { silence: "चुप्पी / लंबा रुकना", filler: "अं-आं (filler)", retake: "दोबारा बोला (retake)", manual: "आपके अपने कट" }; const kinds = Object.keys(L).filter((k) => E.cuts.some((c) => c.reason === k)); if (!kinds.length) return "";
+        const gone = on.reduce((x, c) => x + c.end - c.start, 0); const pct = E.dur ? Math.round(gone / E.dur * 100) : 0;
+        return `<div class="box cutrep"><b>🧹 सफ़ाई का हिसाब</b><p class="small" style="margin:.2rem 0 .4rem">असली <b>${fmt(E.dur)}</b> → बचेगा <b>${fmt(Math.max(0, E.dur - gone))}</b> <span class="muted">(${pct}% हटा)</span></p>
+          ${kinds.map((k) => { const all = E.cuts.filter((c) => c.reason === k); const act = all.filter((c) => c.enabled !== false); const secs = act.reduce((x, c) => x + c.end - c.start, 0);
+            return `<div class="cutrep-row"><label class="chk small"><input type="checkbox" data-cutkind="${k}" ${act.length ? "checked" : ""} ${dis}> <span class="tag ${k}">${L[k]}</span></label><span class="small muted">${act.length}/${all.length} · ${secs.toFixed(1)}s</span><button class="btn small quiet ${E.cutFilter === k ? "on" : ""}" data-cutfilter="${k}">${E.cutFilter === k ? "सब दिखाओ" : "सिर्फ़ ये"}</button></div>`; }).join("")}
+          <p class="small muted" style="margin:.4rem 0 0">किसी तरह के सारे कट एक साथ बंद/चालू करें। कोई एक कट वापस चाहिए तो नीचे list में उसका tick हटाएँ, या कट पर click करके “वापस” के बटन इस्तेमाल करें।</p></div>`; })()}
+      <ul class="plist">${[...E.cuts].filter((c) => !E.cutFilter || c.reason === E.cutFilter).sort((a, b) => a.start - b.start).map((c) => `<li class="${c.enabled === false ? "off" : ""} ${E.sel?.type === "cut" && E.sel.id === c.id ? "sel" : ""}" data-cut="${c.id}">
         <input type="checkbox" ${c.enabled !== false ? "checked" : ""} ${dis}><span class="tag ${c.reason}">${{ silence: "चुप्पी", filler: "अं-आं", retake: "retake", manual: "आपका" }[c.reason] || c.reason}</span><span class="grow small">${esc(c.text || "")}</span><button class="ibtn mbtn ${morphOn(c) ? "on" : ""}" data-cmorph="${c.id}" title="🌗 Morph cut — इस jump cut को smooth करें" ${dis}>🌗</button><span class="small muted">${fmt(c.start)}</span></li>`).join("")}</ul>
       <p class="small muted">अपना कट: वीडियो में I दबाएँ, फिर O, फिर X (या “हटाएँ”)।</p>`;
   } else if (t === "captions" && E.capMode === "text") {
@@ -1816,6 +1823,8 @@ function bindPanel() {
       else { select({ type: "cut", id: c.id }); seek(c.start); renderPanel(); } };
   });
   on("#cuts-all-on", "onclick", () => { E.cuts.forEach((c) => (c.enabled = true)); touch(); renderPanel(); });
+  $$("[data-cutkind]", panel).forEach((el) => (el.onchange = () => { if (!E.canEdit) return; const k = el.dataset.cutkind; E.cuts.forEach((c) => { if (c.reason === k) c.enabled = el.checked; }); touch(); renderPanel(); }));
+  $$("[data-cutfilter]", panel).forEach((b) => (b.onclick = () => { E.cutFilter = E.cutFilter === b.dataset.cutfilter ? "" : b.dataset.cutfilter; const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; }));
   on("#cuts-all-off", "onclick", () => { E.cuts.forEach((c) => (c.enabled = false)); touch(); renderPanel(); });
   on("#recut", "onclick", async () => { await flush(); const ctx = E.ctx; await api("POST", `/projects/${E.pid}/recut`, { options: { max_pause: +$("#max-pause", panel).value } }); toast("कट दोबारा ढूँढे जा रहे हैं"); unmount(); await ctx.load(); ctx.render(); });
   // captions

@@ -100,6 +100,69 @@ def ask_json(prompt: str, *, system: str = "", max_tokens: int = 2048, timeout: 
     return res
 
 
+def ask_json_images(prompt: str, images: list[bytes], *, system: str = "", max_tokens: int = 1500, timeout: float = 90, cache: bool = True, http=None):
+    """A question about pictures (JPEG bytes, in order) → JSON. Gemini and Anthropic can see; with Ollama / no key → None.
+    Cached like ask_json (the pictures are part of the key). `http(url, body, headers) -> dict` is for tests."""
+    global LAST_ERROR
+    which = available()
+    if which not in ("gemini", "claude") or not images:
+        return None
+    import base64
+    h = hashlib.sha256()
+    for im in images:
+        h.update(hashlib.sha256(im).digest())
+    key = hashlib.sha256(f"img|{which}|{_model(which)}|{system}|{max_tokens}|{prompt}|{h.hexdigest()}".encode()).hexdigest()[:32]
+    cf = _cache_dir() / f"{key}.json"
+    use_cache = cache and os.getenv("LLM_CACHE", "1") != "0"
+    if use_cache and cf.exists():
+        try:
+            _stat("hits")
+            return json.loads(cf.read_text())
+        except ValueError:
+            pass
+    if not _gate():
+        return None
+
+    def post(url: str, body: dict, headers: dict) -> dict:
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", **headers})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    post = http or post
+    b64 = [base64.b64encode(im).decode() for im in images]
+    try:
+        if which == "gemini":
+            parts = [{"text": prompt}] + [{"inline_data": {"mime_type": "image/jpeg", "data": x}} for x in b64]
+            body = {"contents": [{"role": "user", "parts": parts}],
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens, "responseMimeType": "application/json"}}
+            if system:
+                body["systemInstruction"] = {"parts": [{"text": system}]}
+            data = post(f"https://generativelanguage.googleapis.com/v1beta/models/{_gemini_model()}:generateContent?key={os.environ['GEMINI_API_KEY']}", body, {})
+            text = "".join(p_.get("text", "") for p_ in data["candidates"][0]["content"]["parts"])
+        else:
+            content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": x}} for x in b64] + [{"type": "text", "text": prompt}]
+            data = post("https://api.anthropic.com/v1/messages",
+                        {"model": os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5"), "max_tokens": max_tokens, "system": system or "Reply with JSON only.",
+                         "messages": [{"role": "user", "content": content}]},
+                        {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01"})
+            text = "".join(p_.get("text", "") for p_ in data.get("content", []))
+        res = _extract_json(text)
+        LAST_ERROR = ""
+    except urllib.error.HTTPError as e:
+        LAST_ERROR = f"AI ({which}) HTTP {e.code}"
+        return None
+    except Exception as e:  # noqa: BLE001
+        LAST_ERROR = f"AI ({which}): {str(e)[:160]}"
+        return None
+    _stat("calls")
+    _count()
+    if use_cache and res is not None:
+        try:
+            cf.write_text(json.dumps(res, ensure_ascii=False))
+        except OSError:
+            pass
+    return res
+
+
 LAST_ERROR = ""   # shown in the UI when AI falls back to templates
 BUDGET = 10**9    # worker: AI calls allowed for the current job's workspace (set from the claim); API: via saas
 

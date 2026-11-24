@@ -80,6 +80,70 @@ def main() -> None:
     print("PASS no two clips on one spot, no overlap, empty transcript is safe")
 
 
+def test_look_inside() -> None:
+    """A clip with a camera file name is placed by what it SHOWS (vision model stand-in): frames are made, described in
+    English + Hindi, and the Hindi words match the spoken line."""
+    import subprocess
+    import tempfile
+    t = Path(tempfile.mkdtemp(prefix="vividora-see-"))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=1280x720:d=6:r=10", "-pix_fmt", "yuv420p", str(t / "v.mp4")], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=orange:s=2000x1000", "-frames:v", "1", str(t / "p.jpg")], check=True)
+    fv, fp = sm.frames_of(t / "v.mp4", "video", 6.0), sm.frames_of(t / "p.jpg", "image")
+    assert len(fv) == 2 and len(fp) == 1 and all(x[:2] == b"\xff\xd8" for x in fv + fp) and len(fp[0]) < 60_000
+
+    asked = []
+
+    def see(prompt, images, system=""):
+        asked.append((prompt, len(images)))
+        assert "Clip 1: pictures 1, 2" in prompt and "Clip 2: picture 3" in prompt and len(images) == 3
+        return [{"clip": 1, "en": "laptop on a desk, hands typing", "hi": "मेज़ पर laptop, टाइप करते हाथ"}, {"clip": 2, "en": "Taj Mahal at sunrise", "hi": "सुबह का ताज महल"},
+                {"clip": 9, "en": "ignored"}, "junk"]
+    seen = sm.describe([{"id": "a", "frames": fv}, {"id": "b", "frames": fp}, {"id": "c", "frames": []}], see)
+    assert set(seen) == {"a", "b"} and "ताज महल" in seen["b"] and seen["a"].startswith("laptop on a desk") and len(asked) == 1
+    clips = [{"id": "a", "name": "VID_20261101.mp4", "kind": "video", "duration": 6, "seen": seen["a"]},
+             {"id": "b", "name": "IMG_5521.jpg", "kind": "image", "seen": seen["b"]}]
+    r = by_id(sm.match(SEGS, clips, duration=80.0, spread=False))
+    assert r["b"]["how"] == "words" and r["b"]["i"] == 1 and r["a"]["i"] == 6, r               # Taj line, laptop line — from the pictures alone
+    assert sm.describe([{"id": "a", "frames": fv}], lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down"))) == {}
+    print("PASS looking inside: frames → descriptions (en + hi) → the right line, without any file name or note")
+
+
+def test_vision_call() -> None:
+    """llm.ask_json_images: the request carries the pictures for Gemini and for Anthropic, the answer is parsed and cached."""
+    import base64
+    import os
+    import tempfile
+    os.environ["DATA_ROOT"] = tempfile.mkdtemp(prefix="vividora-llmc-")
+    from vividora.engine import llm
+    for k in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_URL", "LLM_PROVIDER"):
+        os.environ.pop(k, None)
+    assert llm.ask_json_images("x", [b"abc"]) is None                                   # no key → no call
+    os.environ["GEMINI_API_KEY"] = "g-key"
+    os.environ["GEMINI_MODEL"] = "gemini-test"
+    calls = []
+
+    def http(url, body, headers):
+        calls.append((url, body, headers))
+        if "googleapis" in url:
+            assert "gemini-test:generateContent?key=g-key" in url
+            parts = body["contents"][0]["parts"]
+            assert parts[0]["text"] == "what?" and base64.b64decode(parts[1]["inline_data"]["data"]) == b"JPEG1" and parts[2]["inline_data"]["mime_type"] == "image/jpeg"
+            return {"candidates": [{"content": {"parts": [{"text": '[{"clip": 1, "en": "a cat"}]'}]}}]}
+        assert headers["x-api-key"] == "a-key" and body["messages"][0]["content"][0]["source"]["data"] == base64.b64encode(b"JPEG1").decode()
+        assert body["messages"][0]["content"][-1] == {"type": "text", "text": "what?"}
+        return {"content": [{"type": "text", "text": '{"items": [{"clip": 1, "en": "a dog"}]}'}]}
+    assert llm.ask_json_images("what?", [b"JPEG1", b"JPEG2"], http=http) == [{"clip": 1, "en": "a cat"}] and len(calls) == 1
+    assert llm.ask_json_images("what?", [b"JPEG1", b"JPEG2"], http=http) == [{"clip": 1, "en": "a cat"}] and len(calls) == 1      # cached
+    assert llm.ask_json_images("what?", [b"JPEG1", b"OTHER"], http=lambda *a: (_ for _ in ()).throw(TimeoutError("slow"))) is None  # failure → None
+    os.environ.pop("GEMINI_API_KEY")
+    os.environ["ANTHROPIC_API_KEY"] = "a-key"
+    assert llm.ask_json_images("what?", [b"JPEG1"], http=http) == {"items": [{"clip": 1, "en": "a dog"}]}
+    os.environ.pop("ANTHROPIC_API_KEY")
+    print("PASS vision call: Gemini + Anthropic request shapes, cache, failure is None")
+
+
 if __name__ == "__main__":
+    test_vision_call()
+    test_look_inside()
     main()
     print("ALL PASS")

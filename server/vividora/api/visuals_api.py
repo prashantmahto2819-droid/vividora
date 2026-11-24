@@ -174,6 +174,24 @@ async def support_match(request: Request, user: dict):
                       "kind": "image" if is_img else "video", "duration": float(meta.get("duration") or 0)})
     if not clips:
         raise ApiError(422, "पहले supporting clips / photos चुनें या upload करें")
+    # look inside the clips once (kept in the Library item): a camera file name says nothing, the picture does
+    seen_new = 0
+    if d.get("use_ai", True) and llm.available() in ("gemini", "claude"):
+        rows = {c["id"]: db.get("library", c["id"]) for c in clips}
+        need = [c for c in clips if not (rows[c["id"]].get("meta") or {}).get("ai_seen")]
+
+        def look() -> dict:
+            todo = [{"id": c["id"], "frames": supportmatch.frames_of(storage.abs_path(rows[c["id"]]["path"]), c["kind"], c["duration"])} for c in need[:30]]
+            return supportmatch.describe(todo, llm.ask_json_images)
+        if need:
+            found = await run_in_threadpool(look)
+            with db.tx() as cx:
+                for cid, text in found.items():
+                    db.update(cx, "library", cid, {"meta": {**(rows[cid].get("meta") or {}), "ai_seen": text}})
+                    rows[cid]["meta"] = {**(rows[cid].get("meta") or {}), "ai_seen": text}
+            seen_new = len(found)
+        for c in clips:
+            c["seen"] = str((rows[c["id"]].get("meta") or {}).get("ai_seen") or "")
     edl = p.get("edl") or {}
     dur = float((p.get("meta") or {}).get("duration") or edl.get("duration") or 0) or None
     ask = llm.ask_json if (d.get("use_ai", True) and llm.available()) else None
@@ -182,7 +200,8 @@ async def support_match(request: Request, user: dict):
         segs, clips, cuts=edl.get("cuts") or [], duration=dur, spread=bool(d.get("spread", True)),
         image_seconds=num("image_seconds", 4, 1.5, 15), video_seconds=num("video_seconds", 6, 1.5, 30), ask=ask))
     names = {c["id"]: c for c in clips}
-    return ok({"placements": [{**r, "name": names[r["id"]]["name"], "kind": names[r["id"]]["kind"]} for r in res],
+    return ok({"placements": [{**r, "name": names[r["id"]]["name"], "kind": names[r["id"]]["kind"], "seen": names[r["id"]].get("seen", "")} for r in res],
+               "seen_new": seen_new,
                "ai": any(r["how"] == "ai" for r in res), "ai_on": bool(ask), "placed": sum(1 for r in res if r["start"] is not None), "total": len(res)})
 
 

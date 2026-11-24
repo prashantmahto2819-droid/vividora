@@ -686,3 +686,6 @@ label.btn.disabled { opacity: .5; pointer-events: none; }
 /* several items chosen together */
 .itm.msel { outline: 2px solid var(--accent); outline-offset: -1px; }
 .itm.msel.sel { outline-color: var(--amber); }
+.cutrep { margin: .5rem 0; }
+.cutrep-row { display: flex; align-items: center; gap: .5rem; padding: .15rem 0; }
+.cutrep-row label { flex: 1; min-width: 0; } .cutrep-row .btn.on { background: var(--amber); color: #111; }

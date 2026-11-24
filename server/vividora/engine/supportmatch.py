@@ -100,11 +100,21 @@ def _sim(a: str, b: str) -> float:
     return 0.65 if r >= 0.84 else 0.0
 
 
-def _score(clip_tokens: list[str], line_tokens: list[str]) -> float:
+def _score(clip_tokens: list[str], line_tokens: list[str], rarity: dict | None = None) -> float:
+    """How well a clip's words are found in one spoken line, 0…1. A long description (what the vision model saw) is not
+    punished for its extra words: three matching words are a full match. A word spoken in many lines counts for less."""
     if not clip_tokens or not line_tokens:
         return 0.0
-    got = sum(max((_sim(c, l) for l in line_tokens), default=0.0) for c in clip_tokens)
-    return got / len(clip_tokens)
+    got = 0.0
+    for c in clip_tokens:
+        best, hit = 0.0, None
+        for ln in line_tokens:
+            v = _sim(c, ln)
+            if v > best:
+                best, hit = v, ln
+        if hit is not None:
+            got += best * (rarity or {}).get(hit, 1.0)
+    return min(1.0, got / min(len(clip_tokens), 3))
 
 
 _TIME = re.compile(r"(?<!\d)(\d{1,2}):([0-5]\d)(?::([0-5]\d))?(?!\d)|(?<!\w)(\d{1,3})\s*m(?:in)?\s*(\d{1,2})\s*s(?:ec)?\b", re.I)
@@ -122,6 +132,51 @@ def explicit_time(text: str) -> float | None:
 
 def _natural(name: str):
     return [int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", str(name or ""))]
+
+
+def frames_of(path, kind: str, duration: float = 0.0, max_side: int = 512) -> list[bytes]:
+    """Small JPEGs of a clip for the vision model: the photo itself, or two moments of a video."""
+    import subprocess
+    vf = f"scale='min({max_side},iw)':-2"
+    times = [None] if kind == "image" else ([max(0.2, duration * 0.25), max(0.4, duration * 0.65)] if duration > 2 else [0.2])
+    out = []
+    for t in times:
+        cmd = ["ffmpeg", "-v", "error", "-y", *(["-ss", f"{t:.2f}"] if t is not None else []), "-i", str(path), "-frames:v", "1", "-vf", vf,
+               "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "6", "-"]
+        r = subprocess.run(cmd, capture_output=True)
+        if r.returncode == 0 and len(r.stdout) > 500:
+            out.append(r.stdout)
+    return out
+
+
+def describe(clips: list[dict], ask_images, *, batch: int = 6) -> dict:
+    """What each clip SHOWS, in a few words of English and of Hindi — so a clip called IMG_5521.jpg can still find the
+    line it belongs to. clips: [{id, frames: [jpeg bytes]}] → {id: "english words · हिंदी शब्द"}. Failures are just missing."""
+    out: dict = {}
+    todo = [c for c in clips if c.get("frames")]
+    for i in range(0, len(todo), batch):
+        part = todo[i:i + batch]
+        imgs, lines, n = [], [], 0
+        for k, c in enumerate(part):
+            fr = c["frames"][:2]
+            lines.append(f"Clip {k + 1}: picture{'s' if len(fr) > 1 else ''} {', '.join(str(n + j + 1) for j in range(len(fr)))}")
+            imgs += fr
+            n += len(fr)
+        prompt = ("These pictures are supporting clips for a talk video (a podcast). For each clip say what it SHOWS, so an editor can place it where the "
+                  "speaker talks about it: the main things, place, people (by role, not name unless a caption names them), and any readable text.\n"
+                  + "\n".join(lines) + '\n\nReturn a JSON array, one object per clip, in order: {"clip": number, "en": "6-12 plain English words", '
+                  '"hi": "the same in Hindi, Devanagari script, 6-12 words"}')
+        try:
+            ans = ask_images(prompt, imgs, system="You describe pictures literally and briefly. JSON only.")
+        except Exception:  # noqa: BLE001
+            ans = None
+        for r in (ans if isinstance(ans, list) else (ans or {}).get("items") or []) if ans else []:
+            if not isinstance(r, dict) or not isinstance(r.get("clip"), int) or not (1 <= r["clip"] <= len(part)):
+                continue
+            en, hi = re.sub(r"\s+", " ", str(r.get("en") or "")).strip()[:120], re.sub(r"\s+", " ", str(r.get("hi") or "")).strip()[:120]
+            if en or hi:
+                out[part[r["clip"] - 1]["id"]] = " · ".join(x for x in (en, hi) if x)
+    return out
 
 
 def match(segments: list[dict], clips: list[dict], *, cuts: list[dict] | None = None, duration: float | None = None,
@@ -167,7 +222,8 @@ def match(segments: list[dict], clips: list[dict], *, cuts: list[dict] | None = 
     def line_at(t: float) -> dict | None:
         return next((ln for ln in lines if ln["start"] - 0.3 <= t <= ln["end"] + 0.3), None)
 
-    desc = [" ".join(str(x) for x in (c.get("note") or "", c.get("name") or "", " ".join(c.get("tags") or [])) if x) for c in clips]
+    # note first (the creator's own words), then what the picture shows (AI), then the file name and tags
+    desc = [" ".join(str(x) for x in (c.get("note") or "", c.get("seen") or "", c.get("name") or "", " ".join(c.get("tags") or [])) if x) for c in clips]
 
     # 1. a time the creator wrote
     for k, c in enumerate(clips):
@@ -207,13 +263,18 @@ def match(segments: list[dict], clips: list[dict], *, cuts: list[dict] | None = 
 
     # 3. the words themselves
     cand = []
+    seen_in: dict[str, int] = {}
+    for ln in lines:
+        for tk in set(ln["tok"]):
+            seen_in[tk] = seen_in.get(tk, 0) + 1
+    rarity = {tk: 1.0 / (n ** 0.5) for tk, n in seen_in.items()}
     for k in range(len(clips)):
         if res[k]["start"] is not None:
             continue
         ct = list(dict.fromkeys(tokens(desc[k])))
         for ln in lines:
-            sc = _score(ct, ln["tok"])
-            if sc >= 0.34:
+            sc = _score(ct, ln["tok"], rarity)
+            if sc >= 0.3:
                 cand.append((sc, -ln["start"], k, ln))
     for sc, _, k, ln in sorted(cand, key=lambda x: (x[0], x[1]), reverse=True):
         if res[k]["start"] is None:
