@@ -622,7 +622,7 @@ svg.mpoly.mode-draw polygon, svg.mpoly.mode-draw circle { pointer-events: none; 
 }
 
 /* "your mic is too quiet" notice under the level meter while setting up a take */
-.rec-quiet { position: absolute; left: 12px; right: 12px; bottom: 26px; max-width: 520px; padding: 8px 10px;
+.rec-quiet { position: absolute; left: 12px; right: 12px; bottom: 30px; max-width: 520px; padding: 8px 10px;
   background: rgba(120, 53, 15, .92); color: #fde68a; border-radius: 8px; font-size: 13px; line-height: 1.4; }
 
 /* ── Montage timeline: every cut is a block ── */
@@ -662,3 +662,6 @@ svg.mpoly.mode-draw polygon, svg.mpoly.mode-draw circle { pointer-events: none; 
 .motx em { position: absolute; left: -1px; bottom: 100%; font: 600 10px/1.5 system-ui, sans-serif; background: var(--amber); color: #000; padding: 0 5px; border-radius: 3px 3px 0 0; white-space: nowrap; text-shadow: none; }
 .motx .rs { position: absolute; right: -9px; bottom: -9px; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); border: 2px solid #000; cursor: nwse-resize; }
 .motx.mid { border-style: solid; border-color: var(--accent); }
+.rec-meter { width: 150px; height: 8px; }
+.rec-meter i.hot { background: var(--amber); }
+.rec-gain { position: absolute; left: 172px; bottom: 7px; font-size: .7rem; color: #fff; background: rgba(0,0,0,.55); padding: 1px 7px; border-radius: 99px; white-space: nowrap; }

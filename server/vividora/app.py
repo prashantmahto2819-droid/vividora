@@ -194,7 +194,7 @@ def create_app() -> Starlette:
           X-Content-Type-Options: nosniff          — prevent MIME-sniffing attacks
           X-Frame-Options: DENY                    — block clickjacking
           Referrer-Policy: strict-origin-when-cross-origin  — limit Referer leakage
-          Permissions-Policy: camera=(), microphone=(), geolocation=()  — disable unused browser APIs
+          Permissions-Policy: camera=(self), microphone=(self), geolocation=()  — camera+mic for this site only (Record, voice), never for embedded pages
 
         Cache (non-API only):
           /assets/*  → immutable, 1 year (filenames contain content hashes from the build)
@@ -205,7 +205,7 @@ def create_app() -> Starlette:
             (b"x-content-type-options", b"nosniff"),
             (b"x-frame-options", b"DENY"),
             (b"referrer-policy", b"strict-origin-when-cross-origin"),
-            (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+            (b"permissions-policy", b"camera=(self), microphone=(self), geolocation=()"),   # the Record page and voice commands need both — on this site only
         ]
 
         def __init__(self, app):

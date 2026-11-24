@@ -33,6 +33,11 @@ def main() -> None:
         tok = c.post("/api/auth/login", json={"email": "admin@vividora.local", "password": "test-pass-123"}).json()["token"]
         h = {"authorization": f"Bearer {tok}"}
 
+        # the Record page and voice commands need the camera and the mic: allowed for this site itself, nobody else
+        pp = c.get("/api/health").headers.get("permissions-policy", "")
+        assert "camera=(self)" in pp and "microphone=(self)" in pp and "geolocation=()" in pp, pp
+        print("PASS camera + mic are allowed for the site itself")
+
         rows = {r["env"]: r for r in c.get("/api/providers", headers=h).json()["providers"]}
         assert c.get("/api/providers", headers=h).json()["can_edit"] is True
         assert rows["PIXABAY_API_KEY"]["set"] and rows["PIXABAY_API_KEY"]["source"] == "env" and rows["PIXABAY_API_KEY"]["shown"].endswith("1234")

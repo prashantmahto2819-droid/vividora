@@ -5,6 +5,7 @@
 // Camera access needs HTTPS (or localhost): use the Cloudflare Tunnel URL on the phone.
 
 let R = null;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
@@ -48,7 +49,7 @@ export function mount(root, ctx) {
   const { esc } = ctx;
   let prefs = {}; try { prefs = JSON.parse(localStorage.getItem("vividora_rec") || "{}"); } catch {}
   R = { ctx, root, stream: null, rec: null, chunks: [], t0: 0, timer: null, state: "idle", devices: { cams: [], mics: [] },
-    facing: prefs.facing || "user", camId: prefs.camId || "", micId: prefs.micId || "", res: prefs.res || "auto", fps: prefs.fps || "auto", mirror: prefs.mirror !== false,
+    facing: prefs.facing || "user", camId: prefs.camId || "", micId: prefs.micId || "", res: prefs.res || "auto", fps: prefs.fps || "auto", mirror: prefs.mirror !== false, micGain: ["auto", "1", "2", "4", "8", "16"].includes(String(prefs.micGain)) ? String(prefs.micGain) : "auto",
     tp: { on: true, size: prefs.tpSize || 30, speed: prefs.tpSpeed || 40, opacity: prefs.tpOpacity ?? 0.75, mirror: !!prefs.tpMirror, x: prefs.tpX ?? 20, y: prefs.tpY ?? 56, w: prefs.tpW ?? 360, h: prefs.tpH ?? 220, full: false, playing: false, text: prefs.tpText || "" },
     scriptIdea: null, blob: null, language: prefs.language || "auto" };
   root.innerHTML = `<div class="rec">
@@ -62,7 +63,7 @@ export function mount(root, ctx) {
           <button class="ibtn" id="tp-play" title="scroll चलाएँ (space)">▶</button><button class="ibtn" id="tp-full" title="full screen">⛶</button><button class="ibtn" id="tp-edit" title="edit">✎</button><button class="ibtn" id="tp-close">✕</button></div>
         <div class="tp-text" id="tp-text"></div><i class="tp-resize" id="tp-resize"></i>
       </div>
-      <div class="rec-meter"><i id="rec-level"></i></div>
+      <div class="rec-meter"><i id="rec-level"></i></div><span class="rec-gain" id="rec-gain" hidden title="mic की आवाज़ कितनी बढ़ाई जा रही है — Settings में बदलें"></span>
       <div class="rec-quiet" id="rec-quiet" hidden></div>
       <div class="rec-hud"><span id="rec-time">0:00</span><span id="rec-q" class="small"></span><span id="rec-local" class="small" title="recording इसी phone/PC में भी save होती रहती है"></span></div>
       <div class="rec-recover" id="rec-recover" hidden></div>
@@ -77,6 +78,8 @@ export function mount(root, ctx) {
       <h3>Settings</h3>
       <label>Camera <select id="s-cam"></select></label>
       <label>Mic <select id="s-mic"></select></label>
+      <label>Mic की आवाज़ <select id="s-gain">${[["auto", "Auto — अपने-आप सही level (सलाह)"], ["1", "जैसी है (1×)"], ["2", "2× (+6 dB)"], ["4", "4× (+12 dB)"], ["8", "8× (+18 dB)"], ["16", "16× (+24 dB)"]].map(([v, l]) => `<option value="${v}" ${String(R.micGain) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <p class="small muted">Record से पहले 3–4 सेकंड सामान्य आवाज़ में बोलकर देखें: ऊपर की पट्टी आधी से ज़्यादा भरनी चाहिए।</p>
       <label>Resolution <select id="s-res">${RES.map(([v, l]) => `<option value="${v}" ${R.res === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label>FPS <select id="s-fps">${FPS.map(([v, l]) => `<option value="${v}" ${R.fps === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="chk"><input type="checkbox" id="s-mirror" ${R.mirror ? "checked" : ""}> preview mirror (recording सीधी रहती है)</label>
@@ -110,7 +113,7 @@ export function mount(root, ctx) {
 }
 export function unmount() { if (!R) return; stop(); document.removeEventListener("keydown", onKey); clearInterval(R.timer); cancelAnimationFrame(R.raf); R = null; }
 
-function savePrefs() { try { localStorage.setItem("vividora_rec", JSON.stringify({ facing: R.facing, camId: R.camId, micId: R.micId, res: R.res, fps: R.fps, mirror: R.mirror, language: R.language, tpSize: R.tp.size, tpSpeed: R.tp.speed, tpOpacity: R.tp.opacity, tpMirror: R.tp.mirror, tpX: R.tp.x, tpY: R.tp.y, tpW: R.tp.w, tpH: R.tp.h, tpText: R.tp.text })); } catch {} }
+function savePrefs() { try { localStorage.setItem("vividora_rec", JSON.stringify({ micGain: R.micGain, facing: R.facing, camId: R.camId, micId: R.micId, res: R.res, fps: R.fps, mirror: R.mirror, language: R.language, tpSize: R.tp.size, tpSpeed: R.tp.speed, tpOpacity: R.tp.opacity, tpMirror: R.tp.mirror, tpX: R.tp.x, tpY: R.tp.y, tpW: R.tp.w, tpH: R.tp.h, tpText: R.tp.text })); } catch {} }
 
 async function start() {
   stop();
@@ -129,25 +132,38 @@ async function start() {
   $("#rec-info", R.root).textContent = tr.label || "";
   const caps = tr.getCapabilities ? tr.getCapabilities() : null;
   if (caps) $("#s-caps", R.root).textContent = `यह camera दे सकता है: ${caps.width?.max || "?"}×${caps.height?.max || "?"} तक, ${caps.frameRate?.max || "?"} fps तक${caps.facingMode ? " · " + caps.facingMode.join("/") : ""}`;
-  // level meter
-  try { const ac = new (window.AudioContext || window.webkitAudioContext)(); const src = ac.createMediaStreamSource(R.stream); const an = ac.createAnalyser(); an.fftSize = 512; src.connect(an); const buf = new Uint8Array(an.frequencyBinCount);
-    // The meter also watches for a take that is being recorded far too quietly: a far mic at
-    // this level lands ~20 dB under the music, and no amount of editing afterwards brings the
-    // voice back cleanly — so it is said here, while it can still be fixed.
-    let peak = 0, since = performance.now(), agcTried = false;
-    const quiet = $("#rec-quiet", R.root);
-    const tick = () => { if (!R) return; an.getByteTimeDomainData(buf); let s = 0; for (const x of buf) s += (x - 128) ** 2; const lvl = Math.min(1, Math.sqrt(s / buf.length) / 40); $("#rec-level", R.root).style.width = (lvl * 100) + "%";
-      peak = Math.max(peak, lvl);
-      const now = performance.now();
-      if (now - since > 4000) {
-        if (peak > 0.02 && peak < 0.14) {  // something is being said, but far too softly
-          if (!agcTried) { agcTried = true; R.stream?.getAudioTracks()[0]?.applyConstraints({ autoGainControl: true }).catch(() => {}); }
-          quiet.hidden = false;
-          quiet.textContent = "🔇 आवाज़ बहुत धीमी आ रही है — mic पास लाएँ, या नीचे settings में सही mic चुनें। ऐसे record करने पर music के नीचे आवाज़ दब जाती है।";
-        } else if (peak >= 0.14) quiet.hidden = true;
-        peak = 0; since = now;
-      }
-      R.raf = requestAnimationFrame(tick); }; tick(); R.ac = ac; } catch {}
+  // ---- sound: mic → our own level control → limiter → what gets recorded
+  // Phones give a very quiet raw mic once the browser's "call" processing is off (we keep it off: it narrows and
+  // pumps the voice), and a teleprompter take is spoken from a tripod's distance. So the level is set here, before
+  // it is recorded: "Auto" listens to how loud the speech really is and lifts it to a normal speaking level (slowly
+  // up, quickly down), a limiter catches peaks. The video keeps the camera track; only the audio track is ours.
+  R.boosted = null; R.gainNode = null;
+  try { const AC = window.AudioContext || window.webkitAudioContext; const ac = new AC(); const src = ac.createMediaStreamSource(R.stream);
+    const pre = ac.createAnalyser(); pre.fftSize = 1024; src.connect(pre);
+    const gain = ac.createGain(); const lim = ac.createDynamicsCompressor(); lim.threshold.value = -8; lim.knee.value = 6; lim.ratio.value = 14; lim.attack.value = 0.003; lim.release.value = 0.25;
+    const post = ac.createAnalyser(); post.fftSize = 1024; const dest = ac.createMediaStreamDestination();
+    src.connect(gain); gain.connect(lim); lim.connect(post); lim.connect(dest);
+    R.ac = ac; R.gainNode = gain; R.boosted = dest.stream.getAudioTracks()[0] || null;
+    const a = new Float32Array(pre.fftSize), b = new Float32Array(post.fftSize);
+    const rms = (an, buf) => { an.getFloatTimeDomainData(buf); let q = 0; for (let k = 0; k < buf.length; k++) q += buf[k] * buf[k]; return Math.sqrt(q / buf.length); };
+    const TARGET = 0.11, MAXG = 24;            // loud speech ≈ −19 dBFS RMS after the lift; never more than +27.6 dB
+    let env = 0, floor = 0.02, cur = 1, lastSet = 0, weakSince = 0;
+    const quiet = $("#rec-quiet", R.root); const chip = $("#rec-gain", R.root);
+    const tick = () => { if (!R) return; const now = performance.now(); const raw = rms(pre, a);
+      env += (raw - env) * (raw > env ? 0.25 : 0.004);                  // how loud the speaking is (fast up, slow down)
+      floor = raw < floor ? raw : floor + (raw - floor) * 0.0008;       // the room
+      const mode = R.micGain; let want = cur;
+      if (mode !== "auto") want = clamp(+mode || 1, 1, MAXG);
+      else if (env > Math.max(0.0025, floor * 2.5)) want = clamp(TARGET / env, 1, MAXG);   // only while somebody speaks — never chase the room noise
+      if (Math.abs(want - cur) / cur > 0.06 && now - lastSet > 120) { gain.gain.setTargetAtTime(want, ac.currentTime, want < cur ? 0.12 : 0.9); cur = want; lastSet = now; }
+      const out = rms(post, b); const lvl = Math.min(1, out / 0.22); const bar = $("#rec-level", R.root); if (bar) { bar.style.width = (lvl * 100) + "%"; bar.classList.toggle("hot", out > 0.3); }
+      if (chip && now - (chip._t || 0) > 400) { chip._t = now; const db = 20 * Math.log10(gain.gain.value || 1); chip.textContent = `🎚 ${db >= 0.5 ? "+" + db.toFixed(0) + " dB" : "0 dB"}${mode === "auto" ? " · auto" : ""}`; chip.hidden = false; }
+      // still too soft with the lift at its limit → the mic is really too far / the wrong one
+      const weak = env > 0.0025 && env * cur < 0.035 && (mode !== "auto" || cur >= MAXG * 0.95);
+      if (weak) { if (!weakSince) weakSince = now; if (now - weakSince > 3500 && quiet) { quiet.hidden = false; quiet.textContent = mode === "auto" ? "🔇 आवाज़ बहुत धीमी आ रही है — phone पास लाएँ या earphone/collar mic लगाएँ (Settings में सही mic चुनें)।" : "🔇 आवाज़ धीमी है — Settings में “Mic की आवाज़” Auto या ज़्यादा करें।"; } }
+      else { weakSince = 0; if (quiet && env * cur >= 0.05) quiet.hidden = true; }
+      R.raf = requestAnimationFrame(tick); }; tick();
+  } catch (e) { R.boosted = null; }
   await listDevices();
 }
 function stop() { if (R?.stream) { R.stream.getTracks().forEach((t) => t.stop()); R.stream = null; } if (R?.ac) { R.ac.close().catch(() => {}); R.ac = null; } }
@@ -160,6 +176,9 @@ async function listDevices() {
 
 function bind() {
   const { toast } = R.ctx;
+  $("#s-gain", R.root).onchange = (e) => { R.micGain = e.target.value; savePrefs(); toast(R.micGain === "auto" ? "Mic level: Auto" : `Mic level: ${R.micGain}×`); };
+  // the audio engine may start suspended until the first touch — wake it so the meter and the level control run
+  const wake = () => { if (R?.ac && R.ac.state !== "running") R.ac.resume().catch(() => {}); }; R.root.addEventListener("pointerdown", wake); R.root.addEventListener("keydown", wake);
   $("#rec-settings-btn", R.root).onclick = () => { const p = $("#rec-settings", R.root); p.hidden = !p.hidden; $("#rec-tp", R.root).hidden = true; };
   $("#rec-tp-btn", R.root).onclick = () => { const p = $("#rec-tp", R.root); p.hidden = !p.hidden; $("#rec-settings", R.root).hidden = true; $("#tp", R.root).style.display = ""; };
   $("#s-apply", R.root).onclick = () => { R.camId = $("#s-cam", R.root).value; R.micId = $("#s-mic", R.root).value; R.res = $("#s-res", R.root).value; R.fps = $("#s-fps", R.root).value; R.mirror = $("#s-mirror", R.root).checked; R.language = $("#s-lang", R.root).value; savePrefs(); start(); $("#rec-settings", R.root).hidden = true; };
@@ -284,7 +303,12 @@ async function begin() {
   if (!R.stream) return;
   const m = mime(); R.chunks = [];
   const opts = { mimeType: m || undefined, videoBitsPerSecond: 24_000_000, audioBitsPerSecond: 192_000 };
-  try { R.rec = new MediaRecorder(R.stream, opts); } catch { R.rec = new MediaRecorder(R.stream); }
+  // the levelled sound (see start()); if the audio engine is not running (browser kept it suspended) the raw mic is used
+  let rs = R.stream;
+  if (R.ac && R.boosted) { try { if (R.ac.state !== "running") await R.ac.resume(); } catch { /* stays suspended */ }
+    if (R.ac.state === "running" && R.boosted.readyState === "live") rs = new MediaStream([...R.stream.getVideoTracks(), R.boosted]); }
+  R.recBoosted = rs !== R.stream;
+  try { R.rec = new MediaRecorder(rs, opts); } catch { try { R.rec = new MediaRecorder(rs); } catch { R.recBoosted = false; R.rec = new MediaRecorder(R.stream); } }
   // local safety copy
   const local = $("#rec-local", R.root); const id = "d" + Date.now().toString(36); let seq = 0, size = 0, okWrites = 0;
   R.draft = { id, started: Date.now(), mime: R.rec.mimeType || m || "video/webm", size: 0, seconds: 0, title: R.scriptIdea?.title || "" };
