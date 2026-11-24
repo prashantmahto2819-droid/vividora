@@ -130,3 +130,11 @@ Nothing is kept running anywhere: fal.ai bills per call, RunPod serverless per s
 `POST /api/projects/{id}/speakers/plan` `{style?: "mix"|"close"|"wide_long", zoom?: 0.6–1.6, min_turn?: 1–6, cam?: <library video id>, cam_offset?: seconds}`
 → `202 {job}`; `GET /api/visuals/jobs/{job}` → `{status, message, result: {shots, people, faces, turns, cam, main_close}}`.
 Nothing is written to the project: the editor stores the plan in `effects.speaker` and places the clips (docs/editor-schema.md).
+
+### fal.ai voices
+
+With `FAL_KEY` set (API & Keys) the voice list gains `fal_cb_hindi`, `fal_cb_hindi_drama`, `fal_cb_english` (Chatterbox multilingual,
+300 characters per request, $0.025 / 1000 characters) and `fal_kokoro_beta|psi|omega` (Kokoro Hindi, $0.02 / 1000 characters).
+`engine/tts.py FalBackend` sends each line through fal's queue (`engine/cloudasr.fal_run`); every request is checked against the
+monthly spending limit and recorded as `fal_tts` (price override: `PRICE_FAL_TTS_1K`). A CPU worker takes `dub` jobs as soon as a
+cloud voice key (fal.ai / ElevenLabs) is present.

@@ -20,6 +20,7 @@ PRICES: dict[str, tuple[str, float, str, str]] = {
     "ai_video": ("AI_VIDEO_PRICE_PER_SEC", 0.03, "video-second", "AI video (fal.ai)"),
     "ai_image": ("PRICE_AI_IMAGE", 0.0, "image", "AI image"),
     "elevenlabs": ("PRICE_ELEVENLABS_1K", 0.2, "1000 chars", "ElevenLabs voice"),
+    "fal_tts": ("PRICE_FAL_TTS_1K", 0.025, "1000 chars", "fal.ai voice"),
 }
 
 

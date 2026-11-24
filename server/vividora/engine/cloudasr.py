@@ -116,26 +116,32 @@ def _poll(get: Callable[[], dict], done, failed, *, poll_s: float, max_wait: flo
         time.sleep(poll_s)
 
 
-# ------------------------------------------------------------------ the two services → [(word, start, end)]
-def _fal_piece(mp3: Path, language: str | None, prompt: str | None, call, poll_s: float, max_wait: float) -> tuple[list[tuple[str, float, float]], str]:
+def fal_run(model: str, body: dict, *, call=None, poll_s: float = 1.5, max_wait: float = 900) -> dict:
+    """One request to a fal.ai model through its queue → the model's answer (used for the transcript and the voices).
+    The GPU there is billed only while this request runs."""
+    call = call or _http
     h = {"Authorization": f"Key {os.environ['FAL_KEY']}"}
     base = os.getenv("FAL_QUEUE_BASE", "https://queue.fal.run")
+    job = call("POST", f"{base}/{model.strip('/')}", body, h)
+    su, ru = job.get("status_url"), job.get("response_url")
+    if not su or not ru:
+        if job.get("request_id") is None and job:      # answered at once (a stand-in server, or fal.run)
+            return job
+        raise RuntimeError("fal: " + json.dumps(job)[:200])
+    _poll(lambda: call("GET", su, None, h), lambda s_: s_.get("status") == "COMPLETED", lambda s_: s_.get("status") in ("FAILED", "ERROR"),
+          poll_s=poll_s, max_wait=max_wait, what="fal")
+    return call("GET", ru, None, h)
+
+
+# ------------------------------------------------------------------ the two services → [(word, start, end)]
+def _fal_piece(mp3: Path, language: str | None, prompt: str | None, call, poll_s: float, max_wait: float) -> tuple[list[tuple[str, float, float]], str]:
     model = (os.getenv("FAL_WHISPER_MODEL") or "fal-ai/whisper").strip("/")
     body = {"audio_url": "data:audio/mpeg;base64," + base64.b64encode(mp3.read_bytes()).decode(), "task": "transcribe", "chunk_level": "word"}
     if language and language != "auto":
         body["language"] = language
     if prompt:
         body["prompt"] = prompt[:400]
-    job = call("POST", f"{base}/{model}", body, h)
-    if job.get("chunks") is not None or job.get("text") is not None:          # answered at once
-        out = job
-    else:
-        su, ru = job.get("status_url"), job.get("response_url")
-        if not su or not ru:
-            raise RuntimeError("fal: " + json.dumps(job)[:200])
-        _poll(lambda: call("GET", su, None, h), lambda s: s.get("status") == "COMPLETED", lambda s: s.get("status") in ("FAILED", "ERROR"),
-              poll_s=poll_s, max_wait=max_wait, what="fal")
-        out = call("GET", ru, None, h)
+    out = fal_run(model, body, call=call, poll_s=poll_s, max_wait=max_wait)
     words = []
     for c in out.get("chunks") or []:
         ts = c.get("timestamp") if isinstance(c, dict) else None

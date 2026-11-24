@@ -793,9 +793,13 @@ def main() -> None:
         """Transcripts are taken by this worker when it can make them itself, or when the dashboard says "on fal.ai /
         RunPod" (then this CPU worker only sends the audio out) — the setting can change while the worker runs."""
         from ..engine import cloudasr
+        out = list(kinds)
         if not local_asr and lane != "heavy" and cloudasr.engine_setting() != "local" and cloudasr.first_cloud():
-            return [*kinds, "transcribe"]
-        return kinds
+            out.append("transcribe")
+        # AI voice-over with a cloud voice (fal.ai / ElevenLabs): this worker only sends the text out
+        if "dub" not in out and lane != "quick" and (os.getenv("FAL_KEY") or os.getenv("ELEVENLABS_API_KEY")):
+            out.append("dub")
+        return out
     run_loop(client, live_kinds, handle, poll=float(os.getenv("POLL_SECONDS", "3")),
              info={"ffmpeg": ffmpeg.have("ffmpeg"), "deepfilter": ffmpeg.have("deep-filter"), "lane": lane},
              once=os.getenv("ONCE") == "1")

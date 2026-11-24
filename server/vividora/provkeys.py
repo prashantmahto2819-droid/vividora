@@ -32,7 +32,7 @@ CATALOG: list[dict[str, Any]] = [
     {"env": "CLOUDFLARE_API_TOKEN", "group": "media_ai", "label": "Cloudflare API token (Workers AI)", "secret": True,
      "use": "AI images — documentary, visuals, thumbnails", "link": "https://dash.cloudflare.com/profile/api-tokens"},
     {"env": "FAL_KEY", "group": "media_ai", "label": "fal.ai", "secret": True,
-     "use": "AI video clips (और AI images)", "link": "https://fal.ai/dashboard/keys"},
+     "use": "AI video clips, तेज़ transcript, और AI आवाज़ें (Chatterbox / Kokoro हिन्दी) — सिर्फ़ इस्तेमाल के सेकंड का पैसा", "link": "https://fal.ai/dashboard/keys"},
     {"env": "ELEVENLABS_API_KEY", "group": "media_ai", "label": "ElevenLabs", "secret": True,
      "use": "AI voice-over (चुनने पर)", "link": "https://elevenlabs.io/app/settings/api-keys"},
     {"env": "PIXABAY_API_KEY", "group": "stock", "label": "Pixabay", "secret": True,

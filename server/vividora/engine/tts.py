@@ -72,6 +72,19 @@ VOICE_PRESETS: list[dict] = [
      "kokoro_voice": "hf_alpha", "kokoro_lang": "h"},
     {"id": "hi_kokoro_omega", "label": "Omega — Hindi, हल्का model, commercial-safe (पुरुष)", "lang": "hi", "gender": "m", "engine": "kokoro",
      "kokoro_voice": "hm_omega", "kokoro_lang": "h"},
+    # ---- fal.ai voices (FAL_KEY; the GPU there is paid only for the seconds a line takes) ----
+    {"id": "fal_cb_hindi", "label": "Chatterbox हिन्दी — भावपूर्ण, cloud GPU (fal.ai)", "lang": "hi", "gender": "f", "engine": "fal", "cloud": True,
+     "fal_model": "fal-ai/chatterbox/text-to-speech/multilingual", "fal_voice": "hindi"},
+    {"id": "fal_cb_hindi_drama", "label": "Chatterbox हिन्दी — ज़ोरदार / नाटकीय (fal.ai)", "lang": "hi", "gender": "f", "engine": "fal", "cloud": True,
+     "fal_model": "fal-ai/chatterbox/text-to-speech/multilingual", "fal_voice": "hindi", "fal_exaggeration": 0.85},
+    {"id": "fal_cb_english", "label": "Chatterbox English — expressive (fal.ai)", "lang": "en", "gender": "f", "engine": "fal", "cloud": True,
+     "fal_model": "fal-ai/chatterbox/text-to-speech/multilingual", "fal_voice": "english"},
+    {"id": "fal_kokoro_beta", "label": "Beta — Hindi, तेज़ और सस्ती (महिला, fal.ai)", "lang": "hi", "gender": "f", "engine": "fal", "cloud": True,
+     "fal_model": "fal-ai/kokoro/hindi", "fal_voice": "hf_beta"},
+    {"id": "fal_kokoro_psi", "label": "Psi — Hindi, तेज़ और सस्ती (पुरुष, fal.ai)", "lang": "hi", "gender": "m", "engine": "fal", "cloud": True,
+     "fal_model": "fal-ai/kokoro/hindi", "fal_voice": "hm_psi"},
+    {"id": "fal_kokoro_omega", "label": "Omega — Hindi, तेज़ और सस्ती (पुरुष, fal.ai)", "lang": "hi", "gender": "m", "engine": "fal", "cloud": True,
+     "fal_model": "fal-ai/kokoro/hindi", "fal_voice": "hm_omega"},
     # ---- ElevenLabs Cloud voices (require ELEVENLABS_API_KEY) ----
     {"id": "el_rachel", "label": "Rachel — ElevenLabs, शांत professional (महिला)", "lang": "en", "gender": "f",
      "engine": "elevenlabs", "elevenlabs_voice_id": "21m00Tcm4TlvDq8ikWAM", "cloud": True,
@@ -130,7 +143,7 @@ def is_premium(voice: dict | None) -> bool:
     if not voice:
         return False
     engine = voice.get("engine", "")
-    if engine in ("elevenlabs", "google_cloud", "google", "gcloud"):
+    if engine in ("elevenlabs", "google_cloud", "google", "gcloud", "fal"):
         return True
     return engine == "parler" or bool(voice.get("custom"))
 
@@ -143,6 +156,8 @@ def available_voices() -> list[dict]:
         engine = v.get("engine", "")
         if v.get("cloud"):
             if engine == "elevenlabs" and not os.getenv("ELEVENLABS_API_KEY", ""):
+                continue
+            if engine == "fal" and not os.getenv("FAL_KEY", ""):
                 continue
             if engine in ("google_cloud",) and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""):
                 continue
@@ -321,6 +336,57 @@ class ElevenLabsBackend:
         return out
 
 
+class FalBackend:
+    """Voices on fal.ai's GPUs (FAL_KEY): Chatterbox multilingual (expressive Hindi, 300 characters per request) and
+    Kokoro. Nothing runs between requests, so nothing is billed between them. The preset says which model:
+    `fal_model`, `fal_voice`, optional `fal_exaggeration` (Chatterbox: 0.25 calm … 2 dramatic)."""
+    name = "fal"
+    native_speed = False
+
+    def synth(self, text: str, voice: dict, lang: str, speed: float, out: Path) -> Path:
+        import urllib.request
+
+        from . import cloudasr, meter
+        if not os.getenv("FAL_KEY", ""):
+            raise TTSMissing("fal.ai की key नहीं है — Settings → API & Keys में FAL_KEY डालें।")
+        model = str(voice.get("fal_model") or "fal-ai/kokoro/hindi")
+        chatter = "chatterbox" in model
+        limit = 280 if chatter else 900
+        parts: list[str] = []
+        for s_ in split_sentences(text, limit):          # as few requests as the limit allows
+            if parts and len(parts[-1]) + 1 + len(s_) <= limit:
+                parts[-1] += " " + s_
+            else:
+                parts.append(s_)
+        wavs = []
+        for i, part in enumerate(parts):
+            meter.check("fal_tts")
+            if chatter:
+                body = {"text": part, "voice": voice.get("fal_voice") or ("hindi" if lang == "hi" else "english"),
+                        "exaggeration": max(0.25, min(2.0, float(voice.get("fal_exaggeration") or 0.5)))}
+            else:
+                body = {"prompt": part, "voice": voice.get("fal_voice") or "hf_alpha", "speed": 1.0}
+            try:
+                res = cloudasr.fal_run(model, body, max_wait=300)
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(f"fal.ai voice: {e}") from e
+            url = ((res.get("audio") or {}).get("url") if isinstance(res.get("audio"), dict) else None) or res.get("audio_url")
+            if not url:
+                raise RuntimeError("fal.ai ने आवाज़ नहीं लौटाई: " + str(res)[:160])
+            meter.add("fal_tts", part[:60], len(part) / 1000.0)
+            raw = out.with_name(f"{out.stem}_fal{i}.bin")
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Vividora/1.0"}), timeout=120) as r:
+                raw.write_bytes(r.read())
+            wav = out.with_name(f"{out.stem}_fal{i}.wav")
+            _ff(["-i", str(raw), "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(wav)])
+            raw.unlink(missing_ok=True)
+            wavs.append(wav)
+        pcm = b"".join(read_pcm(w)[0] for w in wavs)
+        for w in wavs:
+            w.unlink(missing_ok=True)
+        return write_wav(out, pcm, 24000)
+
+
 class VoiceStudioBackend:
     """Self-hosted TTS via VoiceStudio (OmniVoice) on localhost:3900.
     41 models, 646 languages.  No API key needed — runs locally."""
@@ -398,6 +464,8 @@ def backend_for(engine: str):
         return KokoroBackend()
     if engine == "elevenlabs":
         return ElevenLabsBackend()
+    if engine == "fal":
+        return FalBackend()
     if engine in ("google_cloud", "google", "gcloud"):
         return GoogleCloudTTSBackend()
     if engine == "voicestudio":
@@ -415,6 +483,10 @@ def check_ready(engine: str) -> None:
     if isinstance(b, ElevenLabsBackend):
         if not os.getenv("ELEVENLABS_API_KEY", ""):
             raise TTSMissing("ELEVENLABS_API_KEY सेट नहीं है — .env में ElevenLabs API key डालें।")
+        return
+    if isinstance(b, FalBackend):
+        if not os.getenv("FAL_KEY", ""):
+            raise TTSMissing("fal.ai की key नहीं है — Settings → API & Keys में FAL_KEY डालें।")
         return
     if isinstance(b, GoogleCloudTTSBackend):
         if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""):
@@ -805,7 +877,7 @@ def handle_job(client, job: dict, work: Path, on_progress: ProgressFn | None = N
     up = client.upload(job["id"], final, "dub", lang)
     v = p.get("voice") or {}
     meta = {"mode": p.get("mode"), "language": lang, "source_language": p.get("source_language"),
-            "voice": {k: v.get(k) for k in ("id", "label", "engine", "description", "kokoro_voice") if v.get(k)},
+            "voice": {k: v.get(k) for k in ("id", "label", "engine", "description", "kokoro_voice", "fal_model", "fal_voice") if v.get(k)},
             "engine": r["engine"], "speed": p.get("speed", 1.0), "pitch": p.get("pitch", 0), "duration": r["duration"],
             "drift_max": r["drift_max"], "cached": r.get("cached", 0), "sig": p.get("sig"), "segments": r["segments"],
             "speakers": {k: {"voice": {kk: vv for kk, vv in (v.get("voice") or {}).items()
