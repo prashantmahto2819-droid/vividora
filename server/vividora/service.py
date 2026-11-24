@@ -965,7 +965,7 @@ def request_montage(c, project: dict, opts: dict) -> dict:
                "preset": preset, "look": opts.get("look") or ("auto" if theme else "none"), "every": max(1, min(8, int(opts.get("every", 2)))),
                "max_seconds": max_s, "flash": bool(opts.get("flash", True)),
                "watermark": opts.get("watermark") or None, "font": opts.get("font") or "Poppins",
-               "text_color": opts.get("text_color") or "#FFFFFF", "text_size": max(0.03, min(0.14, float(opts.get("text_size", 0.07)))),
+               "text_color": opts.get("text_color") or "#FFFFFF", "text_size": max(0.03, min(0.2, float(opts.get("text_size", 0.07)))),
                "seed": int(opts.get("seed", 7)), "mode": opts.get("mode") or "classic",
                "pace": opts.get("pace") or "auto", "effects_level": opts.get("effects_level") or "auto",
                "reframe": opts.get("reframe") or "smart", "slowmo": bool(opts.get("slowmo", True)),
@@ -980,7 +980,10 @@ def request_montage(c, project: dict, opts: dict) -> dict:
                "text_mode": opts.get("text_mode") if opts.get("text_mode") in ("bars", "beats", "names") else "bars",
                "intro": bool(opts.get("intro", False)), "outro": bool(opts.get("outro", False)),
                "intro_text": str(opts.get("intro_text") or "")[:80], "outro_text": str(opts.get("outro_text") or "")[:80],
-               "beat_only": bool(opts.get("beat_only", False)), "keep_clip_audio": bool(opts.get("keep_clip_audio", False))}
+               "beat_only": bool(opts.get("beat_only", False)), "keep_clip_audio": bool(opts.get("keep_clip_audio", False)),
+               # text dragged / resized by hand in the editor
+               "text_pos": _pos2(opts.get("text_pos")), "title_pos": _pos2(opts.get("title_pos")),
+               "text_user": [k for k in ("size", "color") if k in (opts.get("text_user") or [])]}
     # AI voice-over (Script mode) chosen in the Audio tab → mixed over the montage, music ducked under it
     r_eff = ((project.get("settings", {}).get("render") or {}).get("effects") or {})
     vt = r_eff.get("voice_track")
@@ -1015,6 +1018,17 @@ def request_montage(c, project: dict, opts: dict) -> dict:
         return queue.enqueue(c, project["id"], "montage_plan", {k: v for k, v in payload.items() if k != "auto_render"})
     set_status(c, project["id"], "rendering", "montage बन रहा है")
     return queue.enqueue(c, project["id"], "montage", {k: v for k, v in payload.items() if k != "auto_render"})
+
+
+def _pos2(v) -> list[float]:
+    """[x, y] as fractions of the frame (centre of the text); anything odd → the middle."""
+    try:
+        x, y = float(v[0]), float(v[1])
+        if x != x or y != y:
+            raise ValueError
+        return [round(min(0.98, max(0.02, x)), 4), round(min(0.98, max(0.02, y)), 4)]
+    except (TypeError, ValueError, IndexError, KeyError):
+        return [0.5, 0.5]
 
 
 def _clean_plan(pl: dict) -> dict:

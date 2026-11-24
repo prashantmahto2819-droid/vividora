@@ -206,6 +206,25 @@ function effKf(b, W, Hh) {   // keyframes the engine will use (legacy `to` move 
     if (!kf.x && to.x != null) kf.x = [{ t: 0, v: x0 }, { t: d, v: +to.x }]; if (!kf.y && to.y != null) kf.y = [{ t: 0, v: y0 }, { t: d, v: +to.y }]; if (!kf.scale && to.scale != null) kf.scale = [{ t: 0, v: 1 }, { t: d, v: +to.scale / s0 }]; }
   return kf;
 }
+// sticker / picture entrance animations — the same maths as the export (engine/effects._free_overlay)
+function stickerAnim(anim, t, dur, ot) {
+  const u = clamp(t / 0.35, 0, 1); const o = { k: 1, dx: 0, dy: 0, rot: 0, sx: 1, op: clamp(Math.min(t / 0.15, (dur - t) / 0.2), 0, 1) };
+  if (anim === "pop") o.k = u < 0.7 ? 0.2 + u / 0.7 * 0.95 : 1.15 - 0.15 * (u - 0.7) / 0.3;
+  else if (anim === "bounce") o.k = (u < 0.6 ? u / 0.6 * 1.18 : 1.18 - 0.18 * (u - 0.6) / 0.4) + 0.04 * Math.sin(10 * Math.max(0, t)) * Math.exp(-4 * Math.max(0, t));
+  else if (anim === "zoom") o.k = 1.6 - 0.6 * u;
+  else if (anim === "slide_up") o.dy = 0.35 * Math.pow(Math.max(0, 1 - t / 0.35), 2);
+  else if (anim === "slide_left") o.dx = 0.6 * Math.pow(Math.max(0, 1 - t / 0.35), 2);
+  else if (anim === "drop") o.dy = -Math.pow(Math.max(0, 1 - t / 0.45), 2);
+  else if (anim === "shake") o.dx = 0.012 * Math.sin(60 * ot) * Math.exp(-3 * Math.max(0, t));
+  else if (anim === "float") o.dy = 0.01 * Math.sin(4 * ot);
+  else if (anim === "spin") { const v = clamp(t / 0.5, 0, 1); o.rot = -360 * Math.pow(1 - v, 2); o.k = 0.3 + 0.7 * v; }
+  else if (anim === "rotate_in") o.rot = -90 * Math.pow(Math.max(0, 1 - t / 0.4), 2);
+  else if (anim === "wiggle") o.rot = 4 * Math.sin(12.566 * t);
+  else if (anim === "elastic") o.k = Math.max(0.05, 1 - Math.exp(-6 * Math.max(0, t)) * Math.cos(18 * Math.max(0, t)));
+  else if (anim === "flip") o.sx = Math.max(0.04, Math.sin(Math.PI / 2 * clamp(t / 0.4, 0, 1)));
+  else if (anim === "glitch" && t < 0.45) { o.dx = 0.03 * Math.sin(97 * ot); o.dy = 0.008 * Math.sin(53 * ot); }
+  return o;
+}
 // geometry of an overlay clip box in preview pixels at output time ot (engine compose.base_box + keyframes)
 export function clipGeom(b, ot, fb) {
   const W = fb.w, Hh = fb.h; const it = H.libItem(b.id); const aw = +(it?.meta?.width || 0), ah = +(it?.meta?.height || 0); const ar = aw && ah ? aw / ah : null;
@@ -224,7 +243,9 @@ export function clipGeom(b, ot, fb) {
   const dur = b.end - b.start;
   if (fit === "cover" && b.fade !== false) { const fd = Math.min(0.25, dur / 4); op *= clamp(Math.min(t / fd, (dur - t) / fd), 0, 1); }
   op *= trFactor(b, ot);
-  return { cx, cy, w: bw * sm, h: bh == null ? null : bh * sm, rot, op: clamp(op, 0, 1), fit };
+  let sx = 1;
+  if (fit === "free" && b.anim && b.anim !== "none") { const a = stickerAnim(b.anim, t, dur, ot); cx += a.dx * W; cy += a.dy * Hh; op *= a.op; sx = a.sx; return { cx, cy, w: bw * sm * a.k, h: bh == null ? null : bh * sm * a.k, rot: rot + a.rot, op: clamp(op, 0, 1), fit, sx }; }
+  return { cx, cy, w: bw * sm, h: bh == null ? null : bh * sm, rot, op: clamp(op, 0, 1), fit, sx };
 }
 // ---- transitions between overlay clips on one track (render: engine/compose.apply_transitions; preview: opacity only)
 export const TRANSITIONS = { none: "कोई नहीं", crossfade: "Crossfade", dip: "Dip (काला)", slide_left: "Slide ←", slide_right: "Slide →", slide_up: "Slide ↑", slide_down: "Slide ↓", zoom: "Zoom in", wipe: "Wipe →" };
@@ -256,7 +277,7 @@ export function overlayFrame(ot) {
     const b = ed.rs.effects.broll.find((x) => x._id === el.dataset.bid); if (!b) continue;
     const g = clipGeom(b, ot, fb); const t = ot - b.start;
     const st = el.style; st.left = g.cx.toFixed(1) + "px"; st.top = g.cy.toFixed(1) + "px"; st.width = g.w.toFixed(1) + "px"; st.height = g.h == null ? "auto" : g.h.toFixed(1) + "px";
-    st.transform = `translate(-50%,-50%) rotate(${g.rot.toFixed(2)}deg)`; st.opacity = g.op.toFixed(3);
+    st.transform = `translate(-50%,-50%) rotate(${g.rot.toFixed(2)}deg)${g.sx != null && g.sx !== 1 ? ` scaleX(${g.sx.toFixed(3)})` : ""}`; st.opacity = g.op.toFixed(3);
     st.mixBlendMode = CSS_BLEND[b.blend_mode] || KEY_BLEND[b.blend] || "";
     const mk = maskCss(b, t, g); if (st.webkitMaskImage !== mk) { st.webkitMaskImage = mk; st.maskImage = mk; st.webkitMaskSize = st.maskSize = "100% 100%"; st.webkitMaskRepeat = st.maskRepeat = "no-repeat"; }
     const med = el.querySelector("video,img"); if (med) { const f = clipFilter(b, t); if (med._f !== f) { med._f = f; med.style.filter = f; } }

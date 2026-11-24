@@ -206,13 +206,20 @@ def flash_filter(cut_times: list[float], color: str = "white", alpha: float = 0.
 
 
 def music_chain(voice_label: str, music_index: int, *, volume: float = 0.18, duck: bool = True,
-                duration: float, fade: float = 1.5, duck_amount: float = 0.6) -> tuple[str, str]:
+                duration: float, fade: float = 1.5, duck_amount: float = 0.6,
+                start: float = 0.0, at: float = 0.0) -> tuple[str, str]:
     """Mix background music under the voice. Returns (filter_text, output_label).
-    duck_amount 0..1 — how much the music drops while someone speaks."""
-    fade = max(0.0, min(float(fade), duration / 3))
+    duck_amount 0..1 — how much the music drops while someone speaks.
+    start: skip this many seconds into the song; at: the music comes in at this second of the video."""
+    at = max(0.0, min(float(at or 0), max(0.0, duration - 0.5)))
+    start = max(0.0, float(start or 0))
+    span = duration - at
+    fade = max(0.0, min(float(fade), span / 3))
     m = (f"[{music_index}:a]aformat=sample_rates=48000:channel_layouts=mono,"
-         f"atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,volume={volume:.3f}"
-         + (f",afade=t=in:d={fade:.2f},afade=t=out:st={max(0.0, duration - fade):.3f}:d={fade:.2f}" if fade > 0 else "")
+         + (f"atrim=start={start:.3f}:duration={span:.3f}" if (start or at) else f"atrim=0:{duration:.3f}")
+         + f",asetpts=PTS-STARTPTS,volume={volume:.3f}"
+         + (f",afade=t=in:d={fade:.2f},afade=t=out:st={max(0.0, span - fade):.3f}:d={fade:.2f}" if fade > 0 else "")
+         + (f",adelay={int(at * 1000)}:all=1" if at > 0 else "")
          + "[mus]")
     if duck:
         da = max(0.05, min(1.0, float(duck_amount)))
@@ -508,30 +515,47 @@ def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_la
     x1, y1, sc1 = float(to.get("x", x0)), float(to.get("y", y0)), float(to.get("scale", sc0))
     ow = max(8, int(w * max(sc0, sc1)))
     prep = (f"{pre}{src}scale={ow}:-2:flags=bicubic,format=rgba{key},setpts=PTS-STARTPTS+{s:.3f}/TB")
-    if rot:
-        prep += f",rotate={rot}*PI/180:c=black@0:ow='hypot(iw,ih)':oh=ow"
+    anim = item.get("anim") or "none"
+    # animated rotation (turns on the clip's own clock: t is already shifted to the output timeline)
+    spin = {"spin": f"-2*PI*pow(max(0\\,1-(t-{s:.3f})/0.5)\\,2)", "rotate_in": f"-PI/2*pow(max(0\\,1-(t-{s:.3f})/0.4)\\,2)",
+            "wiggle": f"0.07*sin(12.566*(t-{s:.3f}))"}.get(anim)
+    if rot or spin:
+        ang = f"{rot}*PI/180" + (f"+({spin})" if spin else "")
+        prep += f",rotate='{ang}':c=black@0:ow='hypot(iw,ih)':oh=ow"
     if op < 1:
         prep += f",colorchannelmixer=aa={op:.3f}"
-    anim = item.get("anim") or "none"
     if anim != "none":
         prep += f",fade=t=in:st={s:.3f}:d=0.15:alpha=1,fade=t=out:st={max(s, e - 0.2):.3f}:d=0.2:alpha=1"
     prep += f"[ovf{idx}]"
     zexpr = None
     if abs(sc1 - sc0) > 0.001:
         zexpr = _lerp(sc0, sc1, s, e)
-    if anim in ("pop", "bounce", "zoom"):
+    if anim in ("pop", "bounce", "zoom", "spin", "elastic"):
         # overshoot ease on the first 0.35 s: 0 → 1.15 → 1.0 (pop); bounce has a second, smaller kick
         u = f"min(1\\,max(0\\,(t-{s:.3f})/0.35))"
         if anim == "zoom":
             k = f"(1.6-0.6*{u})"
+        elif anim == "spin":
+            k = f"(0.3+0.7*min(1\\,max(0\\,(t-{s:.3f})/0.5)))"
+        elif anim == "elastic":      # a damped spring: 0 → overshoot → settles on 1
+            k = f"max(0.05\\,1-exp(-6*max(0\\,t-{s:.3f}))*cos(18*max(0\\,t-{s:.3f})))"
         elif anim == "bounce":
             k = f"(if(lt({u}\\,0.6)\\,{u}/0.6*1.18\\,1.18-0.18*({u}-0.6)/0.4)+0.04*sin(10*max(0\\,t-{s:.3f}))*exp(-4*max(0\\,t-{s:.3f})))"
         else:
             k = f"if(lt({u}\\,0.7)\\,0.2+{u}/0.7*0.95\\,1.15-0.15*({u}-0.7)/0.3)"
         base = zexpr or f"{max(sc0, sc1):.4f}"
         zexpr = f"({base})*({k})"
-    if zexpr:
-        zw = f"'max(8\\,trunc({w}*{zexpr}/2)*2)'"
+    if anim == "flip":
+        # turns in around its vertical axis: the width opens 0 → full, the height stays
+        base = zexpr or f"{max(sc0, sc1):.4f}"
+        kx = f"max(0.04\\,sin(PI/2*min(1\\,max(0\\,(t-{s:.3f})/0.4))))"
+        zw = f"'max(8\\,trunc(iw*({base})*{kx}*{w / ow:.6f}/2)*2)'"
+        zh = f"'max(8\\,trunc(ih*({base})*{w / ow:.6f}/2)*2)'"
+        prep = prep.replace(f"[ovf{idx}]", f",scale=w={zw}:h={zh}:eval=frame[ovf{idx}]")
+    elif zexpr:
+        # iw is the (possibly rotated → larger) canvas, ow the picture's own width: scale the canvas so the picture
+        # itself gets the wanted width — a turned sticker no longer shrinks when it also animates
+        zw = f"'max(8\\,trunc(iw*({zexpr})*{w / ow:.6f}/2)*2)'"
         prep = prep.replace(f"[ovf{idx}]", f",scale=w={zw}:h=-2:eval=frame[ovf{idx}]")
     px = f"'{w}*{_lerp(x0, x1, s, e)}-w/2'" if (x1 != x0) else f"'{w * x0:.1f}-w/2'"
     py = f"'{h}*{_lerp(y0, y1, s, e)}-h/2'" if (y1 != y0) else f"'{h * y0:.1f}-h/2'"
@@ -545,6 +569,9 @@ def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_la
         px = f"'{w * x0:.1f}-w/2+{w * 0.012:.1f}*sin(60*t)*exp(-3*max(0\\,t-{s:.3f}))'"
     elif anim == "float":
         py = f"'{h * y0:.1f}-h/2+{h * 0.01:.1f}*sin(4*t)'"
+    elif anim == "glitch":      # jumps sideways for the first half second, then sits still
+        px = f"'{w * x0:.1f}-w/2+{w * 0.03:.1f}*sin(97*t)*lt(t-{s:.3f}\\,0.45)'"
+        py = f"'{h * y0:.1f}-h/2+{h * 0.008:.1f}*sin(53*t)*lt(t-{s:.3f}\\,0.45)'"
     return (f"{prep};{in_label}[ovf{idx}]overlay=x={px}:y={py}:eval=frame:enable='between(t\\,{s:.3f}\\,{e:.3f})'"
             f":eof_action=pass{out_label}")
 

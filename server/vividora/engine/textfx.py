@@ -668,6 +668,10 @@ def title_events(titles: list[dict], width: int, height: int, font: str = "Poppi
         raw = str(t.get("text", ""))
         if not raw.strip():
             continue
+        try:        # size is a fraction of the frame's short side; a stray pixel value (60) would ask libass for a 20 000 px font
+            t["size"] = min(0.6, max(0.008, float(t.get("size", .075) or .075)))
+        except (TypeError, ValueError):
+            t["size"] = .075
         ctx = _Ctx(t, width, height)
         layer = 10 + int(t.get("track", 0) or 0)
         s_ms, e_ms = float(t["start"]) * 1000, float(t["end"]) * 1000

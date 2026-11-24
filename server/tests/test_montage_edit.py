@@ -40,6 +40,14 @@ def main() -> None:
         assert pl["total"] == 1.5, pl["total"]
         print("PASS edited plan: unknown clip dropped, new cuts kept, total recomputed")
 
+        # text placed / sized by hand: position kept as fractions (clamped), junk → the middle, only known "user" flags
+        r = client.post(f"/api/projects/{pid}/montage", json={**base, "text_pos": [0.3, 1.7], "title_pos": "x", "text_size": 0.5, "text_user": ["size", "hack"],
+                                                              "plan": {"period": 0.5, "segments": [seg("A")]}}, headers=h)
+        assert r.status_code == 200, r.text
+        m = db.get("projects", pid)["settings"]["montage"]
+        assert m["text_pos"] == [0.3, 0.98] and m["title_pos"] == [0.5, 0.5] and m["text_size"] == 0.2 and m["text_user"] == ["size"], m
+        print("PASS montage text position / size saved")
+
         # nothing left to show → refused with a clear message
         r = client.post(f"/api/projects/{pid}/montage", json={**base, "plan": {"segments": [seg("A", keep=False), seg("GONE")]}}, headers=h)
         assert r.status_code == 422 and "cut" in r.json()["error"], r.text

@@ -137,8 +137,31 @@ def test_voice_level():
     print("PASS voice_level")
 
 
+def test_music_start_and_at():
+    """Background music: `start` skips into the song, `at` brings it in later in the video; the default is unchanged."""
+    import numpy as np
+    from vividora.engine import effects as fx
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "6", str(TMP / "sil.wav")], check=True)
+    # a 4 s "song" that gets louder every second: 0.1, 0.2, 0.3, 0.4 → the part that plays is measurable
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "aevalsrc=0.1*(1+floor(t))*sin(2*PI*440*t):s=48000:d=4", str(TMP / "song.wav")], check=True)
+
+    def levels(**kw):
+        chain, lab = fx.music_chain("[0:a]", 1, volume=1.0, duck=False, duration=6.0, fade=0, **kw)
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(TMP / "sil.wav"), "-stream_loop", "-1", "-i", str(TMP / "song.wav"), "-filter_complex", chain,
+                              "-map", lab, "-t", "6", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], capture_output=True, check=True).stdout
+        a = np.frombuffer(raw, np.int16).astype(float)
+        return [round(float(np.abs(a[i * 8000:(i + 1) * 8000]).max() / 32768), 1) for i in range(6)]
+
+    assert "atrim=0:6.000" in fx.music_chain("[0:a]", 1, duration=6.0)[0]                      # untouched default graph
+    assert levels() == [0.1, 0.2, 0.3, 0.4, 0.1, 0.2], levels()                               # from the top, looping
+    assert levels(start=2) == [0.3, 0.4, 0.1, 0.2, 0.3, 0.4], levels(start=2)                 # 2 s into the song
+    assert levels(at=3) == [0.0, 0.0, 0.0, 0.1, 0.2, 0.3], levels(at=3)                       # silent until second 3
+    assert levels(start=1, at=2) == [0.0, 0.0, 0.2, 0.3, 0.4, 0.1], levels(start=1, at=2)
+
+
 if __name__ == "__main__":
     try:
+        test_music_start_and_at()
         test_text_helpers()
         test_line_cache_and_track()
         test_musictag()

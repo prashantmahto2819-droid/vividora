@@ -557,3 +557,24 @@ fields (`service._clean_plan`), drops cuts whose clip is not in the montage's cl
 `POST /projects/{id}/montage/to-editor` copies the newest render into a **new normal project** (`settings.as_is = true`:
 no Whisper, no auto-cut, `edl.cuts = []`), so titles, stickers, photos, B-roll, sounds, captions and effects can be added
 and moved in the full editor. The montage project itself is not changed.
+
+### Montage text: place and size by hand
+
+`settings.montage.text_pos` / `title_pos` are `[x, y]` fractions of the frame (the **centre** of the text; default
+`[0.5, 0.5]`) for the text lines and for the intro/outro title. In the editor the yellow dashed box over the preview is
+dragged to move it, its corner dot resizes (`text_size`, 0.03 – 0.2 of the short side). `text_user` lists what the
+creator set by hand (`"size"`, `"color"`): those win over the theme's text look. Text is burnt in, so a change needs a
+new render.
+
+## Background music: which part, and from when
+
+`effects.music.start` skips that many seconds into the song (ignored while `fit` — the remix — is on);
+`effects.music.at` brings the music in at that second of the video. Preview (`mix.js`) and export
+(`effects.music_chain`) use the same numbers.
+
+## Sticker / picture animations (`broll[].anim`, `fit: "free"`)
+
+All 16 ids of `presets.sticker_anims` animate in the export (`effects._free_overlay`) and in the preview
+(`pro.js stickerAnim`, same maths): fade, pop, bounce, zoom, slide_up, slide_left, drop, shake, float, spin, flip,
+elastic, wiggle, glitch, rotate_in. An overlay that uses a pro field (mask, keyframes, blend mode, speed…) goes through
+the compositor (`engine/compose.py`), which ignores `anim` — use keyframes there.

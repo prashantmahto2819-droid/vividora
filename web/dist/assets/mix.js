@@ -29,8 +29,9 @@ export function laneGain(lane) {
 function collect() {
   const fx = H.fx(); const out = new Map(); const dur = H.outDur();
   if (fx.music?.id) { const it = H.libItem(fx.music.id); if (it?.url) {
-    const f = Math.min(+fx.music.fade || 0, dur / 3);
-    out.set("music", { key: "music", url: it.url, start: 0, end: dur, trim: 0, vol: fx.music.volume ?? 0.18, fadeIn: f, fadeOut: f, loop: true, rate: 1, lane: "audio", duck: fx.music.duck !== false ? (fx.music.duck_amount ?? 0.6) : 0 }); } }
+    const f = Math.min(+fx.music.fade || 0, (dur - clamp(+fx.music.at || 0, 0, Math.max(0, dur - 0.5))) / 3);
+    const mAt = clamp(+fx.music.at || 0, 0, Math.max(0, dur - 0.5));
+    out.set("music", { key: "music", url: it.url, start: mAt, end: dur, trim: fx.music.fit ? 0 : Math.max(0, +fx.music.start || 0), vol: fx.music.volume ?? 0.18, fadeIn: f, fadeOut: f, loop: true, rate: 1, lane: "audio", duck: fx.music.duck !== false ? (fx.music.duck_amount ?? 0.6) : 0 }); } }
   for (const s of fx.sfx || []) { const it = H.libItem(s.id); if (!it?.url) continue;
     const len = s.dur || Math.min(it.meta?.duration || 0.6, 600);
     out.set("sfx:" + s._id, { key: "sfx:" + s._id, url: it.url, start: +s.at || 0, end: (+s.at || 0) + len, trim: +s.trim || 0, vol: s.volume ?? 0.8, fadeIn: +s.fade_in || 0, fadeOut: +s.fade_out || 0, loop: false, rate: 1, lane: `audio:${s.track || 0}`, duck: 0 }); }

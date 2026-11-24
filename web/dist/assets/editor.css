@@ -655,3 +655,10 @@ svg.mpoly.mode-draw polygon, svg.mpoly.mode-draw circle { pointer-events: none; 
   .is-montage .ed-tl-head label { display: none; }
 }
 @media (max-width: 640px) { .ed.is-montage { grid-template-rows: 48px 44px minmax(44vh, 1fr) auto 330px; } }
+
+/* montage text: a draggable / resizable box over the preview */
+#mo-txtl { position: absolute; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; }
+.motx { position: absolute; transform: translate(-50%, -50%); border: 1.5px dashed var(--amber); border-radius: 4px; padding: .08em .3em; cursor: move; white-space: nowrap; text-align: center; font-weight: 700; line-height: 1.15; text-shadow: 0 0 4px #000, 0 1px 2px #000; background: rgba(0,0,0,.28); pointer-events: auto; touch-action: none; user-select: none; }
+.motx em { position: absolute; left: -1px; bottom: 100%; font: 600 10px/1.5 system-ui, sans-serif; background: var(--amber); color: #000; padding: 0 5px; border-radius: 3px 3px 0 0; white-space: nowrap; text-shadow: none; }
+.motx .rs { position: absolute; right: -9px; bottom: -9px; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); border: 2px solid #000; cursor: nwse-resize; }
+.motx.mid { border-style: solid; border-color: var(--accent); }

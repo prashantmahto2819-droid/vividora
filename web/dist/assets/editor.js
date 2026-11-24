@@ -83,7 +83,7 @@ export function mount(root, project, ctx) {
   E.shorts = JSON.parse(JSON.stringify(project.meta?.shorts || []));
   E.montage = project.kind === "montage";
   TABS = E.montage ? TABS_MONTAGE : TABS_ALL;
-  if (E.montage) { E.tab = "montage"; E.mo = { mode: "auto", pace: "auto", effects_level: "auto", reframe: "smart", slowmo: true, clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07,
+  if (E.montage) { E.tab = "montage"; E.mo = { mode: "auto", pace: "auto", effects_level: "auto", reframe: "smart", slowmo: true, clips: [], music: "", texts: "", preset: "ig-reel", look: "none", every: 2, max_seconds: 30, flash: true, watermark: "", font: "Poppins", text_color: "#FFFFFF", text_size: 0.07, text_pos: [0.5, 0.5], title_pos: [0.5, 0.5], text_user: [],
     theme: "", theme_text: true, intro: false, outro: false, intro_text: "", outro_text: "", text_mode: "bars", pins: [], beat_only: false, keep_clip_audio: false, ...(project.settings?.montage || {}) }; if (Array.isArray(E.mo.texts)) E.mo.texts = E.mo.texts.join("\n"); if (E.mo.quality === "draft") E.mo.quality = "standard"; /* Draft is for one build only — Full HD is the default */ const sp = E.mo.plan; E.moSig = sp ? `${sp.music_start}|${(sp.segments || []).length}|${sp.total}|${sp.bpm}` : ""; }
   if (E.rs?.export && E.rs.export.quality === "draft") E.rs.export.quality = "final";   // a fast 720p draft is a one-time choice; opening the project is back to Full HD
   E.speed = JSON.parse(JSON.stringify(project.edl?.speed || []));
@@ -613,6 +613,7 @@ function layoutFrame() {
   fr.style.width = w + "px"; fr.style.height = h + "px"; fr.classList.toggle("cropview", crop);
   E.frameBox = { x: 0, y: 0, w, h, scale: w / (r >= 1 ? 1920 : 1080) };
   $("#mask", E.root).style.cssText = "display:none";
+  if (E.montage) moTextOverlay();
   $("#safe", E.root).style.cssText = `left:0;top:0;width:${w}px;height:${h}px;display:${E.ratio === "9:16" && !crop && !E.montage ? "block" : "none"}`;
   $("#ovl", E.root).style.cssText = `left:0;top:0;width:${w}px;height:${h}px;${crop ? "display:none" : ""}`;
   E.vf = videoFilter(); v.style.filter = E.vf;
@@ -1258,6 +1259,8 @@ function _renderInspector() {
     h = `<h3>Background music</h3><p class="small muted">${esc(libItem(it.id)?.name || "")}</p>
       <div class="irow">${field("volume", `<input type="range" data-k="volume" min="0" max="1" step="0.01" value="${it.volume ?? 0.18}" ${dis}>`)}${field("fade (s)", `<input type="range" data-k="fade" min="0" max="6" step="0.5" value="${it.fade ?? 1.5}" ${dis}>`)}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" data-k="duck" ${it.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा</label>${field("कितना", `<input type="range" data-k="duck_amount" min="0.1" max="1" step="0.05" value="${it.duck_amount ?? 0.6}" ${dis}>`)}</div>
+      <div class="irow">${field("गाना कहाँ से शुरू (s)", num("start", it.start || 0, 0.5, 0, Math.max(0, (libItem(it.id)?.meta?.duration || 600) - 1)))}${field("video में कब से (s)", num("at", it.at || 0, 0.5, 0, Math.max(0, E.dur - 0.5)))}</div>
+      <p class="small muted">गाने का अच्छा हिस्सा (hook/chorus) सीधे चाहिए? “कहाँ से शुरू” में उसका second लिखें। ${it.fit ? "<b>Remix (fit) चालू है — तब “कहाँ से शुरू” नहीं लगता।</b>" : ""}</p>
       <div class="irow"><button class="btn small" data-act="audiotab">🎙 आवाज़ settings</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "global") {
     const id = E.sel.id;
@@ -1589,7 +1592,9 @@ function renderPanel() {
         ${field("logo", `<select id="mo-wm" ${dis}><option value="">नहीं</option>${logos.map((l) => `<option value="${l.id}" ${mo.watermark === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>`)}</div>
       <details ${mo.texts || mo.text_mode !== "bars" ? "open" : ""}><summary class="small">Text lines (एक line = एक message, | से line break)</summary>${field("", `<textarea id="mo-texts" rows="3" ${dis}>${esc(mo.texts)}</textarea>`)}
       ${auto ? field("कब दिखे", sel("mo-textmode", [["bars", "हर bar पर एक line (धीरे)"], ["beats", "हर strong beat पर एक word (तेज़)"], ["names", "clip के नाम से words, beat पर"]], mo.text_mode || "bars")) : ""}
-      <div class="irow">${field("font", `<select id="mo-font" ${dis}>${fontList().map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field("आकार", `<input type="range" id="mo-size" min="0.04" max="0.12" step="0.005" value="${mo.text_size}" ${dis}>`)}</div></details>
+      <div class="irow">${field("font", `<select id="mo-font" ${dis}>${fontList().map((f) => `<option ${mo.font === f ? "selected" : ""}>${f}</option>`).join("")}</select>`)}${field("रंग", `<input type="color" id="mo-color" value="${mo.text_color}" ${dis}>`)}${field(`आकार <b id="mo-sizev">${Math.round(mo.text_size * 100)}</b>`, `<input type="range" id="mo-size" min="0.03" max="0.2" step="0.005" value="${mo.text_size}" ${dis}>`)}</div>
+      <div class="irow" style="flex-wrap:wrap;gap:.3rem;align-items:center"><span class="small muted">जगह:</span>${[["ऊपर", 0.5, 0.14], ["बीच", 0.5, 0.5], ["नीचे", 0.5, 0.82]].map(([l, x, y]) => `<button class="btn small ${Math.abs((mo.text_pos || [.5, .5])[1] - y) < 0.01 && Math.abs((mo.text_pos || [.5, .5])[0] - x) < 0.01 ? "primary" : ""}" data-motpos="${x},${y}" ${dis}>${l}</button>`).join("")}</div>
+      <p class="small muted">✥ video पर पीली dashed box को <b>खींचकर</b> text कहीं भी रखें, कोने का गोला खींचकर <b>छोटा-बड़ा</b> करें (video रुका हो तब दिखती है)। बदलने के बाद video दोबारा बनाना होता है।</p></details>
       ${auto ? `<div class="irow" style="margin-top:.6rem"><button class="btn primary" id="mo-auto" ${dis}>✨ Auto edit करो (plan + video)</button><button class="btn" id="mo-plan" ${dis}>सिर्फ़ plan</button></div>`
       : `<button class="btn primary" id="mo-render" ${dis}>Montage बनाएँ</button>`}
       ${job ? `<div class="box" style="background:var(--blue-bg,#e8f0fe);padding:0.4rem 0.8rem;border-radius:8px;margin:0.4rem 0"><p class="small">⏳ ${esc(E.p.status_note || "बन रहा है…")} — editing जारी रखें</p><div class="progress" style="margin-top:.3rem"><i style="width:${job.progress || 0}%"></i></div></div>` : ""}
@@ -1859,6 +1864,13 @@ function bindPanel() {
       mo.intro_text = g("#mo-introtext")?.value ?? mo.intro_text; mo.outro_text = g("#mo-outrotext")?.value ?? mo.outro_text; mo.text_mode = g("#mo-textmode")?.value || mo.text_mode;
       if (g("#mo-beatonly")) mo.beat_only = g("#mo-beatonly").checked; if (g("#mo-clipaudio")) mo.keep_clip_audio = g("#mo-clipaudio").checked; };
     ["#mo-music", "#mo-texts", "#mo-font", "#mo-color", "#mo-size", "#mo-every", "#mo-max", "#mo-preset", "#mo-look", "#mo-flash", "#mo-wm", "#mo-pace", "#mo-fxl", "#mo-reframe", "#mo-quality", "#mo-feel", "#mo-slow", "#mo-intro", "#mo-outro", "#mo-themetext", "#mo-introtext", "#mo-outrotext", "#mo-textmode", "#mo-clipaudio"].forEach((sl) => on(sl, "onchange", sync));
+    const userSet = (k) => { mo.text_user = [...new Set([...(mo.text_user || []), k])]; };
+    $("#mo-size", panel)?.addEventListener("input", (e) => { mo.text_size = +e.target.value; userSet("size"); const l = $("#mo-sizev", panel); if (l) l.textContent = Math.round(mo.text_size * 100); moTextOverlay(); });
+    $("#mo-size", panel)?.addEventListener("change", () => moTextChanged());
+    $("#mo-color", panel)?.addEventListener("input", (e) => { mo.text_color = e.target.value; userSet("color"); moTextOverlay(); });
+    ["#mo-texts", "#mo-introtext", "#mo-outrotext"].forEach((q) => $(q, panel)?.addEventListener("input", () => { sync(); moTextOverlay(); }));
+    ["#mo-font", "#mo-intro", "#mo-outro"].forEach((q) => $(q, panel)?.addEventListener("change", () => { sync(); moTextOverlay(); }));
+    $$("[data-motpos]", panel).forEach((b2) => (b2.onclick = () => { sync(); mo.text_pos = b2.dataset.motpos.split(",").map(Number); moTextChanged(); renderPanel(); }));
     on("#mo-beatonly", "onchange", () => { sync(); renderPanel(); });
     on("#mo-theme", "onclick", () => { sync(); showThemes(true); });
     on("#mo-retheme", "onclick", () => { sync(); showThemes(true); });
@@ -2086,7 +2098,8 @@ async function audioPreview(btn) {
     const [proc, raw] = await Promise.all([fetchOne(false), fetchOne(true)]);
     if (E.ab?.proc) { URL.revokeObjectURL(E.ab.proc); URL.revokeObjectURL(E.ab.raw); }
     E.ab = { proc, raw, which: "proc" };
-    const au = $("#ap-audio", E.root); $("#pv", E.root)?.pause(); MIX.stop(); au.src = proc; au.hidden = false; au.play();
+    const au = $("#ap-audio", E.root); if (!au) return E.ctx.toast("आवाज़ का preview तैयार है — Audio tab खोलकर ▶ दबाएँ");   // the tab was left while it was being made
+    $("#pv", E.root)?.pause(); MIX.stop(); au.src = proc; au.hidden = false; au.play();
     const ab = $("#ap-ab", E.root); if (ab) { ab.hidden = false; ab.textContent = "A/B: सुधरी हुई"; }
   } catch (e) { E.ctx.toast(e.message); } finally { btn.disabled = false; btn.textContent = old; }
 }
@@ -2678,6 +2691,9 @@ function bindDrops() {
 function scaledGrade(id, k) { const p = E.ctx.S.presets?.catalog?.grade_presets?.[id]; if (!p) return {}; return Object.fromEntries(Object.entries(p).filter(([n]) => n !== "label" && n !== "cat").map(([n, v]) => [n, +(v * k).toFixed(3)])); }
 function addFxClip(kind, key, at, track) {
   if (!E.canEdit) return; const fx = E.rs.effects; const total = outDur();
+  if (kind === "effect" && key === "color_pop") {   // needs the person matte of the whole video → only as a whole-video effect
+    fx.stack = fx.stack || []; if (!fx.stack.some((x) => x.id === "color_pop")) fx.stack.push({ id: "color_pop", params: {}, enabled: true }); touch(); renderPanel();
+    return E.ctx.toast("Color Pop पूरे video पर लगता है (इंसान की पहचान चाहिए) — “पूरे video पर” में जोड़ दिया"); }
   let st = +outOf(at ?? E.t).toFixed(2); if (total - st < 0.5) st = +Math.max(0, total - 3).toFixed(2);
   const c = { _id: uid(), kind, start: st, end: +Math.min(total, st + 3).toFixed(2), track: track || 0, enabled: true };
   if (kind === "filter") Object.assign(c, { preset: key, strength: 1, grade: scaledGrade(key, 1) }); else Object.assign(c, { id: key, params: {} });
@@ -2797,6 +2813,29 @@ async function moRender() { const mo = E.mo; const { api, toast } = E.ctx; if (!
 async function moToEditor() { const { api, toast } = E.ctx; if (E.moDirty && !confirm("आपके बदलाव अभी video में नहीं बने हैं। पुराने बने हुए video को ही पूरे editor में खोलें?")) return;
   try { const r = await api("POST", `/projects/${E.pid}/montage/to-editor`, {}); toast("नया project बना — पूरे editor में खुल रहा है"); location.hash = `#/projects/${r.project.id}`; } catch (err) { toast(err.message); } }
 function moHasRender() { return (E.p.assets || []).some((a) => a.kind === "render"); }
+// ── Montage text on the preview: drag the box to place it, drag its corner dot to resize ──
+function moTextChanged() { E.moDirty = true; moTextOverlay(); renderTimeline(); if (!moPlan()) E.ctx.toast("text बदला — “Montage बनाएँ” दबाकर video दोबारा बनाएँ"); }
+function moTextOverlay() {
+  if (!E.montage || !E.mo) return; const fr = $("#frame", E.root); const fb = E.frameBox; if (!fr || !fb) return; const mo = E.mo; const { esc } = E.ctx;
+  let L = $("#mo-txtl", fr); if (!L) { L = document.createElement("div"); L.id = "mo-txtl"; fr.appendChild(L); const v = $("#pv", E.root); if (v) { v.addEventListener("play", () => (L.hidden = true)); v.addEventListener("pause", () => (L.hidden = false)); } }
+  const first = String(mo.texts || "").split("\n").map((x) => x.trim()).find(Boolean); const title = (mo.intro && mo.intro_text) || (mo.outro && mo.outro_text) || "";
+  const px = (k) => Math.max(8, (+mo.text_size || 0.07) * Math.min(fb.w, fb.h) * k);
+  const box = (key, txt, pos, k, tag) => `<div class="motx" data-motx="${key}" style="left:${(pos[0] * 100).toFixed(2)}%;top:${(pos[1] * 100).toFixed(2)}%;font-size:${px(k).toFixed(1)}px;font-family:'${esc(mo.font || "Poppins")}',sans-serif;color:${esc(mo.text_color || "#fff")}"><em>${tag}</em><span>${esc(txt).replace(/\|/g, "<br>")}</span>${E.canEdit ? `<i class="rs" title="खींचकर छोटा-बड़ा"></i>` : ""}</div>`;
+  L.innerHTML = (first ? box("text_pos", first, mo.text_pos || [.5, .5], 1, "✥ text") : "") + (title ? box("title_pos", title, mo.title_pos || [.5, .5], 1.25, "✥ intro/outro") : "");
+  if (!E.canEdit) return;
+  $$(".motx", L).forEach((el) => (el.onpointerdown = (e) => {
+    if (e.button > 0) return; e.preventDefault(); e.stopPropagation(); const key = el.dataset.motx; const r = fr.getBoundingClientRect();
+    if (e.target.classList.contains("rs")) { // resize: distance from the box centre
+      const c = el.getBoundingClientRect(); const cx = c.left + c.width / 2, cy = c.top + c.height / 2; const d0 = Math.max(6, Math.hypot(e.clientX - cx, e.clientY - cy)); const s0 = +mo.text_size || 0.07;
+      return track(e, (ev) => { mo.text_size = +clamp(s0 * Math.hypot(ev.clientX - cx, ev.clientY - cy) / d0, 0.03, 0.2).toFixed(4); mo.text_user = [...new Set([...(mo.text_user || []), "size"])];
+        $$(".motx", L).forEach((x) => (x.style.fontSize = px(x.dataset.motx === "title_pos" ? 1.25 : 1).toFixed(1) + "px")); const sl = $("#mo-size", E.root); if (sl) sl.value = mo.text_size; const lv = $("#mo-sizev", E.root); if (lv) lv.textContent = Math.round(mo.text_size * 100); },
+        (moved) => { if (moved) moTextChanged(); }, 1); }
+    const p0 = [...(mo[key] || [.5, .5])];
+    track(e, (ev, dx, dy) => { let x = clamp(p0[0] + dx / r.width, 0.02, 0.98), y = clamp(p0[1] + dy / r.height, 0.02, 0.98); if (Math.abs(x - 0.5) < 0.012) x = 0.5; if (Math.abs(y - 0.5) < 0.012) y = 0.5;   // snap to the middle
+      mo[key] = [+x.toFixed(4), +y.toFixed(4)]; el.style.left = (x * 100).toFixed(2) + "%"; el.style.top = (y * 100).toFixed(2) + "%"; el.classList.toggle("mid", x === 0.5 || y === 0.5); },
+      (moved) => { el.classList.remove("mid"); if (moved) { moTextChanged(); if (E.tab === "montage") { const pn = $("#ed-panel", E.root); const sc = pn?.scrollTop || 0; renderPanel(); if (pn) pn.scrollTop = sc; } } }, 2);
+  }));
+}
 function renderMoTimeline(body, labels) {
   E.root.classList.add("is-montage");
   const { esc } = E.ctx; const pl = moPlan(); const info = $("#tl-info", E.root); const openBtn = moHasRender() && E.canEdit ? `<button class="btn small" data-mo-full title="text, sticker, photo, sound, B-roll, caption, effect — सब जोड़ने और खिसकाने के लिए">🎛 पूरे editor में खोलें</button>` : "";
@@ -2902,7 +2941,7 @@ function renderTimeline() {
   const sfxLen = (s) => { const it = libItem(s.id); return s.dur || Math.min(it?.meta?.duration || 0.6, 600); };
   const sfxEl = (s, R) => { const it = libItem(s.id); const w = Math.max(14, sfxLen(s) * pps); return `<div class="itm sfx ${sel("sfx", s._id)}" data-item="sfx:${s._id}" style="left:${OX(s.at)}px;width:${w.toFixed(1)}px;${rowCss(R, s)}" title="${esc(it?.name || "audio")}">${w >= 28 ? `<i class="h l"></i>` : ""}${apTag(s)}<span>${it?.kind === "music" ? "♪ " : ""}${esc(it?.name || "sfx")} · ${Math.round((s.volume ?? 0.8) * 100)}%</span>${w >= 28 ? `<i class="h r"></i>` : ""}</div>`; };
   const fxEl = (c, R) => `<div class="itm fxc ${c.kind === "filter" ? "filter" : ""} ${c.enabled === false ? "off" : ""} ${sel("fxclip", c._id)}" data-item="fxclip:${c._id}" style="left:${OX(c.start)}px;width:${OW(c.start, c.end)}px;${rowCss(R, c)}"><i class="h l"></i><span>${c.kind === "filter" ? "🎨" : "✨"} ${esc(fxClipLabel(c))}</span><i class="h r"></i></div>`;
-  const audio = (fx.music.id ? `<div class="itm music ${sel("music", "m")}" data-item="music:m" style="left:0;width:${(E.dur * pps).toFixed(1)}px"><span>♪ ${esc(libItem(fx.music.id)?.name || "music")} · ${Math.round(fx.music.volume * 100)}%${fx.music.duck !== false ? " · duck" : ""}</span></div>` : "");
+  const audio = (fx.music.id ? `<div class="itm music ${sel("music", "m")}" data-item="music:m" style="left:${(clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5)) * pps).toFixed(1)}px;width:${((E.dur - clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5))) * pps).toFixed(1)}px"><span>♪ ${esc(libItem(fx.music.id)?.name || "music")} · ${Math.round(fx.music.volume * 100)}%${fx.music.duck !== false ? " · duck" : ""}</span></div>` : "");
   const shortsRow = E.shorts.map((sc) => `<div class="itm short ${sc.selected === false ? "off" : ""} ${sel("short", sc.id)}" data-item="short:${sc.id}" style="left:${X(sc.start)}px;width:${Math.max(8, (sc.end - sc.start) * pps).toFixed(1)}px"><i class="h l"></i><span>${esc(sc.title || sc.id)} · ${(sc.end - sc.start).toFixed(0)}s</span><i class="h r"></i></div>`).join("");
   const peaks = E.p.meta?.peaks || [];
   const wave = peaks.length ? `<canvas class="wave" width="${Math.ceil(E.dur * pps)}" height="46"></canvas>` : "";

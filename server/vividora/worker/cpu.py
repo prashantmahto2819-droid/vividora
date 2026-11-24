@@ -562,6 +562,8 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                                  text_style=th.get("text_style") if p.get("theme_text", True) else None,
                                  text_mode="beats" if p.get("text_mode") in ("beats", "names") else "bars",
                                  intro_text=str(p.get("intro_text") or ""), outro_text=str(p.get("outro_text") or ""),
+                                 text_pos=tuple(p["text_pos"]) if p.get("text_pos") else None, title_pos=tuple(p["title_pos"]) if p.get("title_pos") else None,
+                                 text_user=tuple(p.get("text_user") or ()),
                                  beat_only=bool(p.get("beat_only", False)), keep_clip_audio=bool(p.get("keep_clip_audio", False)))
             warns = _montage_voice(client, p, assets, out, tmp)
             files = []
@@ -586,6 +588,7 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                                  max_seconds=float(p.get("max_seconds", 30)), flash=bool(p.get("flash", True)),
                                  font=p.get("font") or "Poppins", text_color=p.get("text_color") or "#FFFFFF",
                                  text_size=float(p.get("text_size", 0.07)), watermark=wm, seed=int(p.get("seed", 7)),
+                                 text_pos=tuple(p["text_pos"]) if p.get("text_pos") else None,
                                  encoder_preset=enc_preset, on_progress=_progress(client, job["id"]))
             warns = _montage_voice(client, p, assets, out, tmp)
             files = []

@@ -619,6 +619,7 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
            text_color: str = "#FFFFFF", text_size: float = 0.07, watermark: Path | None = None,
            fonts_dir: Path | None = None, encoder_preset: str | None = None, on_progress=None,
            text_style: dict | None = None, text_mode: str = "bars", intro_text: str = "", outro_text: str = "",
+           text_pos: tuple[float, float] | None = None, title_pos: tuple[float, float] | None = None, text_user: tuple[str, ...] = (),
            beat_only: bool = False, keep_clip_audio: bool = False) -> dict:
     """clips: id → {path, kind, w, h}. text_style: a textfx style (font/color/outline/box…) — the theme's text look;
     text_mode: "bars" (one line per bar) or "beats" (one word on every strong-beat cut); intro_text / outro_text sit on
@@ -737,8 +738,9 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
         base = min(W, H)
         ts = dict(text_style or {})
         font = ts.get("font") or font
-        text_color = ts.get("color") or text_color
-        size = round(float(ts.get("size") or text_size) * base)
+        # what the creator set by hand (size / colour) wins over the theme's text look
+        text_color = text_color if "color" in text_user else (ts.get("color") or text_color)
+        size = round(float(text_size if "size" in text_user else (ts.get("size") or text_size)) * base)
         outline_c = ass_color(ts.get("outline") or "#000000")
         outline_w = round(float(ts.get("outline_w") or 0.006) * base, 1)
         if ts.get("box"):
@@ -759,6 +761,9 @@ def render(*, pl: dict, clips: dict[str, dict], music_path: Path, out_dir: Path,
                "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
         for a, b, st, line in events:
             anim = "\\fad(90,140)\\fscx80\\fscy80\\t(0,180,\\fscx100\\fscy100)" if st == "M" else "\\fad(200,300)\\fscx92\\fscy92\\t(0,600,\\fscx100\\fscy100)"
+            at = title_pos if st == "T" else text_pos        # dragged in the editor → \\pos (centre of the text), else the middle
+            if at and (abs(at[0] - 0.5) > 0.004 or abs(at[1] - 0.5) > 0.004):
+                anim = f"\\an5\\pos({round(min(0.98, max(0.02, at[0])) * W)},{round(min(0.98, max(0.02, at[1])) * H)})" + anim
             ass.append(f"Dialogue: 0,{_t(a)},{_t(b)},{st},,0,0,0,,{{{anim}}}{_esc(line).replace('|', chr(92) + 'N')}")
         f = work / "beat.ass"
         f.write_text("\n".join(ass) + "\n", encoding="utf-8")

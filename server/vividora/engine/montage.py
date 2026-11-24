@@ -96,7 +96,7 @@ def _segments(total_beats: list[float], every: int, max_seconds: float) -> list[
 
 def render(*, clips: list[dict], music: Path, out_dir: Path, name: str, preset: dict, texts: list[str],
            look: str = "none", every: int = 2, max_seconds: float = 30, flash: bool = True,
-           font: str = "Poppins", text_color: str = "#FFFFFF", text_size: float = 0.07,
+           font: str = "Poppins", text_color: str = "#FFFFFF", text_size: float = 0.07, text_pos: tuple[float, float] | None = None,
            watermark: Path | None = None, seed: int = 7, encoder_preset: str | None = None,
            on_progress=None) -> dict:
     """clips: [{path, type: video|image, duration}] — order is kept, clips cycle."""
@@ -169,7 +169,9 @@ def render(*, clips: list[dict], music: Path, out_dir: Path, name: str, preset: 
             s_i = segs[min(len(segs) - 1, i * per)][0] - t0
             e_i = (segs[min(len(segs) - 1, (i + 1) * per - 1)][1] - t0) if i < len(lines) - 1 else total
             txt = _esc(line).replace("|", "\\N")
-            ass.append(f"Dialogue: 0,{_t(s_i)},{_t(e_i)},M,,0,0,0,,{{\\fad(120,160)\\fscx92\\fscy92\\t(0,250,\\fscx100\\fscy100)}}{txt}")
+            pos = (f"\\an5\\pos({round(min(0.98, max(0.02, text_pos[0])) * w)},{round(min(0.98, max(0.02, text_pos[1])) * h)})"
+                   if text_pos and (abs(text_pos[0] - 0.5) > 0.004 or abs(text_pos[1] - 0.5) > 0.004) else "")
+            ass.append(f"Dialogue: 0,{_t(s_i)},{_t(e_i)},M,,0,0,0,,{{{pos}\\fad(120,160)\\fscx92\\fscy92\\t(0,250,\\fscx100\\fscy100)}}{txt}")
         f = work / "montage.ass"
         f.write_text("\n".join(ass) + "\n", encoding="utf-8")
         fonts = Path(__file__).resolve().parent.parent.parent / "fonts"

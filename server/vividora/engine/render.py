@@ -300,6 +300,11 @@ def _fx_clips(e: dict, w: int, h: int, fps: float, dur: float, cur: str, chains:
             continue
         if c.get("kind") == "filter":
             chain = catalog.grade_filter(c.get("grade"))
+        elif c.get("id") == "color_pop":
+            # needs the person matte of the whole video: it only works as a whole-video effect (Effects → stack),
+            # as a timed clip its placeholder would reach ffmpeg as an unknown filter and fail the export
+            logging.getLogger("vividora.render").warning("color_pop works on the whole video only — the effect clip is skipped")
+            continue
         else:
             chain = catalog.stack_filter([{"id": c.get("id"), "params": c.get("params") or {}, "kf": c.get("kf"), "enabled": True}],
                                          w, h, fps, en - s)
@@ -822,7 +827,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             inputs += ["-stream_loop", "-1", "-i", str(music["path"])]
             chain, cur_a = fx.music_chain(cur_a, next_in, volume=float(music.get("volume", 0.18)),
                                           duck=bool(music.get("duck", True)), duration=new_dur,
-                                          fade=float(music.get("fade", 1.5)), duck_amount=float(music.get("duck_amount", 0.6)))
+                                          fade=float(music.get("fade", 1.5)), duck_amount=float(music.get("duck_amount", 0.6)),
+                                          start=0.0 if music.get("fit") else float(music.get("start", 0) or 0),
+                                          at=float(music.get("at", 0) or 0))
             chains.append(chain)
             next_in += 1
         g1 = fx.track_gain(e, "audio")  # lane A1: voice + AI voice-over + music
