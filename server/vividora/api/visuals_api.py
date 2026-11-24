@@ -81,7 +81,7 @@ def _fetch(job_id: str, ws: str, user_id: str, d: dict) -> None:
             if src_kind in ("stock_video", "stock_photo"):
                 key = os.getenv("PIXABAY_API_KEY")
                 if not key:
-                    raise RuntimeError(".env में PIXABAY_API_KEY नहीं है")
+                    raise RuntimeError("API & Keys page (या .env) में PIXABAY_API_KEY नहीं है")
                 if not query:
                     raise RuntimeError("stock खोज के लिए शब्द (English) लिखें")
                 want = "video" if src_kind == "stock_video" else "photo"
@@ -103,7 +103,7 @@ def _fetch(job_id: str, ws: str, user_id: str, d: dict) -> None:
                                     license=f"AI-generated image ({prov}) — synthetic", move=True)
                 else:
                     if not aivideo.provider():
-                        raise RuntimeError("AI video provider set नहीं है (.env: FAL_KEY)")
+                        raise RuntimeError("AI video provider set नहीं है (API & Keys page में FAL_KEY)")
                     st.update(message="AI video बन रही है (1–3 मिनट)…")
                     vid = aivideo.animate(img, d.get("video_prompt") or prompt[:160], work / "ai.mp4")
                     row = _add_file(ws, user_id, "broll", vid, name=name, tags="ai,visuals,ai-video", source="ai",

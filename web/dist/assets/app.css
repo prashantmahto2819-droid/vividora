@@ -640,3 +640,13 @@ a.stat:hover { border-color: #46546A; } .stat b { font-size: 1.55rem; font-varia
   .tplcard { cursor: default; }
   .plans .btn { min-height: 48px; }
 }
+
+/* sidebar sections fold; settings pages link to each other */
+button.nav-sec { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: 0; cursor: pointer; font-family: inherit; text-align: left; }
+button.nav-sec:hover { color: var(--text); }
+button.nav-sec i { font-style: normal; font-size: .8rem; transition: transform .15s; }
+button.nav-sec.shut i { transform: rotate(-90deg); }
+.hub { display: flex; gap: .35rem; flex-wrap: wrap; margin: 0 0 1rem; padding-bottom: .7rem; border-bottom: 1px solid var(--line); }
+.hub a { padding: .3rem .75rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-size: .85rem; white-space: nowrap; }
+.hub a:hover { color: var(--text); }
+.hub a.on { background: var(--amber); border-color: var(--amber); color: #111; font-weight: 600; }

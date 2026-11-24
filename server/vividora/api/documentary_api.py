@@ -197,7 +197,7 @@ async def plan(request: Request, user: dict):
         if res is None:
             from ..engine import llm
             if not llm.available():
-                raise ApiError(409, ".env में GEMINI_API_KEY या ANTHROPIC_API_KEY डालें — या अपनी script दें ({\"script\": \"…\"})")
+                raise ApiError(409, "API & Keys page (या .env) में GEMINI_API_KEY या ANTHROPIC_API_KEY डालें — या अपनी script दें ({\"script\": \"…\"})")
             raise ApiError(502, "AI से scenes नहीं बन पाए — दोबारा कोशिश करें")
     if res is None:
         raise ApiError(422, "script से scenes नहीं बने")
@@ -356,7 +356,7 @@ async def series(request: Request, user: dict):
         if len(topic) < 3:
             raise ApiError(422, "series का topic चाहिए")
         if not llm.available():
-            raise ApiError(409, ".env में GEMINI_API_KEY (या ANTHROPIC_API_KEY / Ollama) डालें — series के episodes AI से बनते हैं")
+            raise ApiError(409, "API & Keys page (या .env) में GEMINI_API_KEY (या ANTHROPIC_API_KEY / Ollama) डालें — series के episodes AI से बनते हैं")
         res = await run_in_threadpool(lambda: doc.series_plan(topic, int(b.get("episodes") or 4), str(b.get("language") or "hi")))
         if not res:
             raise ApiError(502, "AI से episodes नहीं बन पाए — दोबारा कोशिश करें")

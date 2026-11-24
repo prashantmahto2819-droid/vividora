@@ -9,6 +9,12 @@ function ensureCss() {
   const st = document.createElement("style"); st.id = "tl-css";
   st.textContent = `.tl-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem}@media(max-width:900px){.tl-wrap{grid-template-columns:1fr}}
 .tl-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem}
+.pk-row{padding:.6rem 0;border-top:1px solid var(--line)}.pk-row:first-of-type{border-top:0;padding-top:0}
+.pk-head{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}.pk-chip{font-size:.72rem;padding:.08rem .5rem;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.pk-chip.ok{border-color:rgba(70,200,120,.5);color:#46c878}.pk-chip code{font-size:.72rem}
+.pk-edit{display:flex;gap:.4rem;flex-wrap:wrap}.pk-edit input{flex:1;min-width:180px}
+#api-tabs{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;max-width:100%}#api-tabs button{background:none;border:0;color:var(--muted);padding:.55rem .9rem;cursor:pointer;font:inherit}
+#api-tabs button.on{background:var(--amber);color:#111;font-weight:600}@media(max-width:560px){#api-tabs{display:flex}#api-tabs button{flex:1;padding:.5rem .4rem;font-size:.85rem}}
 .tl-box textarea{width:100%;min-height:9rem;resize:vertical}
 .tl-row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;margin:.6rem 0}.tl-row .field{flex:1;min-width:140px}
 .tl-st{font-size:.85rem;margin-top:.5rem}.tl-st.err{color:#ff6b5e}
@@ -147,7 +153,11 @@ export function apiView() {
   const base = location.origin;
   const k = apiNewKey || "YOUR_API_KEY";
   const cu = `curl -X POST ${base}/api/v1/text-to-speech \\\n  -H "Authorization: Bearer ${k}" -H "Content-Type: application/json" \\\n  -d '{"text":"नमस्ते दोस्तों","lang":"hi"}'`;
-  return `<div class="pghead"><div><h1>🔌 API & Integrations</h1><p class="muted">अपने दूसरे software (n8n, Zapier, Make, अपनी app, script) से Vividora चलाएँ — Image→3D, Text→Voice, 3D character video। Key सिर्फ़ आपके workspace तक सीमित है।</p></div></div>
+  const tab = /out|vividora/.test(location.hash.split("?")[1] || "") ? "out" : "in";
+  return `<div class="pghead"><div><h1>🔌 API & Keys</h1><p class="muted">दो अलग चीज़ें हैं: <b>बाहर की services की keys</b> (Gemini, Pixabay, fal… — जिन्हें Vividora इस्तेमाल करता है) और <b>Vividora की अपनी API key</b> (जिससे आपका दूसरा software Vividora को चलाता है)।</p></div></div>
+  <div class="seg" id="api-tabs" style="margin-bottom:1rem"><button data-apitab="in" class="${tab === "in" ? "on" : ""}">🔑 Services की keys जोड़ें</button><button data-apitab="out" class="${tab === "out" ? "on" : ""}">🔌 Vividora की API दें</button></div>
+  <div id="api-in" ${tab === "in" ? "" : "hidden"}><div id="pk-list"><p class="small muted">लोड हो रहा है…</p></div></div>
+  <div id="api-out" ${tab === "out" ? "" : "hidden"}><p class="muted small" style="margin:0 0 .8rem">अपने दूसरे software (n8n, Zapier, Make, अपनी app, script) से Vividora चलाएँ — Image→3D, Text→Voice, 3D character video, documentary। Key सिर्फ़ आपके workspace तक सीमित है।</p>
   <div class="tl-wrap"><div class="tl-box">
     <h3 style="margin:0 0 .4rem">नई API key</h3>
     <div class="tl-row"><div class="field"><label>नाम (जैसे n8n, my-app)</label><input id="ak-name" maxlength="60" placeholder="n8n"></div>
@@ -164,7 +174,28 @@ export function apiView() {
     <p class="small" style="margin-top:.8rem">काम में 1–3 मिनट लग सकते हैं: response में <code>job_id</code> मिलता है → <code>GET /v1/jobs/{job_id}</code> से देखें → <code>done</code> होने पर <code>file.download</code> से फ़ाइल लें। या <code>callback_url</code> दें, तो खत्म होते ही आपके URL पर खबर आएगी।</p>
     <p class="small"><a href="/api/v1/docs" target="_blank" rel="noopener">📖 पूरा API docs</a> · <a href="/api/v1/openapi.json" target="_blank" rel="noopener">openapi.json</a> (Postman / n8n में import करें)</p>
     <p class="small muted">⚠ Key password जैसी है — किसी को दिखाएँ नहीं, screenshot में न आने दें। लीक हो जाए तो यहीं से हटा दें।</p>
-  </div></div>`;
+  </div></div></div>`;
+}
+// outside-service keys (server: provkeys.py) — saved encrypted, used at once, no server restart
+async function provLoad() {
+  const box = $("#pk-list"); if (!box) return;
+  let r; try { r = await ctx.api("GET", "/providers"); } catch (e) { box.innerHTML = `<p class="small err">${esc(e.message)}</p>`; return; }
+  const can = r.can_edit; const groups = Object.keys(r.groups);
+  const n = r.providers.filter((x) => x.set).length;
+  box.innerHTML = `<div class="note ${can ? "" : "warn"}" style="margin-bottom:.8rem">${can ? `यहाँ key चिपकाकर <b>Save</b> दबाएँ — तुरंत काम करने लगती है, server restart या <code>.env</code> खोलने की ज़रूरत नहीं। Key database में <b>encrypt</b> होकर रहती है और दोबारा पूरी कभी नहीं दिखती (सिर्फ़ आख़िरी 4 अक्षर)। <code>.env</code> में पहले से रखी key भी चलती रहती है; यहाँ डाली key उससे ऊपर मानी जाती है।` : `ये keys सिर्फ़ server के मालिक (admin) बदल सकते हैं। नीचे दिखता है कि कौन-सी service चालू है।`} <b>${n}/${r.providers.length}</b> चालू।</div>`
+    + groups.map((g) => { const rows = r.providers.filter((x) => x.group === g); if (!rows.length) return "";
+      return `<div class="tl-box" style="margin-bottom:.8rem"><h3 style="margin:0 0 .5rem">${esc(r.groups[g])}</h3>${rows.map((x) => `<div class="pk-row" data-pk="${esc(x.env)}">
+        <div class="pk-head"><b>${esc(x.label)}</b> ${x.set ? `<span class="pk-chip ok">✓ चालू${x.shown ? ` · <code>${esc(x.shown)}</code>` : ""}${x.source === "env" ? " · .env से" : x.source === "dashboard" ? " · यहाँ से" : ""}</span>` : `<span class="pk-chip">नहीं डाली</span>`}
+          ${x.link ? `<a class="small" href="${esc(x.link)}" target="_blank" rel="noopener">key कहाँ मिलेगी ↗</a>` : ""}</div>
+        <p class="small muted" style="margin:.15rem 0 .4rem">${esc(x.use)} <span style="opacity:.6">· ${esc(x.env)}</span></p>
+        ${can ? `<div class="pk-edit"><input type="${x.secret ? "password" : "text"}" autocomplete="off" spellcheck="false" placeholder="${esc(x.placeholder || (x.set ? "नई key चिपकाएँ (बदलने के लिए)" : "key यहाँ चिपकाएँ"))}"><button class="btn small primary" data-pksave>Save</button>${x.source === "dashboard" ? `<button class="btn small quiet" data-pkdel title="यहाँ डाली key हटाएँ (.env वाली, अगर है, वापस चलने लगेगी)">हटाएँ</button>` : ""}</div>` : ""}
+      </div>`).join("")}</div>`; }).join("");
+  if (!can) return;
+  box.querySelectorAll("[data-pk]").forEach((row) => { const env = row.dataset.pk; const inp = row.querySelector("input"); const sv = row.querySelector("[data-pksave]"); const dl = row.querySelector("[data-pkdel]");
+    const save = async () => { const v = inp.value.trim(); if (!v) return ctx.toast("पहले key चिपकाएँ"); sv.disabled = true;
+      try { await ctx.api("PUT", "/providers/" + env, { value: v }); ctx.toast("✅ Save हो गई — अब से इस्तेमाल होगी"); await provLoad(); } catch (e) { ctx.toast(e.message); sv.disabled = false; } };
+    sv.onclick = save; inp.onkeydown = (e) => { if (e.key === "Enter") save(); };
+    if (dl) dl.onclick = async () => { if (dl.dataset.sure !== "1") { dl.dataset.sure = "1"; dl.textContent = "पक्का? (दोबारा दबाएँ)"; return; } try { await ctx.api("DELETE", "/providers/" + env); ctx.toast("हटा दी"); await provLoad(); } catch (e) { ctx.toast(e.message); } }; });
 }
 export function apiBind(c) {
   ctx = c; ensureCss();
@@ -181,7 +212,8 @@ export function apiBind(c) {
       }));
     } catch (e) { box.innerHTML = `<p class="small err">${esc(e.message)}</p>`; }
   };
-  loadList();
+  loadList(); provLoad();
+  document.querySelectorAll("[data-apitab]").forEach((b) => (b.onclick = () => { const t = b.dataset.apitab; document.querySelectorAll("[data-apitab]").forEach((x) => x.classList.toggle("on", x === b)); $("#api-in").hidden = t !== "in"; $("#api-out").hidden = t !== "out"; }));
   const cc = $("#ak-copycurl"); if (cc) cc.onclick = () => copy($("#ak-curl").textContent, "Example copy हो गया");
   const go = $("#ak-go");
   if (go) go.onclick = async () => {

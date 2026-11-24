@@ -329,7 +329,7 @@ def _freesound_search(q: str) -> list[dict]:
     """Search Freesound.org for CC0 sounds."""
     key = os.getenv("FREESOUND_API_KEY")
     if not key:
-        raise ApiError(400, ".env में FREESOUND_API_KEY डालें (freesound.org/apiv2 — free)")
+        raise ApiError(400, "API & Keys page (या .env) में FREESOUND_API_KEY डालें (freesound.org/apiv2 — free)")
     url = (
         f"https://freesound.org/apiv2/search/text/"
         f"?query={urllib.parse.quote(q)}"
@@ -394,7 +394,7 @@ def _tenor_search(q: str, kind: str = "sticker") -> list[dict]:
     from .config import settings as cfg
     key = cfg.tenor_api_key or os.getenv("TENOR_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
     if not key:
-        raise ApiError(400, ".env में TENOR_API_KEY डालें (tenor.com/developer — free)")
+        raise ApiError(400, "API & Keys page (या .env) में TENOR_API_KEY डालें (tenor.com/developer — free)")
     content_filter = "medium"  # off, low, medium, high
     media_filter = "tinygif,gif,webp_transparent"
     # sticker search gets transparent PNGs/WEBPs; gif search gets animated GIFs
@@ -580,7 +580,7 @@ async def search_free(request: Request, user: dict):
         elif src.startswith("pixabay"):
             key = os.getenv("PIXABAY_API_KEY")
             if not key:
-                raise ApiError(400, ".env में PIXABAY_API_KEY डालें (pixabay.com/api/docs — free)")
+                raise ApiError(400, "API & Keys page (या .env) में PIXABAY_API_KEY डालें (pixabay.com/api/docs — free)")
             if src.endswith("video"):
                 data = _http_json(f"https://pixabay.com/api/videos/?key={key}&q={urllib.parse.quote(q)}&per_page=30&safesearch=true")
                 for r in data.get("hits", []):
@@ -599,7 +599,7 @@ async def search_free(request: Request, user: dict):
             # jamendo-nc  → also non-commercial (NC) tracks — ONLY for channels that earn nothing; tagged so Auto never picks them
             cid = os.getenv("JAMENDO_CLIENT_ID")
             if not cid:
-                raise ApiError(400, ".env में JAMENDO_CLIENT_ID डालें (devportal.jamendo.com — free)")
+                raise ApiError(400, "API & Keys page (या .env) में JAMENDO_CLIENT_ID डालें (devportal.jamendo.com — free)")
             data = _http_json(f"https://api.jamendo.com/v3.0/tracks/?client_id={cid}&format=json&limit=40&search={urllib.parse.quote(q)}"
                               f"&audioformat=mp32&include=licenses+musicinfo")
             for r in data.get("results", []):

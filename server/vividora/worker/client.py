@@ -90,6 +90,28 @@ class ApiClient:
         return self._req("PUT", f"/worker/jobs/{job_id}/upload?{q}", raw=path, timeout=3600)
 
 
+_env_base: dict[str, str | None] = {}
+
+
+def _apply_env(env: dict | None) -> None:
+    """Service keys saved in the dashboard reach this process with every job: set them; one that was removed there goes
+    back to what this worker's own .env had."""
+    import os
+    if not isinstance(env, dict):
+        return
+    for k, v in (env.get("set") or {}).items():
+        if isinstance(k, str) and isinstance(v, str) and k.isupper():
+            _env_base.setdefault(k, os.environ.get(k))
+            os.environ[k] = v
+    for k in env.get("unset") or []:
+        if k in _env_base:
+            old = _env_base.pop(k)
+            if old is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = old
+
+
 def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0, info: dict | None = None,
              once: bool = False) -> None:
     """Claim → handle → report, forever. `handler(client, job, project, assets)` returns the result dict."""
@@ -111,6 +133,7 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
         job = claimed["job"]
         log.info("job %s %s (project %s)", job["id"], job["kind"], job["project_id"])
         client.job_id = job["id"]  # file downloads are scoped to this job's workspace on the server
+        _apply_env(claimed.get("env"))
         llm_before = 0
         try:  # plan quota: the worker's own AI calls stop when the workspace's credits are gone
             from ..engine import llm as _llm

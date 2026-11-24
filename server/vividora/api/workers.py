@@ -34,7 +34,17 @@ async def claim(request: Request):
     return ok({"job": job, "project": {k: project[k] for k in
                                        ("id", "workspace_id", "title", "language", "meta", "transcript",
                                         "edl", "settings")},
-               "assets": assets, "quota": {"ai_credits": saas.ai_credits_left(project["workspace_id"])}})
+               "assets": assets, "quota": {"ai_credits": saas.ai_credits_left(project["workspace_id"])},
+               "env": _provider_env()})
+
+
+def _provider_env() -> dict:
+    """Service keys set in the dashboard, for the worker that runs this job (it has its own process / container)."""
+    try:
+        from .. import provkeys
+        return provkeys.worker_env()
+    except Exception:  # noqa: BLE001 — never block a job on this
+        return {}
 
 
 def _job(request: Request) -> dict:

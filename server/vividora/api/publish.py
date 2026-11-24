@@ -88,19 +88,19 @@ async def connect_start(request: Request, user: dict):
     platform = request.path_params["platform"]
     if platform == "youtube":
         if not youtube.configured():
-            raise ApiError(400, ".env में YT_CLIENT_ID / YT_CLIENT_SECRET / PUBLIC_URL सेट करें")
+            raise ApiError(400, "API & Keys page (या .env) में YT_CLIENT_ID / YT_CLIENT_SECRET / PUBLIC_URL सेट करें")
         state = pysecrets.token_urlsafe(24)
         _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel"), "_ts": _t.time()}
         return ok({"url": youtube.auth_url(state)})
     if platform == "meta":
         if not metaapi.configured():
-            raise ApiError(400, ".env में META_APP_ID / META_APP_SECRET / PUBLIC_URL सेट करें")
+            raise ApiError(400, "API & Keys page (या .env) में META_APP_ID / META_APP_SECRET / PUBLIC_URL सेट करें")
         state = pysecrets.token_urlsafe(24)
         _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel"), "_ts": _t.time()}
         return ok({"url": metaapi.auth_url(state)})
     if platform == "tiktok":
         if not tiktokapi.configured():
-            raise ApiError(400, ".env में TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET / PUBLIC_URL सेट करें")
+            raise ApiError(400, "API & Keys page (या .env) में TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET / PUBLIC_URL सेट करें")
         state = pysecrets.token_urlsafe(24)
         _states[state] = {"workspace_id": user["workspace_id"], "user_id": user["id"], "platform": platform, "channel_id": request.query_params.get("channel"), "_ts": _t.time()}
         return ok({"url": tiktokapi.auth_url(state)})

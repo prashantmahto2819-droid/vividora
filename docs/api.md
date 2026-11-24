@@ -91,3 +91,21 @@ let j; do { await new Promise(r => setTimeout(r, 4000)); j = await (await fetch(
 * Starter pack में अब 29 SFX हैं (`server/tools/make_sfx.py` से numpy में बने, CC0)। नए जोड़ने: Settings → Library → Starter pack फिर से।
 * **Earshot / अपनी WAV files:** `MEDIA_ROOT/incoming/sfx/<tag>/file.wav` में डालें, फिर `POST /api/library/import-sfx-dir` (admin)। folder का नाम tag बन जाता है।
 * **Openverse SFX:** Library → वेब खोज → "Sound effects — Openverse"। सिर्फ़ commercial-safe CC (CC0 / PDM / BY / BY-SA) दिखते हैं; credit/licence हर item में सेव रहता है (BY/BY-SA में video description में credit देना होगा)।
+
+## Keys of outside services — from the dashboard
+
+`API & Keys → Services की keys जोड़ें` (`#/api`) sets the keys Vividora itself uses, without touching `.env` or
+restarting: `PUBLIC_URL`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`,
+`FAL_KEY`, `ELEVENLABS_API_KEY`, `PIXABAY_API_KEY`, `JAMENDO_CLIENT_ID`, `FREESOUND_API_KEY`, `TENOR_API_KEY`,
+`YT_API_KEY`, `YT_CLIENT_ID` / `YT_CLIENT_SECRET`, `META_APP_ID` / `META_APP_SECRET`, `TIKTOK_CLIENT_KEY` /
+`TIKTOK_CLIENT_SECRET`.
+
+* Stored encrypted (Fernet from `SECRET_KEY`) in the `provider_keys` table; the API only ever returns “set / not set”
+  and the last four characters. **Changing `SECRET_KEY` makes saved keys unreadable — enter them again.**
+* A dashboard value wins over `.env`; “हटाएँ” brings the `.env` value back. Everything else in `.env` works as before.
+* Only the admin of the server's first (operator) workspace, with a dashboard login, can change them
+  (`GET /api/providers`, `PUT|DELETE /api/providers/{ENV}`); an API key (`vk_…`) never can.
+* Workers receive the keys they use themselves (Gemini / Anthropic / Cloudflare / fal / ElevenLabs) with every job they
+  claim, so the worker container needs no restart either.
+
+The other half of the page, `Vividora की API दें`, creates `vk_…` keys for your own software (described above).
