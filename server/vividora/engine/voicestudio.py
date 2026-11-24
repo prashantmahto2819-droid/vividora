@@ -23,6 +23,7 @@ from ..config import settings
 log = logging.getLogger("vividora.voicestudio")
 
 _TIMEOUT = 120  # seconds — TTS on CPU can be slow
+BUSY_WAIT = 240.0  # seconds to keep retrying while VoiceStudio answers 429 (busy with an earlier line)
 
 
 def _url(path: str) -> str:
@@ -120,15 +121,43 @@ def synthesise(text: str, model: str | None = None, voice: str | None = None,
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
             return r.read()
 
-    try:
+    import re
+    import time
+
+    def _once() -> bytes:
         try:
-            audio = _post({**payload, "language": language})
+            return _post({**payload, "language": language})
         except urllib.error.HTTPError as e:
             if e.code not in (400, 422):  # this build rejects the extra "language" field
                 raise
-            audio = _post(payload)  # this build rejects the extra "language" field
+            return _post(payload)
+
+    try:
+        waited, audio = 0.0, b""
+        while True:
+            try:
+                audio = _once()
+                break
+            except urllib.error.HTTPError as e:
+                # 429 = VoiceStudio is still busy with an earlier line (it runs one at a time on the CPU). It says nothing was
+                # started and when to come back — wait and send the same request again instead of failing.
+                if e.code != 429 or waited >= BUSY_WAIT:
+                    raise
+                body_ = e.read().decode(errors="replace")
+                m = re.search(r"retry[^0-9]{0,40}(\d+(?:\.\d+)?)\s*s", body_, re.I)
+                try:
+                    pause = float(e.headers.get("Retry-After") or (m.group(1) if m else 10))
+                except (TypeError, ValueError):
+                    pause = 10.0
+                pause = max(3.0, min(30.0, pause + 1))
+                log.info("VoiceStudio busy — retrying in %.0fs (waited %.0fs)", pause, waited)
+                time.sleep(pause)
+                waited += pause
     except urllib.error.HTTPError as e:
         err = e.read().decode(errors="replace")[:500]
+        if e.code == 429:
+            raise RuntimeError(f"VoiceStudio अभी पिछली आवाज़ बनाने में व्यस्त है ({int(BUSY_WAIT // 60)} मिनट इंतज़ार के बाद भी खाली नहीं हुआ) — 1–2 मिनट बाद दोबारा "
+                               "कोशिश करें। बार-बार हो तो server पर VoiceStudio को restart करें (अटकी हुई पुरानी request हट जाएगी)।") from e
         raise RuntimeError(f"VoiceStudio TTS error ({e.code}): {err}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"VoiceStudio unreachable: {e.reason}") from e
