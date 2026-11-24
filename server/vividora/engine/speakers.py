@@ -58,17 +58,29 @@ def _cluster(dets: list[tuple], n_looks: int) -> list[dict]:
     import numpy as np
     if not dets:
         return []
-    dets = sorted(dets, key=lambda d: d[1])
+    # density peaks, not chains: a false hit on the wall now and then must not glue two people into one
+    xs = np.array([d[1] for d in dets], dtype=np.float32)
     med_w = float(np.median([d[3] for d in dets]))
-    gap = max(0.07, 0.6 * med_w)
-    groups, cur = [], [dets[0]]
-    for d in dets[1:]:
-        if d[1] - cur[-1][1] > gap:
-            groups.append(cur)
-            cur = [d]
-        else:
-            cur.append(d)
-    groups.append(cur)
+    sep = max(0.08, 0.7 * med_w)                 # two faces are at least this far apart
+    hist, edges = np.histogram(xs, bins=100, range=(0.0, 1.0))
+    reach = max(1, int(round(sep / 2 / 0.01)))
+    dens = np.convolve(hist, np.ones(2 * reach + 1), mode="same")
+    groups, taken = [], np.zeros(len(dets), dtype=bool)
+    for _ in range(MAX_FACES + 2):
+        b = int(np.argmax(dens))
+        if dens[b] < max(3, 0.12 * n_looks):
+            break
+        lo, hi = max(0, b - reach), min(100, b + reach + 1)
+        centre = float(np.average((edges[lo:hi] + 0.005), weights=np.maximum(hist[lo:hi], 1e-6)))
+        pick = (np.abs(xs - centre) <= sep / 2) & ~taken
+        if pick.any():
+            g = [dets[i] for i in np.where(pick)[0]]
+            w_med = float(np.median([d[3] for d in g]))
+            g = [d for d in g if 0.6 * w_med <= d[3] <= 1.6 * w_med]       # the same face keeps its size
+            if g:
+                groups.append(g)
+            taken |= pick
+        dens[max(0, b - 2 * reach):min(100, b + 2 * reach + 1)] = 0
     faces = []
     for g in groups:
         frames = sorted({d[0] for d in g})
