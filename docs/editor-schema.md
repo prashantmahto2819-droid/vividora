@@ -622,3 +622,32 @@ Preview: `pro.js overlayFrame` (CSS radius / border / box-shadow, image transfor
   clips longer than `compose.REVERSE_MAX` = 10 s play forwards, ffmpeg keeps every frame in memory).
 * `POST /api/projects/{id}/still {t}` → the frame at source second `t` as a Library image. “📸 Freeze frame” puts it
   over the video for 2 s at the playhead (the sound keeps running — it is a held picture, not a stop in time).
+
+## Speaker switch for podcasts (`effects.speaker`, effect `closeup`, `broll[].focus_x`)
+
+`POST /api/projects/{id}/speakers/plan` (`engine/speakers.py`, background job, poll `GET /api/visuals/jobs/{job}`) finds
+the faces of the main video, measures mouth movement per face and returns a camera plan in **source seconds**:
+
+```jsonc
+"speaker": {
+  "enabled": true,
+  "shots": [ {"start": 0, "end": 6.1, "who": 0, "shot": "close", "zoom": 1.6, "x": 0.1, "y": 0.4, "cx": 0.27},
+             {"start": 6.1, "end": 14.1, "who": 1, "shot": "cam"},          // second camera
+             {"start": 14.1, "end": 18, "who": 0, "shot": "wide", "cx": 0.27} ],
+  "faces":  [ {"x": 0.27, "y": 0.43, "w": 0.2, "h": 0.36, "seen": 0.9} ],     // of the main camera, fractions of the frame
+  "people": [ {"who": 0, "cam": 1, "talk": 10.4, "x": 0.27, "y": 0.43, "h": 0.36}, {"who": 1, "cam": 2, "talk": 7.6} ],
+  "cam": {"id": "<library id>", "offset": 1.7, "confidence": 35, "duration": 18, "focus_x": 0.5},   // main second t = camera-2 second t + offset
+  "sig": "…"                     // the kept ranges the clips were placed for (the editor warns when cuts changed)
+}
+```
+
+The editor (AI Studio → “Podcast: बोलने वाले पर कैमरा”) turns the plan into ordinary clips, all tagged `_spk: true`:
+
+* `close` → an effect clip `{"id": "closeup", "params": {"zoom", "x", "y"}}` on the FX track. `closeup` is a normal catalog
+  effect (crop → scale): `zoom` 1.05–3, `x` / `y` = where the window sits (0 = left / top, 1 = right / bottom).
+* `cam` → an overlay clip of the second camera: `fit: "cover"`, `fade: false`, `trim_in = source second + offset`,
+  `focus_x` (new, any cover clip: the subject's place 0 … 1 in the clip; it stays in the picture when the sides are cut off).
+* `wide` → nothing (the main picture as it is).
+
+Vertical outputs cut from a wide source (`fit: crop`): `_spk` close-up clips are skipped and the crop window jumps to the
+active speaker instead (`speakers.track_points` replaces the face track; needs `face_track != "off"`).

@@ -432,6 +432,9 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
         edl = {**edl, "cuts": [{**c, "start": float(c.get("start", 0)) - seek, "end": float(c.get("end", 0)) - seek}
                                for c in (edl.get("cuts") or []) if isinstance(c, dict)]}
         meta = {**meta, "face_track": [[float(t) - seek, cx] for t, cx in (meta.get("face_track") or [])]}
+        if isinstance(e.get("speaker"), dict) and isinstance(e["speaker"].get("shots"), list):
+            e["speaker"] = {**e["speaker"], "shots": [{**sh, "start": float(sh.get("start", 0)) - seek, "end": float(sh.get("end", 0)) - seek}
+                                                      for sh in e["speaker"]["shots"] if isinstance(sh, dict)]}
         if transcript:
             transcript = {**transcript, "segments": [
                 {**sg, "start": float(sg.get("start", 0)) - seek, "end": float(sg.get("end", 0)) - seek,
@@ -554,6 +557,14 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     src_w, src_h = int(meta.get("width", w)), int(meta.get("height", h))
     track_cmds = None
     kf = meta.get("face_track") or []
+    spk = e.get("speaker") if isinstance(e.get("speaker"), dict) else None
+    if preset.get("fit") == "crop" and src_w / src_h > w / h * 1.15 and any(isinstance(c, dict) and c.get("_spk") for c in e.get("fxclips") or []):
+        # a vertical picture cut out of a wide one: the close-up is made by moving the window to the speaker (below),
+        # zooming into the already cut picture would show the wrong person
+        e["fxclips"] = [c for c in e["fxclips"] if not (isinstance(c, dict) and c.get("_spk"))]
+        if spk and spk.get("enabled", True) and spk.get("shots"):
+            from . import speakers
+            kf = speakers.track_points(spk["shots"], spk.get("faces") or [], [a for a, _ in keep])
     if face_track != "off" and kf and preset.get("fit") == "crop" and src_w / src_h > w / h:
         from .facetrack import crop_commands
         factor = max(w / src_w, h / src_h)

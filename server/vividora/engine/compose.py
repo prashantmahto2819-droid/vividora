@@ -177,7 +177,8 @@ def base_box(item: dict, W: int, H: int, src_w: int, src_h: int) -> tuple[int, i
         k = min(W / src_w, H / src_h)
         bw, bh = _ev(src_w * k), _ev(src_h * k)
         return bw, bh, 0.5, 0.5, f"scale={bw}:{bh}:flags=bicubic"
-    return W, H, 0.5, 0.5, f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
+    from .effects import cover_fill
+    return W, H, 0.5, 0.5, cover_fill(item, W, H)
 
 
 def _kf(item: dict, dur: float, x0: float, y0: float) -> dict[str, list[dict]]:

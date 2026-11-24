@@ -518,6 +518,24 @@ def _cut_src(item: dict, input_index: int, alpha_index: int | None, idx: int, h:
     return pre, f"[ocut{idx}]", ""  # the person matte replaces colour keying
 
 
+def cover_fill(item: dict, w: int, h: int) -> str:
+    """Fill the frame with the clip. `focus_x` / `focus_y` (0 … 1: where the subject is in the clip) keep that point in
+    the picture when the sides or top are cut off — a second camera's face in a vertical video. Default = the middle."""
+    def at(k: str) -> float | None:
+        try:
+            v = item.get(k)
+            return None if v in (None, "") else max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return None
+    fx_, fy_ = at("focus_x"), at("focus_y")
+    crop = f"crop={w}:{h}"
+    if fx_ is not None or fy_ is not None:
+        cx = f"max(0\\,min(iw-{w}\\,iw*{fx_ if fx_ is not None else 0.5:.4f}-{w}/2))"
+        cy = f"max(0\\,min(ih-{h}\\,ih*{fy_ if fy_ is not None else 0.5:.4f}-{h}/2))"
+        crop += f":{cx}:{cy}"
+    return f"scale={w}:{h}:force_original_aspect_ratio=increase,{crop}"
+
+
 def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, out_label: str, idx: int,
                    alpha_index: int | None = None) -> str:
     """Full-frame B-roll (fit: cover), a picture-in-picture box, or a free transform
@@ -534,7 +552,7 @@ def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, 
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = {"tl": "24:24", "tr": f"W-w-24:24", "bl": f"24:H-h-{int(h*0.28)}", "br": f"W-w-24:H-h-{int(h*0.28)}"}.get(item.get("pos", "tr"), "W-w-24:24")
     else:
-        fill = ken_burns(item, w, h) or f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+        fill = ken_burns(item, w, h) or cover_fill(item, w, h)
         prep = (f"{pre}{src}{fill}{key},"
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = "0:0"

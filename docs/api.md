@@ -124,3 +124,9 @@ estimated unit price; `spend.py` keeps the log (`spend_log`) and the month's tot
 when the month's estimate reaches it (`meter.SpendCap`). Workers get the remaining budget with each claimed job and
 report what they spend (`POST /api/worker/spend`). `GET /api/spend` → totals (the log only for the operator admin).
 Nothing is kept running anywhere: fal.ai bills per call, RunPod serverless per second of a job.
+
+### Speaker switch (podcast camera)
+
+`POST /api/projects/{id}/speakers/plan` `{style?: "mix"|"close"|"wide_long", zoom?: 0.6–1.6, min_turn?: 1–6, cam?: <library video id>, cam_offset?: seconds}`
+→ `202 {job}`; `GET /api/visuals/jobs/{job}` → `{status, message, result: {shots, people, faces, turns, cam, main_close}}`.
+Nothing is written to the project: the editor stores the plan in `effects.speaker` and places the clips (docs/editor-schema.md).

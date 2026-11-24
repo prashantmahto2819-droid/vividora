@@ -240,7 +240,129 @@ async def still(request: Request, user: dict):
     return ok(_view(db.get("library", item_id)), status=201)
 
 
+_SCANS: dict[tuple, dict] = {}      # (file, mtime) → speakers.scan result; a second plan with another style is instant
+
+
+def _scan_cached(path: Path, duration: float, width: int, height: int, progress) -> dict:
+    from ..engine import speakers
+    key = (str(path), path.stat().st_mtime_ns)
+    got = _SCANS.get(key)
+    if got is None:
+        got = speakers.scan(path, duration, width, height, progress=progress)
+        with _LOCK:
+            while len(_SCANS) >= 6:
+                _SCANS.pop(next(iter(_SCANS)))
+            _SCANS[key] = got
+    return got
+
+
+def _speakers(job_id: str, project: dict, opts: dict) -> None:
+    st = _JOBS[job_id]
+    try:
+        from .. import thumbs
+        from ..engine import speakers
+        from .library import _probe_meta
+        src = thumbs.source_video(project, quality=False)
+        if src is None:
+            raise ValueError("वीडियो फ़ाइल नहीं मिली")
+        meta = project.get("meta") or {}
+        dur = float(meta.get("duration") or 0)
+        pm = _probe_meta(src, "broll")
+        w, h = int(pm.get("width") or meta.get("width") or 0), int(pm.get("height") or meta.get("height") or 0)
+        st["message"] = "चेहरे और होंठ देख रहा हूँ… 0%"
+        main = _scan_cached(src, dur, w, h, lambda f: st.update(message=f"चेहरे और होंठ देख रहा हूँ… {int(f * 100)}%"))
+        words = []
+        for sg in ((project.get("transcript") or {}).get("segments")) or []:
+            ws = [x for x in (sg.get("words") or []) if isinstance(x, dict) and "start" in x and "end" in x]
+            words += ws or [{"start": sg.get("start", 0), "end": sg.get("end", 0)}]
+        faces, cams, cam_out, norm = main["faces"], {}, None, False
+        scores = main["scores"]
+        who = [{"cam": 1, "face": j} for j in range(len(faces))]
+        if opts.get("cam"):
+            it = opts["cam"]
+            cpath = storage.abs_path(it["path"])
+            cm = {**_probe_meta(cpath, "broll"), **{k: v for k, v in (it.get("meta") or {}).items() if k in ("duration", "width", "height") and v}}
+            cdur, cw, ch = float(cm.get("duration") or 0), int(cm.get("width") or 0), int(cm.get("height") or 0)
+            if opts.get("cam_offset") is not None:
+                off, conf = float(opts["cam_offset"]), None
+            else:
+                st["message"] = "दूसरे कैमरे को आवाज़ से मिला रहा हूँ…"
+                raw = thumbs.source_video(project) or src
+                off, conf = speakers.sync_offset(raw, cpath)
+                if conf < 7.5:
+                    raise ValueError(f"दूसरे कैमरे की आवाज़ इस वीडियो से नहीं मिली (भरोसा {conf}) — क्या दोनों एक ही समय की recording हैं और दूसरे कैमरे में आवाज़ है? "
+                                     "नहीं तो नीचे “कितने सेकंड आगे/पीछे” हाथ से भरें।")
+            st["message"] = "दूसरा कैमरा देख रहा हूँ… 0%"
+            cam = _scan_cached(cpath, cdur, cw, ch, lambda f: st.update(message=f"दूसरा कैमरा देख रहा हूँ… {int(f * 100)}%"))
+            if not cam["faces"]:
+                raise ValueError("दूसरे कैमरे में चेहरा नहीं मिला — सामने से दिखता चेहरा चाहिए")
+            scores, who, faces = speakers.with_camera(main, cam, off, words)
+            cams = {len(who) - 1: True}
+            norm = True
+            cf = max(cam["faces"], key=lambda f: f["seen"] * f["h"])
+            cam_out = {"id": it["id"], "name": it["name"], "offset": off, "confidence": conf, "duration": cdur, "focus_x": cf["x"], "focus_y": cf["y"]}
+        if not main["faces"] and not cam_out:
+            raise ValueError("चेहरा नहीं मिला — speaker switch के लिए चेहरे सामने से (या थोड़ा तिरछे) दिखने चाहिए")
+        if len(who) < 2:
+            raise ValueError("एक ही चेहरा मिला — बदलने के लिए दो लोग एक frame में हों, या दूसरे कैमरे की फ़ाइल जोड़ें")
+        tl = speakers.turns(scores, main["fps"], words, min_turn=opts["min_turn"], norm=norm, duration=dur or None)
+        sh = speakers.shots(tl, faces, dur or (tl[-1]["end"] if tl else 0), style=opts["style"], zoom=opts["zoom"], cams=cams,
+                            main_close=len(main["faces"]) >= 2)
+        if cam_out:      # shots of camera 2 outside its recording fall back to the main picture
+            for s_ in sh:
+                if s_["shot"] == "cam" and (s_["start"] + cam_out["offset"] < 0 or s_["end"] + cam_out["offset"] > cam_out["duration"] + 0.2):
+                    s_["shot"] = "wide"
+        talk = [0.0] * len(who)
+        for t in tl:
+            talk[t["who"]] += t["end"] - t["start"]
+        people = []
+        for j, wdef in enumerate(who):
+            row = {"who": j, "cam": wdef["cam"], "talk": round(talk[j], 1)}
+            if wdef["cam"] == 1 and j < len(faces):
+                row.update({"x": faces[j]["x"], "y": faces[j]["y"], "h": faces[j]["h"]})
+            people.append(row)
+        st.update(status="done", message="तैयार", result={"shots": sh, "people": people, "faces": faces, "turns": len(tl), "cam": cam_out,
+                                                         "style": opts["style"], "zoom": opts["zoom"], "main_close": len(main["faces"]) >= 2})
+    except Exception as e:  # noqa: BLE001 — the job reports it
+        log.info("speaker plan failed: %s", e)
+        st.update(status="error", error=str(e)[:400], message="नहीं हो पाया")
+    finally:
+        st["ended"] = time.time()
+
+
+@require("editor")
+async def speakers_plan(request: Request, user: dict):
+    """Who is speaking → camera plan (engine/speakers.py). Runs in the background: poll GET /visuals/jobs/{job}.
+    Body: {style?: mix | close | wide_long, zoom?: 0.6–1.6, min_turn?: 1–6 s, cam?: library video id (second camera),
+    cam_offset?: seconds (skip the sound match)} → {job}; the job's `result` = {shots, people, faces, turns, cam}."""
+    p = own_project(request, user)
+    d = await body(request)
+    rate_limit(request, "speakers_plan", 12)
+    opts = {"style": d.get("style") if d.get("style") in ("mix", "close", "wide_long") else "mix", "cam": None, "cam_offset": None}
+    try:
+        opts["zoom"] = max(0.6, min(1.6, float(d.get("zoom") or 1)))
+        opts["min_turn"] = max(1.0, min(6.0, float(d.get("min_turn") or 1.8)))
+        if d.get("cam_offset") not in (None, ""):
+            opts["cam_offset"] = max(-7200.0, min(7200.0, float(d["cam_offset"])))
+    except (TypeError, ValueError):
+        raise ApiError(422, "zoom / min_turn / cam_offset संख्या होनी चाहिए")
+    if d.get("cam"):
+        it = db.get("library", str(d["cam"]))
+        if not it or it["workspace_id"] != user["workspace_id"] or it["kind"] != "broll" or str(it.get("mime") or "").startswith("image/"):
+            raise ApiError(404, "दूसरे कैमरे की वीडियो Library में नहीं मिली")
+        opts["cam"] = it
+    ws = user["workspace_id"]
+    with _LOCK:
+        if any(j["ws"] == ws and j["status"] == "running" and j.get("source") == "speakers" for j in _JOBS.values()):
+            raise ApiError(429, "एक speaker जाँच चल रही है — उसे पूरा होने दें")
+        job_id = db.new_id()
+        _JOBS[job_id] = {"ws": ws, "status": "running", "message": "शुरू…", "source": "speakers", "started": time.time()}
+    threading.Thread(target=_speakers, args=(job_id, p, opts), daemon=True).start()
+    return ok({"job": job_id}, status=202)
+
+
 routes = [Route("/projects/{project_id}/visuals/plan", plan, methods=["POST"]),
+          Route("/projects/{project_id}/speakers/plan", speakers_plan, methods=["POST"]),
           Route("/projects/{project_id}/still", still, methods=["POST"]),
           Route("/projects/{project_id}/support/match", support_match, methods=["POST"]),
           Route("/projects/{project_id}/visuals/fetch", fetch, methods=["POST"]),

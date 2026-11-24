@@ -613,6 +613,7 @@ function mainGeom(W, H) {
     const cover = !fitc && (E.ratio !== "16:9" || (sr > dr && dr >= 1));
     const k = cover ? Math.max(W / ew, H / eh) : Math.min(W / ew, H / eh); dw = ew * k; dh = eh * k;
     x0 = cover ? (W - dw) * (E.rs.focus_x ?? 0.5) : (W - dw) / 2; y0 = cover ? (H - dh) * (E.rs.focus_y ?? 0.5) : (H - dh) / 2;
+    const sc = cover && sr > dr * 1.15 ? spkCx() : null; if (sc != null) x0 = clamp(W / 2 - sc * dw, W - dw, 0);   // vertical: the window sits on whoever speaks
   }
   return { vw, vh, c, rot, side, dw, dh, x0, y0, t };
 }
@@ -920,6 +921,7 @@ function renderOverlay() {
   $("#ovl-text", ovl).innerHTML = html;
   // effect/filter clips under the playhead change the look of the video while it plays
   const vf = videoFilter(); if (vf !== E.vf) { E.vf = vf; const v = $("#pv", E.root); if (v) v.style.filter = vf; const cv = $("#pv-cut", E.root); if (cv) cv.style.filter = vf; }
+  closeupSync();
   cutOverlays(); cutSync(); lutSync();
   renderHandles();
 }
@@ -1245,6 +1247,95 @@ function supBind(panel) {
       fx.broll.push({ _id: "sup_" + uid(), _sup: x.r.id, id: x.r.id, start: x.st, end: en, fit: S.layout === "pip" ? "pip" : "cover", pos: "tr" }); n++; });
     touch(); renderTimeline(); toast(`${n} supporting clips timeline पर लग गईं — हर एक को खींचकर खिसका सकते हैं (Ctrl+Z से वापस)`, 5000); re(); };
 }
+// ── podcast: the camera follows whoever speaks (engine/speakers.py) ──
+// The plan lives in effects.speaker (SOURCE seconds). "लगाओ" turns it into ordinary timeline clips: a Close-up effect clip
+// for every close shot, an overlay clip of the second camera for every camera-2 shot — each can be moved or deleted.
+function spkState() { if (!E.spk) E.spk = { style: "mix", zoom: 1, minTurn: 1.8, cam: "", camOff: "", busy: false, msg: "" }; return E.spk; }
+function spkSig() { return keeps().map(([a, b]) => a.toFixed(2) + "-" + b.toFixed(2)).join(","); }
+function spkClose(f, zoom) { const z = clamp(clamp(0.36 / Math.max(0.05, f.h), 1.25, 2.4) * clamp(zoom || 1, 0.5, 2), 1.15, 3); const sl = 1 - 1 / z; const cy = f.y + 0.05 * f.h;
+  return { zoom: +z.toFixed(3), x: +clamp((f.x - 0.5 / z) / sl, 0, 1).toFixed(4), y: +clamp((cy - 0.42 / z) / sl, 0, 1).toFixed(4) }; }
+function spkName(P, who) { const pp = (P.people || [])[who]; if (!pp) return "?"; if (pp.cam === 2) return "कैमरा 2"; const mains = (P.people || []).filter((x) => x.cam === 1); if (mains.length < 2) return "मुख्य कैमरा"; const i = mains.indexOf(pp); return i === 0 ? "बायाँ व्यक्ति" : i === mains.length - 1 ? "दायाँ व्यक्ति" : "बीच वाला"; }
+function spkApply(quiet) {
+  const fx = E.rs.effects; const P = fx.speaker; if (!P || !Array.isArray(P.shots)) return;
+  fx.fxclips = (fx.fxclips || []).filter((c) => !c._spk); fx.broll = (fx.broll || []).filter((b) => !b._spk);
+  const ks = keeps(); let nc = 0, ncam = 0; let last = null;
+  for (const sh of P.shots) { if (sh.shot === "wide") { last = null; continue; }
+    for (const [a, b] of ks) { const p = Math.max(a, sh.start), q = Math.min(b, sh.end); if (q - p < 0.15) continue;
+      const st = +outOf(p).toFixed(3), en = +(outOf(p) + (q - p)).toFixed(3);
+      if (sh.shot === "cam" && P.cam && libItem(P.cam.id)) { fx.broll.push({ _id: "spk_" + uid(), _spk: true, id: P.cam.id, start: st, end: en, fit: "cover", fade: false, track: 0, trim_in: +Math.max(0, p + P.cam.offset).toFixed(3), focus_x: P.cam.focus_x, volume: 0 }); ncam++; last = null; }
+      else if (sh.shot === "close" && sh.zoom) {
+        if (last && last._who === sh.who && Math.abs(last.end - st) < 0.03) { last.end = en; continue; }
+        last = { _id: "spk_" + uid(), _spk: true, _who: sh.who, kind: "effect", id: "closeup", params: { zoom: sh.zoom, x: sh.x, y: sh.y }, start: st, end: en, track: 0, enabled: true }; fx.fxclips.push(last); nc++; } } }
+  P.sig = spkSig(); P.enabled = true; touch(); renderTimeline(); layoutFrame();
+  if (!quiet) E.ctx.toast(`${nc} close-up${ncam ? ` + ${ncam} कैमरा-2 shots` : ""} timeline पर लग गए — FX track पर हर एक को खींच / काट / हटा सकते हैं (Ctrl+Z से वापस)`, 6000);
+}
+function spkHtml(dis) {
+  const { esc } = E.ctx; const S = spkState(); const fx = E.rs.effects; const P = fx.speaker; const vids = (E.lib || []).filter((x) => x.kind === "broll" && !String(x.mime || "").startsWith("image/") && x.source !== "starter" && !x.meta?.char);
+  const applied = (fx.fxclips || []).filter((c) => c._spk).length + (fx.broll || []).filter((b) => b._spk).length;
+  const opt = (v, cur, lab) => `<option value="${v}" ${String(cur) === String(v) ? "selected" : ""}>${lab}</option>`;
+  let res = "";
+  if (P && Array.isArray(P.shots) && P.shots.length) {
+    const ppl = (P.people || []).map((x) => `${spkName(P, x.who)} ${fmt(x.talk || 0)}`).join(" · ");
+    const stale = applied && P.sig && P.sig !== spkSig();
+    res = `<p class="small">👥 ${esc(ppl)} · ${P.shots.length} shots${P.cam ? ` · कैमरा 2 आवाज़ से ${P.cam.offset >= 0 ? "+" : ""}${(+P.cam.offset).toFixed(2)}s पर मिला${P.cam.confidence ? ` (भरोसा ${Math.round(P.cam.confidence)})` : ""}` : ""}</p>
+      ${stale ? `<p class="small" style="color:var(--warn,#F2B33D)">⚠ इसके बाद कट बदले हैं — close-up पुराने समय पर हैं। <b>“दोबारा बैठाओ”</b> दबाएँ।</p>` : ""}
+      <div class="irow" style="flex-wrap:wrap;gap:.35rem"><button class="btn primary" id="spk-apply" ${dis}>${applied ? "🔄 दोबारा बैठाओ" : "✅ timeline पर लगाओ"}</button>${applied ? `<button class="btn" id="spk-clear" ${dis}>✕ सब हटाओ</button>` : ""}</div>
+      <details class="spk-list" ${S.open ? "open" : ""}><summary class="small">हर shot देखें / बदलें (${P.shots.length})</summary>
+      ${P.shots.slice(0, 400).map((sh, i) => `<div class="irow spk-row" data-spk="${i}" style="align-items:center;gap:.35rem"><button class="btn small quiet spk-seek">${fmt(sh.start)}</button><span class="small muted">${(sh.end - sh.start).toFixed(1)}s</span>
+        <select class="spk-who" ${dis}>${(P.people || []).map((x) => opt(x.cam === 2 ? "cam" : "c" + x.who, sh.shot === "cam" ? "cam" : sh.shot === "close" || (P.main_close === false && sh.shot === "wide") ? "c" + sh.who : "", x.cam === 2 ? "🎥 कैमरा 2" : (P.main_close !== false ? "🔍 " + spkName(P, x.who) + " पास से" : "🎥 मुख्य कैमरा"))).join("")}${P.main_close !== false ? opt("wide", sh.shot === "wide" ? "wide" : "", "🖼 पूरा frame (wide)") : ""}</select></div>`).join("")}</details>`;
+  }
+  return `<div class="ph"><h3>🎙 Podcast: बोलने वाले पर कैमरा</h3><span class="small muted">अपने-आप</span></div>
+    <p class="small muted">दो लोग एक ही frame में बैठे हैं? Vividora <b>होंठों की हरकत</b> देखकर पहचानता है कि कौन बोल रहा है और उसी पर close-up लगाता है — जैसे दो कैमरों से shoot हुआ हो। <b>दूसरे कैमरे की file</b> भी है तो नीचे जोड़ें: आवाज़ से अपने-आप sync होती है। 9:16 (Shorts / Reels) में खिड़की अपने-आप बोलने वाले पर चली जाती है।</p>
+    <div class="irow" style="flex-wrap:wrap;gap:.4rem;align-items:center">
+      <select id="spk-style" ${dis}>${opt("mix", S.style, "मिला-जुला (close-up + बीच में wide)")}${opt("close", S.style, "हमेशा बोलने वाले पर")}${opt("wide_long", S.style, "ज़्यादातर wide, लंबे जवाब पर close-up")}</select>
+      <select id="spk-zoom" ${dis} title="close-up कितना पास">${opt(0.85, S.zoom, "थोड़ा पास")}${opt(1, S.zoom, "सामान्य पास")}${opt(1.2, S.zoom, "बहुत पास")}</select>
+      <select id="spk-min" ${dis} title="इससे छोटी बात (हाँ, अच्छा…) पर कैमरा नहीं बदलता">${opt(1.2, S.minTurn, "तेज़ बदलाव")}${opt(1.8, S.minTurn, "सामान्य")}${opt(3, S.minTurn, "आराम से")}</select></div>
+    <div class="irow" style="flex-wrap:wrap;gap:.35rem;align-items:center;margin-top:.35rem"><span class="small muted">दूसरा कैमरा:</span>
+      <select id="spk-cam" ${dis}><option value="">नहीं है (एक ही कैमरा)</option>${vids.slice(0, 200).map((x) => opt(x.id, S.cam, "🎞 " + esc(x.name.slice(0, 40)))).join("")}</select>
+      <label class="btn small ${dis ? "disabled" : ""}">＋ upload<input type="file" id="spk-up" accept="video/*" hidden ${dis}></label>
+      ${S.cam ? `<label class="small" title="खाली = आवाज़ से अपने-आप। भरें तभी जब दूसरे कैमरे में आवाज़ न हो: उसकी recording मुख्य video से कितने सेकंड पहले शुरू हुई (+) या बाद में (−)">sync <input type="number" id="spk-off" step="0.05" value="${esc(String(S.camOff))}" placeholder="auto" style="width:72px" ${dis}> s</label>` : ""}</div>
+    <div class="irow" style="margin-top:.45rem"><button class="btn ${P?.shots?.length ? "" : "primary"}" id="spk-go" ${dis} ${S.busy ? "disabled" : ""}>${S.busy ? "⏳ " + esc(S.msg || "देख रहा हूँ…") : "🔍 कौन बोल रहा है — जाँचो"}</button></div>
+    ${S.err ? `<p class="small" style="color:var(--bad,#e66)">${esc(S.err)}</p>` : ""}${res}`;
+}
+function spkBind(panel) {
+  const S = spkState(); const { api, toast } = E.ctx; const fx = E.rs.effects; const re = () => { const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; };
+  const bind = (q, k, num) => { const el = $(q, panel); if (el) el.onchange = () => { S[k] = num ? +el.value : el.value; if (k === "cam") re(); }; };
+  bind("#spk-style", "style"); bind("#spk-zoom", "zoom", true); bind("#spk-min", "minTurn", true); bind("#spk-cam", "cam"); bind("#spk-off", "camOff");
+  const up = $("#spk-up", panel); if (up) up.onchange = async () => { const f = up.files[0]; if (!f) return; const d = await libUpload("broll", f); if (d?.id) { S.cam = d.id; toast("दूसरा कैमरा जुड़ गया — अब “जाँचो” दबाएँ"); } re(); };
+  const go = $("#spk-go", panel); if (go) go.onclick = async () => { S.busy = true; S.err = ""; S.msg = "शुरू…"; re();
+    try { const body = { style: S.style, zoom: S.zoom, min_turn: S.minTurn }; if (S.cam) { body.cam = S.cam; if (String(S.camOff).trim() !== "") body.cam_offset = +S.camOff; }
+      const { job } = await api("POST", `/projects/${E.pid}/speakers/plan`, body); const pid = E.pid;
+      for (;;) { await new Promise((r) => setTimeout(r, 1500)); if (E.pid !== pid) return; const j = await api("GET", `/visuals/jobs/${job}`);
+        if (j.status === "running") { if (j.message !== S.msg) { S.msg = j.message; const b = $("#spk-go", E.root); if (b) b.textContent = "⏳ " + S.msg; } continue; }
+        if (j.status === "error") throw new Error(j.error || "नहीं हो पाया");
+        const r = j.result; fx.speaker = { enabled: true, shots: r.shots, faces: r.faces, people: r.people, cam: r.cam || null, style: r.style, zoom: r.zoom, main_close: r.main_close }; touch();
+        toast(`${r.turns} बार बोलने वाला बदला → ${r.shots.length} shots। देखकर “timeline पर लगाओ” दबाएँ`, 6000); break; }
+    } catch (err) { S.err = err.message; }
+    S.busy = false; re(); };
+  const P = fx.speaker;
+  const ap = $("#spk-apply", panel); if (ap) ap.onclick = () => { spkApply(); re(); };
+  const cl = $("#spk-clear", panel); if (cl) cl.onclick = () => { fx.fxclips = (fx.fxclips || []).filter((c) => !c._spk); fx.broll = (fx.broll || []).filter((b) => !b._spk); if (P) P.enabled = false; touch(); renderTimeline(); layoutFrame(); toast("Speaker close-up हट गए (योजना रखी है — “लगाओ” से वापस)"); re(); };
+  const dl = $(".spk-list", panel); if (dl) dl.ontoggle = () => { S.open = dl.open; };
+  $$("[data-spk]", panel).forEach((row) => { const sh = P.shots[+row.dataset.spk];
+    $(".spk-seek", row).onclick = () => seek(sh.start + 0.05);
+    $(".spk-who", row).onchange = (e) => { const v = e.target.value; delete sh.zoom; delete sh.x; delete sh.y;
+      if (v === "wide") sh.shot = "wide"; else if (v === "cam") { sh.shot = "cam"; sh.who = P.people.findIndex((x) => x.cam === 2); }
+      else { const who = +v.slice(1); const pp = P.people[who]; sh.who = who; if (pp && pp.h && P.main_close !== false) { sh.shot = "close"; sh.cx = pp.x; Object.assign(sh, spkClose(pp, P.zoom)); } else { sh.shot = "wide"; if (pp) sh.cx = pp.x; } }
+      touch(); if ((fx.fxclips || []).some((c) => c._spk) || (fx.broll || []).some((b) => b._spk)) spkApply(true); re(); }; });
+}
+// the Close-up effect clip under the playhead, as CSS for the preview (same window as the render's crop → scale)
+function closeupCss() {
+  if (E.bypass || E.montage) return ""; const fx = E.rs.effects; const ot = outOf(E.t); const hid = new Set(fx.hidden_tracks || []);
+  const [vw, vh] = srcSize(); const tall = vw / vh > frameRatio() * 1.15;
+  const c = (fx.fxclips || []).filter((x) => x.id === "closeup" && x.enabled !== false && ot >= x.start && ot < x.end && !hid.has(`fx:${x.track || 0}`) && !(tall && x._spk)).pop();
+  if (!c) return ""; const z = clamp(+(c.params?.zoom ?? 1.6) || 1.6, 1.05, 3), x = clamp(+(c.params?.x ?? 0.5), 0, 1), y = clamp(+(c.params?.y ?? 0.4), 0, 1);
+  return `${(x * 100).toFixed(2)}% ${(y * 100).toFixed(2)}%|scale(${z})`;
+}
+// vertical frame cut out of a wide video: where the active speaker is (0 … 1 of the source width) — same rule as speakers.track_points
+function spkCx() { const fx = E.rs.effects; const P = fx.speaker; if (!P || P.enabled === false || !Array.isArray(P.shots) || E.rs.face_track === "off" || !(fx.fxclips || []).some((c) => c._spk)) return null;
+  let cx = null; for (const sh of P.shots) { if (sh.start > E.t + 1e-6) break; if (sh.cx != null && sh.shot !== "cam") cx = sh.cx; } return cx ?? P.faces?.[0]?.x ?? null; }
+function closeupSync() { const sx = spkCx(); if (sx !== E.spkCx) { E.spkCx = sx; applyVideoCss(); }
+  const cu = closeupCss(); if (cu === E.cu) return; E.cu = cu; const [o, t] = cu ? cu.split("|") : ["", ""]; $$(".vclip", E.root).forEach((el) => { el.style.transformOrigin = o; el.style.transform = t; }); }
 // ── sound: length of a sound clip on the timeline, and volume points (automation) ──
 function sfxSpan(s) { return +s.dur || Math.min((libItem(s.id)?.meta?.duration || 0.6) / clamp(+s.speed || 1, 0.5, 2), 600); }
 function volKfSorted(it) { return (it.vol_kf || []).filter((k) => k && isFinite(+k.t) && isFinite(+k.v)).map((k) => ({ t: Math.max(0, +k.t), v: clamp(+k.v, 0, 3) })).sort((a, b) => a.t - b.t); }
@@ -1585,7 +1676,7 @@ function renderPanel() {
   } else if (t === "ai") {
     const A = E.ai; const K = { hook: "🎬 Hook video (शुरुआत)", broll: "🎞 B-roll", background: "🖼 Cutout background", thumbnail: "🏷 Thumbnail background" };
     const V = E.vz, vp = V?.providers || {}; const SRC = [["stock_video", "Stock video (Pixabay)", vp.stock], ["stock_photo", "Stock photo (Pixabay)", vp.stock], ["ai_image", "AI तस्वीर", !!vp.ai_image], ["ai_video", `AI video${vp.ai_video_usd ? " ≈ $" + vp.ai_video_usd + "/clip" : ""}`, !!vp.ai_video && !!vp.ai_image], ["library", "मेरी Library से", true]];
-    h = supHtml(dis) + `<div class="ph" style="margin-top:1.2rem"><h3>🎬 आवाज़ से visuals</h3><span class="small muted">अपने-आप</span></div>
+    h = supHtml(dis) + `<div style="margin-top:1.2rem"></div>` + spkHtml(dis) + `<div class="ph" style="margin-top:1.2rem"><h3>🎬 आवाज़ से visuals</h3><span class="small muted">अपने-आप</span></div>
       <p class="small muted">आप जो बोलते हैं उसके हिसाब से Vividora लाइनें चुनता है, हर लाइन के लिए खोज के शब्द और AI prompt पहले से तैयार करता है, और आपके चुने source से video/तस्वीर लाकर उसी जगह timeline पर लगा देता है। हर चीज़ बदली जा सकती है।</p>
       <div class="irow"><select id="vz-n" title="कितनी लाइनें">${[4, 6, 8, 12].map((n) => `<option ${n === (E.vzN || 6) ? "selected" : ""}>${n}</option>`).join("")}</select><button class="btn small primary" id="vz-go" ${dis}>✨ सुझाव बनाएँ</button>${V?.items?.length ? `<button class="btn small" id="vz-all" ${dis}>सब लगाएँ</button>` : ""}</div>
       ${V ? `<label class="chk small"><input type="checkbox" id="vz-sfx" ${E.vzSfx !== false ? "checked" : ""}> हर visual के साथ हल्की whoosh आवाज़</label>
@@ -1884,7 +1975,7 @@ function bindPanel() {
       x.status = "done"; x.msg = `${it.source === "pixabay" ? "Pixabay" : it.source === "ai" ? "AI" : "Library"}: ${it.name || ""}`.slice(0, 60); touch(); renderTimeline();
     } catch (er) { x.status = "error"; x.msg = er.message; }
     if (E.tab === "ai") renderPanel(); };
-  if (E.tab === "ai") supBind(panel);
+  if (E.tab === "ai") { supBind(panel); spkBind(panel); }
   on("#vz-go", "onclick", async (e) => { e.target.disabled = true; e.target.textContent = "सोच रहे हैं…"; E.vzN = +$("#vz-n", panel).value;
     try { await flush(); const r = await api("POST", `/projects/${E.pid}/visuals/plan`, { max_items: E.vzN }); const pv = r.providers || {};
       const def = pv.stock ? "stock_video" : pv.ai_image ? "ai_image" : "library";
