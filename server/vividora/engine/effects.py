@@ -601,7 +601,55 @@ KEN_BURNS = {"none": "नहीं", "zoom_in": "धीरे zoom in", "zoom_ou
              "pan_up": "ऊपर सरकना ↑", "pan_down": "नीचे सरकना ↓"}
 
 
-def ken_burns(item: dict, w: int, h: int) -> str:
+def frame_margin(item: dict, ow: int) -> int:
+    """Pixels the shadow of `frame_style` adds on every side of the picture (0 without a shadow)."""
+    try:
+        sh = max(0.0, min(1.0, float(item.get("shadow") or 0)))
+    except (TypeError, ValueError):
+        sh = 0.0
+    return max(8, int(ow * 0.09)) if sh > 0.02 else 0
+
+
+def sticker_anim(anim: str, t: float, dur: float) -> dict:
+    """The entrance / idle animation of a free picture at clip second t — the same maths as the legacy overlay filter and the
+    editor preview (pro.js stickerAnim): {k: size ×, dx, dy: move in frame widths / heights, rot: degrees, op: opacity}."""
+    import math
+    u = max(0.0, min(1.0, t / 0.35))
+    tp = max(0.0, t)
+    o = {"k": 1.0, "dx": 0.0, "dy": 0.0, "rot": 0.0, "op": max(0.0, min(1.0, min(t / 0.15, (dur - t) / 0.2)))}
+    if anim == "pop":
+        o["k"] = 0.2 + u / 0.7 * 0.95 if u < 0.7 else 1.15 - 0.15 * (u - 0.7) / 0.3
+    elif anim == "bounce":
+        o["k"] = (u / 0.6 * 1.18 if u < 0.6 else 1.18 - 0.18 * (u - 0.6) / 0.4) + 0.04 * math.sin(10 * tp) * math.exp(-4 * tp)
+    elif anim == "zoom":
+        o["k"] = 1.6 - 0.6 * u
+    elif anim == "slide_up":
+        o["dy"] = 0.35 * max(0.0, 1 - t / 0.35) ** 2
+    elif anim == "slide_left":
+        o["dx"] = 0.6 * max(0.0, 1 - t / 0.35) ** 2
+    elif anim == "drop":
+        o["dy"] = -(max(0.0, 1 - t / 0.45) ** 2)
+    elif anim == "shake":
+        o["dx"] = 0.012 * math.sin(60 * t) * math.exp(-3 * tp)
+    elif anim == "float":
+        o["dy"] = 0.01 * math.sin(4 * t)
+    elif anim == "spin":
+        v = max(0.0, min(1.0, t / 0.5))
+        o["rot"], o["k"] = -360 * (1 - v) ** 2, 0.3 + 0.7 * v
+    elif anim == "rotate_in":
+        o["rot"] = -90 * max(0.0, 1 - t / 0.4) ** 2
+    elif anim == "wiggle":
+        o["rot"] = 4 * math.sin(12.566 * t)
+    elif anim == "elastic":
+        o["k"] = max(0.05, 1 - math.exp(-6 * tp) * math.cos(18 * tp))
+    elif anim == "flip":                       # the pro compositor cannot squeeze one axis: a quick grow instead
+        o["k"] = max(0.04, math.sin(math.pi / 2 * max(0.0, min(1.0, t / 0.4))))
+    elif anim == "glitch" and t < 0.45:
+        o["dx"], o["dy"] = 0.03 * math.sin(97 * t), 0.008 * math.sin(53 * t)
+    return o
+
+
+def ken_burns(item: dict, w: int, h: int, fps: float = 25) -> str:
     """A still photo that fills the frame, slowly moving (zoompan on a 2× picture so the motion is smooth).
     '' when the item has no `kb` or is not an image."""
     kb = item.get("kb")
@@ -611,14 +659,14 @@ def ken_burns(item: dict, w: int, h: int) -> str:
         k = max(0.05, min(0.5, float(item.get("kb_amount") or 0.18)))
     except (TypeError, ValueError):
         k = 0.18
-    n = max(1, int(round((float(item["end"]) - float(item["start"])) * 25)))      # a looped picture comes in at 25 fps
+    n = max(1, int(round((float(item["end"]) - float(item["start"])) * fps)))      # a looped picture comes in at 25 fps (legacy path)
     p_ = f"min(on/{n}\\,1)"
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
     z = {"zoom_in": f"1+{k:.3f}*{p_}", "zoom_out": f"1+{k:.3f}*(1-{p_})"}.get(kb, f"{1 + k:.3f}")
     x = {"pan_left": f"(iw-iw/zoom)*(1-{p_})", "pan_right": f"(iw-iw/zoom)*{p_}"}.get(kb, cx)
     y = {"pan_up": f"(ih-ih/zoom)*(1-{p_})", "pan_down": f"(ih-ih/zoom)*{p_}"}.get(kb, cy)
     return (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
-            f"zoompan=z='{z}':x='{x}':y='{y}':d=1:s={w}x{h}:fps=25")
+            f"zoompan=z='{z}':x='{x}':y='{y}':d=1:s={w}x{h}:fps={fps:g}")
 
 
 def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_label: str, idx: int,

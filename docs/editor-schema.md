@@ -577,7 +577,7 @@ new render.
 All 16 ids of `presets.sticker_anims` animate in the export (`effects._free_overlay`) and in the preview
 (`pro.js stickerAnim`, same maths): fade, pop, bounce, zoom, slide_up, slide_left, drop, shake, float, spin, flip,
 elastic, wiggle, glitch, rotate_in. An overlay that uses a pro field (mask, keyframes, blend mode, speed…) goes through
-the compositor (`engine/compose.py`), which ignores `anim` — use keyframes there.
+the compositor (`engine/compose.py`), which turns `anim` into keyframes itself (`compose.anim_kf`, same maths; the creator's own keyframes on a parameter win; `flip` becomes a quick grow).
 
 ## Sound batch: volume points, fades, speed, pitch
 
@@ -610,7 +610,7 @@ Nothing is written: the editor (AI Studio → “Podcast की supporting clips
 | `free` | `shadow` | 0–1 strength of a soft drop shadow (down-right) |
 | `cover`, image only | `kb`, `kb_amount` | `zoom_in · zoom_out · pan_left · pan_right · pan_up · pan_down`, 0.05–0.5 (default 0.18) |
 
-Engine: `effects.frame_style`, `effects.ken_burns` (legacy overlay path; the pro compositor ignores them, like `anim`).
+Engine: `effects.frame_style`, `effects.ken_burns` — on both paths (`tests/test_pro_parity.py` compares the pro compositor with the simple overlay).
 Preview: `pro.js overlayFrame` (CSS radius / border / box-shadow, image transform).
 
 ## Timeline: several items, copy / paste, ripple delete; reverse; freeze frame

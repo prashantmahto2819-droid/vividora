@@ -181,6 +181,28 @@ def base_box(item: dict, W: int, H: int, src_w: int, src_h: int) -> tuple[int, i
     return W, H, 0.5, 0.5, cover_fill(item, W, H)
 
 
+def anim_kf(anim: str, dur: float, x0: float, y0: float) -> dict[str, list[dict]]:
+    """A sticker animation (`anim` of a free clip) as keyframes, so clips on the pro path move like the others.
+    Sampled densely where it moves: the entrance (first 0.6 s), the idle part of float / wiggle / shake, the fade at the end."""
+    from .effects import sticker_anim
+    ts = [i * 0.03 for i in range(21)]                      # 0 … 0.6 s
+    step = {"float": 0.2, "wiggle": 0.0625, "shake": 0.02, "bounce": 0.05, "elastic": 0.04}.get(anim)
+    if step:
+        stop = dur if anim in ("float", "wiggle") else min(dur, 1.4)
+        t = 0.6 + step
+        while t < stop and len(ts) < 96:
+            ts.append(t)
+            t += step
+    ts += [dur - 0.2, dur - 0.1, dur]
+    ts = sorted({round(max(0.0, min(dur, t)), 3) for t in ts})
+    cols: dict[str, list[dict]] = {"x": [], "y": [], "scale": [], "rotation": [], "opacity": []}
+    for t in ts:
+        a = sticker_anim(anim, t, dur)
+        for k, v in (("x", x0 + a["dx"]), ("y", y0 + a["dy"]), ("scale", a["k"]), ("rotation", a["rot"]), ("opacity", a["op"])):
+            cols[k].append({"t": t, "v": round(v, 4), "ease": "linear"})
+    return {k: v for k, v in cols.items() if max(p["v"] for p in v) - min(p["v"] for p in v) > 1e-4}
+
+
 def _kf(item: dict, dur: float, x0: float, y0: float) -> dict[str, list[dict]]:
     out = {k: K.normalize(v, lo=KF_PARAMS[k][0], hi=KF_PARAMS[k][1]) for k, v in (item.get("kf") or {}).items() if k in KF_PARAMS}
     out = {k: v for k, v in out.items() if v}
@@ -193,6 +215,11 @@ def _kf(item: dict, dur: float, x0: float, y0: float) -> dict[str, list[dict]]:
         if "scale" not in out and "scale" in to:
             s0 = float(item.get("scale", 0.4) or 0.4)
             out["scale"] = [{"t": 0.0, "v": 1.0, "ease": "linear"}, {"t": dur, "v": float(to["scale"]) / s0, "ease": "linear"}]
+    an = item.get("anim")
+    if an and an != "none" and item.get("fit") == "free" and dur > 0.3:
+        for k, pts in anim_kf(str(an), dur, x0, y0).items():
+            if k in KF_PARAMS and k not in out:          # the creator's own keyframes win
+                out[k] = K.normalize(pts, lo=KF_PARAMS[k][0], hi=KF_PARAMS[k][1])
     return out
 
 
@@ -339,6 +366,9 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
     L = f"pc{idx}"
     # --- time: speed / ramp → geometry → speed warp → constant fps, clip-local clock 0…dur
     v = "[{IN0}:v]" + ("setpts=PTS-STARTPTS," if is_img else pre_v + setpts_for(pieces) + ",")
+    if is_img and (item.get("fit") or "cover") == "cover":
+        from .effects import ken_burns
+        fit_f = ken_burns({**item, "type": "image"}, W, H, fps) or fit_f      # a slowly moving photo, as on the simple path
     v += f"{fit_f},setsar=1,"
     if not is_img:
         v += warp_filter(item.get("speed_warp"), min_speed, fps)
@@ -398,6 +428,13 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
         ch.append(v + ",format=rgba")
     # --- opacity (static or keyframed via sendcmd), fades
     tail = []
+    if item.get("fit") == "free":                # photo frame: border, rounded corners, shadow (the shadow makes the canvas larger)
+        from .effects import frame_margin, frame_style
+        fs = frame_style(item, bw, idx + 500)
+        if fs:
+            tail.append(fs.lstrip(","))
+            grow = 2 * frame_margin(item, bw)
+            bw, bh = bw + grow, bh + grow
     op = max(0.0, min(1.0, float(item.get("opacity", 1.0) if item.get("opacity") is not None else 1.0)))
     if "opacity" in kf and K.animated(kf["opacity"]):
         cmd = work / f"op{idx}.cmd"
