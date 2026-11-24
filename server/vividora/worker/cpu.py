@@ -173,17 +173,21 @@ def _resolve_effects(client: ApiClient, effects: dict | None, tmp: Path, assets:
 def _montage_voice(client: ApiClient, p: dict, assets: list[dict], out: dict, tmp: Path) -> list[str]:
     """Script voice-over (dub asset) chosen for a montage → mix it over the rendered video in place."""
     v = p.get("voice") or {}
-    dub = next((a for a in assets if a["id"] == v.get("asset_id") and a["kind"] == "dub"), None) if v else None
-    if not dub:
-        return []
     from ..engine import dub as dub_eng
-    voice = client.download(dub["id"], tmp / f"dub_{Path(dub['path']).name}")
+    if v.get("lib_id"):                      # the creator's own recording from the Library
+        voice = client.download_library(v["lib_id"], tmp / "lib" / f"voice_{v['lib_id']}")
+    else:
+        dub = next((a for a in assets if a["id"] == v.get("asset_id") and a["kind"] == "dub"), None) if v else None
+        if not dub:
+            return []
+        voice = client.download(dub["id"], tmp / f"dub_{Path(dub['path']).name}")
     warns: list[str] = []
     for f in out["files"]:
         if f.get("kind") == "render":
             src = Path(f["path"])
             mixed = src.with_name(src.stem + "_vo.mp4")
-            warns += dub_eng.mix_voice_over(src, voice, mixed, duck=bool(v.get("duck", True)))
+            warns += dub_eng.mix_voice_over(src, voice, mixed, duck=bool(v.get("duck", True)), start=float(v.get("start") or 0),
+                                            volume=float(v.get("volume") or 1))
             mixed.replace(src)
     return warns
 

@@ -1291,6 +1291,35 @@ function spkTag(t) { const P = E.rs.effects.speaker; if (!P || !Array.isArray(P.
 function myVoiceBox(dis, id) { const { esc } = E.ctx; const has = (E.lib || []).find((x) => /myvoice|my voice|मेरी आवाज़/i.test(x.name + " " + (x.tags || "")));
   return `<div class="box" style="margin:.4rem 0"><b class="small">🎙 आपकी आवाज़ का नमूना</b><p class="small muted">${has ? `अभी का नमूना: <b>${esc(has.name)}</b>। नया डालेंगे तो वही इस्तेमाल होगा।` : "अभी कोई नमूना नहीं है।"} अपनी साफ़ आवाज़ की 10–20 सेकंड की recording दें (शोर और music के बिना)। सिर्फ़ अपनी ही आवाज़ डालें।</p><label class="btn small ${dis ? "disabled" : ""}">＋ नमूना upload<input type="file" id="${id}" accept=".mp3,.wav,.m4a,.ogg" hidden ${dis}></label><div id="lib-progress"></div></div>`; }
 async function myVoiceUpload(inp) { const f = inp.files[0]; if (!f) return; const ext = (f.name.match(/\.[a-z0-9]+$/i) || [".m4a"])[0]; const d = await libUpload("sfx", new File([f], "myvoice" + ext, { type: f.type })); if (d?.id) E.ctx.toast("आपकी आवाज़ का नमूना जुड़ गया ✓ — अब आवाज़ बनाएँ"); renderPanel(); }
+// ── montage: the creator's own voice over the video — a recording from the Library, uploaded or recorded here ──
+function moVoiceClips() { const cur = String(E.rs.effects.voice_track || ""); return (E.lib || []).filter((x) => x.kind === "sfx" && x.source !== "starter" && (/voice|आवाज़|rec/i.test(x.name + " " + (x.tags || "")) || cur === "lib:" + x.id || (x.meta?.duration || 0) >= 4)).slice(0, 60); }
+function moVoiceHtml(dis, cur) {
+  const fx = E.rs.effects; const mv = fx.montage_voice || {}; const R = E.moRec || {};
+  return `<div class="box" style="margin:.5rem 0"><b class="small">🎙 अपनी आवाज़ में बोलें (शायरी, बात, narration)</b>
+    <p class="small muted">तीन तरीके: ऊपर <b>script लिखकर AI आवाज़</b> बनाएँ (“मेरी अपनी आवाज़” चुनें तो आपकी आवाज़ में), या अपनी <b>recording upload</b> करें, या यहीं <b>mic से record</b> करें। फिर ऊपर “इसे इस्तेमाल करें” में चुनें और montage दोबारा बनाएँ — music आवाज़ के नीचे अपने-आप धीमा हो जाता है।</p>
+    <div class="irow" style="flex-wrap:wrap;gap:.35rem;align-items:center"><label class="btn small ${dis ? "disabled" : ""}">＋ recording upload<input type="file" id="mov-up" accept=".mp3,.wav,.m4a,.ogg,.webm,.opus,.aac,audio/*" hidden ${dis}></label>
+      <button class="btn small ${R.on ? "primary" : ""}" id="mov-rec" ${dis}>${R.on ? "⏹ रोकें और लगाएँ" : "🔴 mic से record करें"}</button>${R.on ? `<span class="small" id="mov-rec-t">● recording…</span>` : ""}</div><div id="lib-progress"></div>
+    ${cur !== "original" ? `<div class="irow" style="margin-top:.4rem">${field("आवाज़ कब शुरू हो (सेकंड)", `<input type="number" id="mov-start" min="0" step="0.5" value="${+mv.start || 0}" style="width:90px" ${dis}>`)}${field(`आवाज़ कितनी तेज़ <b id="mov-vol-v">${Math.round((+mv.volume || 1) * 100)}%</b>`, `<input type="range" id="mov-vol" min="0.4" max="2.5" step="0.05" value="${+mv.volume || 1}" ${dis}>`)}</div>` : ""}</div>`;
+}
+function moVoiceBind(panel) {
+  if (!E.montage) return; const fx = E.rs.effects; const { toast } = E.ctx;
+  const use = async (file) => { const d = await libUpload("sfx", file); if (d?.id) { fx.voice_track = "lib:" + d.id; fx.voice_track_mode = "replace"; touch(); toast("आपकी आवाज़ लग गई ✓ — अब montage दोबारा बनाएँ (Render)", 5000); } renderPanel(); };
+  const up = $("#mov-up", panel); if (up) up.onchange = () => { const f = up.files[0]; if (f) use(new File([f], "voice_" + f.name.replace(/^voice_/i, ""), { type: f.type })); };
+  const rb = $("#mov-rec", panel); if (rb) rb.onclick = async () => { const R = (E.moRec = E.moRec || {});
+    if (R.on) { R.rec.stop(); return; }
+    try { const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      const mime = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); const chunks = []; R.rec = rec; R.on = true; R.t0 = Date.now();
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = () => { stream.getTracks().forEach((t) => t.stop()); clearInterval(R.iv); R.on = false; const type = rec.mimeType || mime || "audio/webm"; const ext = type.includes("ogg") ? ".ogg" : type.includes("mp4") ? ".m4a" : ".webm";
+        const blob = new Blob(chunks, { type }); if (blob.size < 2000) { toast("recording खाली रही — mic की अनुमति जाँचें"); renderPanel(); return; }
+        use(new File([blob], `voice_rec_${new Date().toISOString().slice(11, 19).replace(/:/g, "")}${ext}`, { type })); };
+      rec.start(500); R.iv = setInterval(() => { const el = $("#mov-rec-t", E.root); if (el) el.textContent = `● ${fmt((Date.now() - R.t0) / 1000)}`; }, 500); renderPanel();
+    } catch (err) { toast("mic नहीं खुला: " + (err.message || err) + " — browser में microphone की अनुमति दें", 6000); } };
+  const mvSet = (k, v) => { fx.montage_voice = { ...(fx.montage_voice || {}), [k]: v }; touch(); };
+  const st = $("#mov-start", panel); if (st) st.onchange = () => mvSet("start", clamp(+st.value || 0, 0, 3600));
+  const vl = $("#mov-vol", panel); if (vl) vl.oninput = () => { mvSet("volume", +vl.value); const l = $("#mov-vol-v", panel); if (l) l.textContent = Math.round(+vl.value * 100) + "%"; };
+}
 const SPK_COLORS = ["#FFFFFF", "#FFD400", "#7CE0FF"];
 // podcast captions: the text colour of whoever speaks at source second t ("" = the style's own colour)
 function spkColorAt(t) { const P = E.rs.effects.speaker; if (!P || P.enabled === false || !Array.isArray(P.caption_colors) || !Array.isArray(P.shots)) return ""; let who = null; for (const sh of P.shots) { if (sh.start > t) break; who = sh.who; } return (who != null && P.caption_colors[who]) || ""; }
@@ -2619,6 +2648,7 @@ function dubBox(dis, panel) {
       if (audio) audio.pause(); audio = new Audio(a.url); audio.dataset.id = a.id; audio.play().catch((e) => toast(e.message)); }));
     $$("[data-dubdel]", box).forEach((b) => (b.onclick = async () => { if (!confirm("यह AI voice track हटाएँ?")) return;
       try { await api("DELETE", `/projects/${E.pid}/dub/${b.dataset.dubdel}`); E.p.assets = E.p.assets.filter((a) => a.id !== b.dataset.dubdel); if (fx.voice_track === b.dataset.dubdel) { fx.voice_track = "original"; touch(); } renderPanel(); } catch (er) { toast(er.message); } }));
+    moVoiceBind(panel);
     const use = q("#dub-use"); if (use) use.onchange = () => { const v = use.value; fx.voice_track = v === "original" ? "original" : v.replace(/^both:/, ""); fx.voice_track_mode = v.startsWith("both:") ? "both" : "replace";
       touch(); renderPanel(); toast(v === "original" ? "मूल आवाज़ — render में यही" : `AI आवाज़ लगी — ${E.montage ? "Montage दोबारा बनाएँ" : "Render"} में सुनें`); };
     const un = q("#dub-under"); if (un) un.oninput = () => { fx.voice_track_under = +un.value; q("#dub-under-v").textContent = Math.round(fx.voice_track_under * 100) + "%"; touch(); };
@@ -2667,7 +2697,8 @@ function dubBox(dis, panel) {
     ${st.mode === "dub" ? `<p class="small muted">transcript एक ही AI call में translate होता है (server में GEMINI_API_KEY चाहिए), फिर हर line अपनी जगह fit होती है।</p>` : ""}
     <div class="irow"><button class="btn small primary" id="dub-go" ${dis || (active ? "disabled" : "")}>🎙 बनाएँ</button><span class="small muted grow" id="dub-prog">${esc(progText(job))}</span></div>
     ${tracks.length ? `<ul class="plist">${tracks.map((a) => `<li><button class="ibtn" data-dubplay="${a.id}" title="सुनें">${ICON.play}</button><span class="grow small">${esc(vlabel(a))}${a.meta?.mode ? ` <span class="muted">· ${esc(D.modes[a.meta.mode] || a.meta.mode)}</span>` : ""}</span>${E.canEdit ? `<button class="btn small quiet" data-dublines="${a.id}" title="हर line देखें, बदलें, फिर बोलें">✏ lines</button><button class="ibtn" data-dubdel="${a.id}" title="हटाएँ">${ICON.trash}</button>` : ""}</li>`).join("")}</ul>${dubLinesHtml(st, tracks, voices, active)}` : ""}
-    ${field("इसे इस्तेमाल करें (render की आवाज़)", `<select id="dub-use" ${dis}><option value="original" ${curVal === "original" ? "selected" : ""}>${E.montage ? "कोई voice-over नहीं (सिर्फ़ music)" : "मूल आवाज़ (original)"}</option>${tracks.map((a) => `<option value="${a.id}" ${curVal === a.id ? "selected" : ""}>🗣 ${esc(vlabel(a))}</option>${E.montage ? "" : `<option value="both:${a.id}" ${curVal === "both:" + a.id ? "selected" : ""}>दोनों: ${esc(D.langs[a.label] || a.label)} AI + original धीमी</option>`}`).join("")}</select>`)}
+    ${field("इसे इस्तेमाल करें (render की आवाज़)", `<select id="dub-use" ${dis}><option value="original" ${curVal === "original" ? "selected" : ""}>${E.montage ? "कोई voice-over नहीं (सिर्फ़ music)" : "मूल आवाज़ (original)"}</option>${tracks.map((a) => `<option value="${a.id}" ${curVal === a.id ? "selected" : ""}>🗣 ${esc(vlabel(a))}</option>${E.montage ? "" : `<option value="both:${a.id}" ${curVal === "both:" + a.id ? "selected" : ""}>दोनों: ${esc(D.langs[a.label] || a.label)} AI + original धीमी</option>`}`).join("")}${E.montage ? moVoiceClips().map((x) => `<option value="lib:${x.id}" ${curVal === "lib:" + x.id ? "selected" : ""}>🎙 मेरी recording: ${esc(x.name.slice(0, 40))}</option>`).join("") : ""}</select>`)}
+    ${E.montage ? moVoiceHtml(dis, cur) : ""}
     ${curVal.startsWith("both:") ? field(`original कितनी <b id="dub-under-v">${Math.round((fx.voice_track_under ?? 0.25) * 100)}%</b>`, `<input type="range" id="dub-under" min="0" max="0.8" step="0.05" value="${fx.voice_track_under ?? 0.25}" ${dis}>`) : ""}
     ${cur !== "original" ? `<p class="small muted">captions अब AI आवाज़ के शब्दों से बनेंगे। कट/speed बदलें तो dub दोबारा बनाएँ।</p>` : ""}</div>`;
 }

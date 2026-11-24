@@ -24,7 +24,7 @@ from .deps import ApiError, ok, require, require_worker
 
 KINDS = {
     "music": {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp4", ".mov", ".webm", ".opus"},  # a reel's video works as the song
-    "sfx": {".mp3", ".wav", ".m4a", ".ogg"},
+    "sfx": {".mp3", ".wav", ".m4a", ".ogg", ".webm", ".opus", ".aac"},   # webm / opus: a voice clip recorded in the browser
     "broll": {".mp4", ".mov", ".mkv", ".webm", ".m4v"},
     "image": {".png", ".jpg", ".jpeg", ".webp", ".gif"},
     "logo": {".png", ".webp", ".svg"},

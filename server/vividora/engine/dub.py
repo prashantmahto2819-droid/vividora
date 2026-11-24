@@ -142,14 +142,19 @@ def translate(lines: list[dict], src: str, dst: str) -> list[dict]:
     return out
 
 
-def mix_voice_over(video, voice, out, *, duck: bool = True) -> list[str]:
-    """Montage / finished video + AI voice-over → same picture, voice on top, its music ducked
-    under the voice, loudness -14 LUFS. → warnings."""
+def mix_voice_over(video, voice, out, *, duck: bool = True, start: float = 0.0, volume: float = 1.0) -> list[str]:
+    """Montage / finished video + a voice (AI voice-over or the creator's own recording) → same picture, voice on top,
+    its music ducked under the voice, loudness -14 LUFS. `start` = where in the video the voice begins, `volume` 0.2–3. → warnings."""
     from . import ffmpeg
     info = ffmpeg.probe(video)
     dur = float(info.get("duration") or 0)
     vdur = float(ffmpeg.probe(voice).get("duration") or 0)
-    v = f"[1:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=0:{dur:.3f}"
+    start = max(0.0, min(float(start or 0), max(0.0, dur - 0.5)))
+    volume = max(0.2, min(3.0, float(volume or 1)))
+    ms = int(round(start * 1000))
+    v = (f"[1:a]aformat=sample_rates=48000:channel_layouts=stereo" + (f",volume={volume:.2f}" if abs(volume - 1) > 0.01 else "")
+         + (f",adelay={ms}|{ms}" if ms else "") + f",apad,atrim=0:{dur:.3f}")
+    vdur += start
     if info.get("has_audio"):
         m = "[0:a]aformat=sample_rates=48000:channel_layouts=stereo"
         if duck:

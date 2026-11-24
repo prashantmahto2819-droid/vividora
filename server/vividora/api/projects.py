@@ -132,7 +132,8 @@ async def update_project(request: Request, user: dict):
         edl["cuts"] = cuts
         edl["stats"] = {**edl.get("stats", {}), "cuts": sum(1 for c in cuts if c.get("enabled", True)),
                         "removed_seconds": round(removed, 2),
-                        "final_seconds": round(float(edl["duration"]) - removed, 2)}
+                        # a montage has no source recording: its cut list carries no duration of its own
+                        "final_seconds": round(max(0.0, float(edl.get("duration") or (p.get("meta") or {}).get("duration") or 0) - removed), 2)}
         changes["edl"] = edl
     if "transcript" in data and isinstance(data["transcript"], dict):
         # the editor may still hold the transcript from before a re-transcribe: lines re-heard since

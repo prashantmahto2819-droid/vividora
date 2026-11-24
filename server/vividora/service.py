@@ -988,9 +988,21 @@ def request_montage(c, project: dict, opts: dict) -> dict:
     r_eff = ((project.get("settings", {}).get("render") or {}).get("effects") or {})
     vt = r_eff.get("voice_track")
     if vt and vt != "original":
-        a = db.get("assets", vt)
-        if a and a["project_id"] == project["id"] and a["kind"] == "dub":
-            payload["voice"] = {"asset_id": vt, "duck": bool((r_eff.get("music") or {}).get("duck", True))}
+        mv = r_eff.get("montage_voice") if isinstance(r_eff.get("montage_voice"), dict) else {}
+        try:
+            place = {"start": max(0.0, float(mv.get("start") or 0)), "volume": max(0.2, min(3.0, float(mv.get("volume") or 1)))}
+        except (TypeError, ValueError):
+            place = {"start": 0.0, "volume": 1.0}
+        duck = bool((r_eff.get("music") or {}).get("duck", True))
+        if str(vt).startswith("lib:"):
+            # the creator's own recording (a Library sound) spoken over the montage
+            it = db.get("library", str(vt)[4:])
+            if it and it["workspace_id"] == project["workspace_id"]:
+                payload["voice"] = {"lib_id": it["id"], "duck": duck, **place}
+        else:
+            a = db.get("assets", vt)
+            if a and a["project_id"] == project["id"] and a["kind"] == "dub":
+                payload["voice"] = {"asset_id": vt, "duck": duck, **place}
     old = (project.get("settings", {}).get("montage") or {})
     kind = "montage"
     if payload["mode"] == "auto":
