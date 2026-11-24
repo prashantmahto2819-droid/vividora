@@ -79,6 +79,8 @@ VOICE_PRESETS: list[dict] = [
      "fal_model": "fal-ai/chatterbox/text-to-speech/multilingual", "fal_voice": "hindi", "fal_exaggeration": 0.85},
     {"id": "fal_cb_english", "label": "Chatterbox English — expressive (fal.ai)", "lang": "en", "gender": "f", "engine": "fal", "cloud": True,
      "fal_model": "fal-ai/chatterbox/text-to-speech/multilingual", "fal_voice": "english"},
+    {"id": "fal_cb_myvoice", "label": "🎙 मेरी अपनी आवाज़ — Library के नमूने से (fal.ai, beta)", "lang": "hi", "gender": "m", "engine": "fal", "cloud": True,
+     "fal_model": "fal-ai/chatterbox/text-to-speech/multilingual", "fal_clone": True},
     {"id": "fal_kokoro_beta", "label": "Beta — Hindi, तेज़ और सस्ती (महिला, fal.ai)", "lang": "hi", "gender": "f", "engine": "fal", "cloud": True,
      "fal_model": "fal-ai/kokoro/hindi", "fal_voice": "hf_beta"},
     {"id": "fal_kokoro_psi", "label": "Psi — Hindi, तेज़ और सस्ती (पुरुष, fal.ai)", "lang": "hi", "gender": "m", "engine": "fal", "cloud": True,
@@ -336,6 +338,28 @@ class ElevenLabsBackend:
         return out
 
 
+MYVOICE_HINT = ("अपनी आवाज़ का नमूना नहीं मिला — Library → Sounds में अपनी साफ़ आवाज़ की 10–20 सेकंड की recording upload करें "
+                "और उसका नाम या tag “myvoice” रखें।")
+
+
+def my_voice(voice: dict, sample: Path | None, lang: str) -> dict:
+    """The "my own voice" preset + the creator's sample → the voice block of a job (the sample travels inside it as a
+    small MP3, so any worker can use it). Only the person's own voice: the sample comes from their own Library."""
+    import base64
+    import tempfile
+    if not voice.get("fal_clone"):
+        return voice
+    if sample is None or not Path(sample).exists():
+        raise ValueError(MYVOICE_HINT)
+    with tempfile.TemporaryDirectory(prefix="vividora-myvoice-") as d:
+        mp3 = Path(d) / "ref.mp3"
+        _ff(["-i", str(sample), "-t", "20", "-vn", "-ac", "1", "-ar", "24000", "-af", "highpass=f=70,loudnorm=I=-18:TP=-2", "-c:a", "libmp3lame", "-b:a", "64k", str(mp3)])
+        data = mp3.read_bytes()
+    if len(data) < 8000:
+        raise ValueError("आवाज़ का नमूना बहुत छोटा है — कम से कम 5 सेकंड (अच्छा: 10–20 सेकंड) की साफ़ recording चाहिए")
+    return {**voice, "fal_voice": "data:audio/mpeg;base64," + base64.b64encode(data).decode(), "fal_ref_lang": "hindi" if lang == "hi" else "english"}
+
+
 class FalBackend:
     """Voices on fal.ai's GPUs (FAL_KEY): Chatterbox multilingual (expressive Hindi, 300 characters per request) and
     Kokoro. Nothing runs between requests, so nothing is billed between them. The preset says which model:
@@ -364,6 +388,10 @@ class FalBackend:
             if chatter:
                 body = {"text": part, "voice": voice.get("fal_voice") or ("hindi" if lang == "hi" else "english"),
                         "exaggeration": max(0.25, min(2.0, float(voice.get("fal_exaggeration") or 0.5)))}
+                if voice.get("fal_clone"):
+                    if not str(voice.get("fal_voice") or "").startswith(("data:", "http")):
+                        raise TTSMissing(MYVOICE_HINT)
+                    body["custom_audio_language"] = voice.get("fal_ref_lang") or ("hindi" if lang == "hi" else "english")
             else:
                 body = {"prompt": part, "voice": voice.get("fal_voice") or "hf_alpha", "speed": 1.0}
             try:
@@ -877,7 +905,8 @@ def handle_job(client, job: dict, work: Path, on_progress: ProgressFn | None = N
     up = client.upload(job["id"], final, "dub", lang)
     v = p.get("voice") or {}
     meta = {"mode": p.get("mode"), "language": lang, "source_language": p.get("source_language"),
-            "voice": {k: v.get(k) for k in ("id", "label", "engine", "description", "kokoro_voice", "fal_model", "fal_voice") if v.get(k)},
+            "voice": {k: v.get(k) for k in ("id", "label", "engine", "description", "kokoro_voice", "fal_model", "fal_voice")
+                      if v.get(k) and not str(v.get(k)).startswith("data:")},
             "engine": r["engine"], "speed": p.get("speed", 1.0), "pitch": p.get("pitch", 0), "duration": r["duration"],
             "drift_max": r["drift_max"], "cached": r.get("cached", 0), "sig": p.get("sig"), "segments": r["segments"],
             "speakers": {k: {"voice": {kk: vv for kk, vv in (v.get("voice") or {}).items()

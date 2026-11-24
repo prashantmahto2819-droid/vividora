@@ -101,6 +101,32 @@ def main():
         m, b = SEEN[n0]
         assert m == "fal-ai/kokoro/hindi" and b == {"prompt": "नमस्ते दोस्तों।", "voice": "hm_psi", "speed": 1.0}, (m, b)
     chars = sum(len(b.get("text") or b.get("prompt")) for _, b in SEEN)
+    # my own voice: the Library sample travels as a small MP3, the model is told its language
+    from vividora.engine import dub
+    with tempfile.TemporaryDirectory() as d:
+        import subprocess
+        ref = Path(d) / "myvoice.wav"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "anoisesrc=d=30:c=pink:a=0.2", str(ref)], check=True)
+        v0 = dub.resolve_voice("fal_cb_myvoice", None, "hi")
+        assert v0.get("fal_clone") and v0["fal_model"].endswith("multilingual"), v0
+        assert dub.resolve_voice("fal_cb_hindi_drama", "anything", "hi")["fal_exaggeration"] == 0.85     # fal fields survive the editor's path
+        try:
+            tts.my_voice(v0, None, "hi")
+            raise AssertionError("no sample → must explain")
+        except ValueError as e:
+            assert "myvoice" in str(e)
+        try:
+            tts.backend_for("fal").synth("नमस्ते", v0, "hi", 1.0, Path(d) / "x.wav")
+            raise AssertionError("clone voice without a sample must not fall back to another voice")
+        except tts.TTSMissing:
+            pass
+        v1 = tts.my_voice(v0, ref, "hi")
+        assert v1["fal_voice"].startswith("data:audio/mpeg;base64,") and 60_000 < len(v1["fal_voice"]) < 260_000, len(v1["fal_voice"])   # 20 s at most
+        n0 = len(SEEN)
+        tts.backend_for("fal").synth("यह मेरी आवाज़ है।", v1, "hi", 1.0, Path(d) / "mine.wav")
+        b = SEEN[n0][1]
+        assert b["voice"] == v1["fal_voice"] and b["custom_audio_language"] == "hindi" and b["text"] == "यह मेरी आवाज़ है।", {k: str(v)[:40] for k, v in b.items()}
+    print("my own voice: sample → 20 s MP3 inside the job, custom_audio_language sent, no silent fallback ✓")
     # AI music: one request, an MP3 of the asked length, priced per minute
     from vividora.engine import aimusic
     with tempfile.TemporaryDirectory() as d:
@@ -116,6 +142,7 @@ def main():
         assert spent[s0] == ("ai_music", 0.75, 0.015), spent[s0]
         assert aimusic.estimate_usd(180) == 0.06
     spent_tts = [x for x in spent if x[0] == "fal_tts"]
+    chars = sum(len(b.get("text") or b.get("prompt")) for m, b in SEEN if "music" not in m)
     assert abs(sum(u for _, u, _ in spent_tts) - chars / 1000) < 0.01
     assert abs(sum(c for _, _, c in spent_tts) - chars / 1000 * 0.025) < 1e-3, spent
     # the spending limit stops the next line

@@ -72,6 +72,12 @@ async def create(request: Request, user: dict):
     voice = tts.voice_preset(vid) if vid else _default_voice()
     if not voice:
         raise ApiError(422, "voice नहीं मिली" if vid else "कोई TTS voice उपलब्ध नहीं (VoiceStudio चालू करें)")
+    if voice.get("fal_clone"):
+        from .library import my_voice_sample
+        try:
+            voice = tts.my_voice(voice, my_voice_sample(user["workspace_id"]), str(b.get("lang") or voice.get("lang") or "hi")[:8])
+        except ValueError as e:
+            raise ApiError(422, str(e))
     if voice.get("engine") == "voicestudio":  # Voice Studio page: pick the exact VoiceStudio model / voice
         voice = dict(voice)
         for k_in, k_out in (("vs_model", "vs_model"), ("vs_voice", "vs_voice")):

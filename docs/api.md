@@ -145,3 +145,7 @@ cloud voice key (fal.ai / ElevenLabs) is present.
 `POST /api/music/generate` `{mood?, text?, seconds?: 10–180, name?, project_id?}` → `202 {job, usd}`; `GET /api/visuals/jobs/{job}` →
 `item` = the new Library music (`source: "ai"`, `meta.ai_prompt`). `engine/aimusic.py`: fal.ai `cassetteai/music-generator`
 (`FAL_MUSIC_MODEL` to change), instrumental only, recorded as `ai_music` ($0.02 / minute, `PRICE_AI_MUSIC_MIN`), stopped by the spending limit.
+
+Voice `fal_cb_myvoice` (beta): the creator's own voice. The newest Library sound whose name or tag contains `myvoice`
+(`api/library.my_voice_sample`) is cut to 20 s, sent to Chatterbox as the reference (`voice` = data URI, `custom_audio_language`).
+Without a sample the request is refused with the upload hint — it never falls back to another voice.

@@ -42,6 +42,10 @@ async def create_dub(request: Request, user: dict):
         pl = await run_in_threadpool(dub.plan, p, mode=mode, language=data.get("language"),
                                      script=str(data.get("script") or ""), effects=effects)
         voice = dub.resolve_voice(data.get("voice"), data.get("description"), pl["language"])
+        if voice.get("fal_clone"):
+            from ..engine import tts as _t
+            from .library import my_voice_sample
+            voice = _t.my_voice(voice, my_voice_sample(p["workspace_id"]), pl["language"])
         # ElevenLabs: allow frontend to override voice settings (stability, similarity_boost, style, use_speaker_boost)
         el_overrides = data.get("elevenlabs_settings")
         if el_overrides and isinstance(el_overrides, dict) and voice.get("engine") == "elevenlabs":

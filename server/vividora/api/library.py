@@ -834,6 +834,18 @@ async def upload(request: Request, user: dict):
     return ok(_view(item), 201)
 
 
+def my_voice_sample(workspace_id: str) -> Path | None:
+    """The creator's own voice sample: the newest Library sound whose name or tag says "myvoice" (or "मेरी आवाज़")."""
+    rows = db.rows(db.conn().execute(
+        "SELECT * FROM library WHERE workspace_id = ? AND kind IN ('sfx', 'music', 'voice', 'broll') AND "
+        "(lower(name) LIKE '%myvoice%' OR lower(name) LIKE '%my voice%' OR name LIKE '%मेरी आवाज़%' OR lower(tags) LIKE '%myvoice%') "
+        "ORDER BY created_at DESC LIMIT 1", (workspace_id,)))
+    if not rows:
+        return None
+    p = storage.abs_path(rows[0]["path"])
+    return p if p.exists() else None
+
+
 def _music_meta(path: Path, name: str = "", tags: str = "") -> dict:
     """bpm / mood / genre tags for a music file; never fails the upload."""
     from ..engine import musictag
