@@ -351,6 +351,7 @@ function skeleton() {
         <select class="btn small quiet" id="t-speed" title="In–Out की speed"><option value="">speed…</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select>
         <span class="muted small" id="t-marks"></span>
         <button class="btn small quiet" id="t-frame" title="इस समय का असली rendered frame (effects/body/grade सहित)">🎞 Preview frame</button>
+        <button class="btn small quiet" id="t-still" title="playhead वाले frame को photo बनाकर 2 सेकंड के लिए video के ऊपर रोक दो (Freeze frame) — photo Library में भी आ जाती है">📸 Freeze frame</button>
         <button class="ibtn" id="t-full" title="Full screen (F)">⛶</button>
       </div>
     </section>
@@ -436,6 +437,11 @@ function bindStatic() {
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); const blob = await r.blob(); fp.querySelector("img").src = URL.createObjectURL(blob); fp.querySelector("b").textContent = fmt(E.t); fp.hidden = false; }
     catch (err) { E.ctx.toast(err.message); } btn.disabled = false; btn.textContent = "🎞 Preview frame"; };
   $("#frameprev-x", E.root).onclick = () => ($("#frameprev", E.root).hidden = true);
+  const stl = $("#t-still", E.root); if (stl) stl.onclick = async () => { if (!E.canEdit) return; if (cutAt(E.t)) return E.ctx.toast("playhead कटे हुए हिस्से पर है — उसके बाहर रखें"); stl.disabled = true;
+    try { const it = await E.ctx.api("POST", `/projects/${E.pid}/still`, { t: +E.t.toFixed(2) }); E.lib = E.lib || []; E.lib.unshift(it); const st = +outOf(E.t).toFixed(2); const en = +Math.min(outDur(), st + 2).toFixed(2);
+      if (en - st < 0.3) { E.ctx.toast("Photo Library में आ गई (video के आख़िर में जगह नहीं थी)"); }
+      else { const b = { _id: "fz_" + uid(), id: it.id, start: st, end: en, fit: "cover", fade: false, kb: "zoom_in", kb_amount: 0.08 }; E.rs.effects.broll.push(b); touch(); select({ type: "broll", id: b._id }); E.ctx.toast("📸 Frame 2 s के लिए रुका — किनारा खींचकर लंबा/छोटा करें। आवाज़ चलती रहती है।", 5000); } }
+    catch (err) { E.ctx.toast(err.message); } stl.disabled = false; };
   $("#t-speed", E.root).onchange = (e) => { const r = +e.target.value; e.target.value = ""; if (!r || !E.canEdit) return; if (E.markIn == null || E.markOut == null) return E.ctx.toast("पहले I और O से हिस्सा चुनें");
     const it = { id: uid(), start: +E.markIn.toFixed(3), end: +E.markOut.toFixed(3), rate: r }; E.speed.push(it); E.markIn = E.markOut = null; $("#t-marks", E.root).textContent = ""; touch(); select({ type: "speed", id: it.id }); };
   $("#tl-zoom", E.root).oninput = (e) => { E.pps = +e.target.value; renderTimeline(); };

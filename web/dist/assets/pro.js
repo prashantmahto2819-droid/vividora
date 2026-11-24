@@ -293,7 +293,7 @@ export function overlayFrame(ot) {
     const med = el.querySelector("video,img"); if (med) { const f = clipFilter(b, t); if (med._f !== f) { med._f = f; med.style.filter = f; } }
     const vid = el.querySelector("video");
     if (vid) {
-      const src = +(b.trim_in || 0) + srcOffset(b, Math.max(0, t)); const end = b.trim_out != null && b.trim_out !== "" ? +b.trim_out : vid.duration || Infinity;
+      const src = +(b.trim_in || 0) + srcOffset(b, b.reverse && b.end - b.start <= 10 ? Math.max(0, b.end - b.start - t) : Math.max(0, t)); const end = b.trim_out != null && b.trim_out !== "" ? +b.trim_out : vid.duration || Infinity;
       el.style.visibility = src > end + 0.05 ? "hidden" : "";
       vid.muted = !(+b.volume > 0) || !playing; if (+b.volume > 0) vid.volume = clamp(+b.volume, 0, 1);
       H.follow(vid, Math.min(src, end - 0.001), playing, rate * speedAt(b, Math.max(0, t)), fps);
@@ -539,6 +539,7 @@ export function brollInspector(it, dis) {
       <div class="seg" style="margin:.35rem 0"><button data-spmode="normal" class="${ramp ? "" : "on"}">Normal</button><button data-spmode="curve" class="${ramp ? "on" : ""}" ${dis}>⤳ Curve (ramp)</button></div>
       ${ramp ? `<div class="chips">${Object.entries(RAMPS).map(([k, [l]]) => `<button data-ramp="${k}" ${dis}>${l}</button>`).join("")}</div>${rampSvg(it, avail)}<p class="small muted">point खींचें · खाली जगह क्लिक = नया point · double-click = हटाएँ · ऊपर = तेज़, नीचे = slow-mo</p>` : ""}
       <p class="small muted">इस speed पर पूरी clip: <b>${H.fmt(nat)}</b> (timeline पर अभी ${H.fmt(len)})${Math.abs(nat - len) > 0.15 ? ` <button class="btn small quiet" data-act2="fitlen" ${dis}>लंबाई = पूरी clip</button>` : ""}</p>
+      <label class="chk small" style="margin:.3rem 0"><input type="checkbox" data-k="reverse" ${it.reverse ? "checked" : ""} ${dis}> ⏪ उल्टा चलाएँ (reverse)${it.reverse && it.end - it.start > 10 ? ` <b style="color:var(--rose)">— 10 s से लंबी clip उल्टी नहीं चलती, छोटी करें</b>` : ""}</label>
       ${H.field("Speed Warp (smooth slow-mo)", `<select data-pk="speed_warp" ${dis}>${Object.entries(PP().speed?.warp || { off: "Off" }).map(([k, l]) => `<option value="${k}" ${(it.speed_warp || "off") === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}
       ${(it.speed_warp || "off") !== "off" ? `<p class="small muted rhint">सिर्फ़ 0.75× से धीमे हिस्सों पर · render धीमा (${it.speed_warp === "best" ? "~0.3–1 fps" : it.speed_warp === "balanced" ? "~1–2 fps" : "+5 %"}) · <b>render में दिखेगा</b></p>` : ""}`, ramp ? "curve" : sp !== 1 ? sp + "×" : "");
     // --- trim

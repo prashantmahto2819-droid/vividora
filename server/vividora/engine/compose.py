@@ -48,8 +48,12 @@ _FF_MODE = {"overlay": "hardlight", "hardlight": "overlay", "add": "addition", "
 SPEED_WARP = {"off": "बंद · Off", "fast": "Fast (frame blend)", "balanced": "Balanced (optical flow, ½ res)",
               "best": "Best (optical flow, full res — slow)"}
 KF_PARAMS = {"x": (-1.0, 2.0), "y": (-1.0, 2.0), "scale": (0.01, 10.0), "rotation": (-3600.0, 3600.0), "opacity": (0.0, 1.0)}
+import logging as _logging
+log = _logging.getLogger("vividora.compose")
+
 PRO_KEYS = ("trim_in", "trim_out", "speed", "speed_ramp", "speed_warp", "volume", "color", "grade", "grade_preset",
-            "stack", "mask", "crop", "blend_mode", "kf", "lut", "lut_path", "tr")
+            "stack", "mask", "crop", "blend_mode", "kf", "lut", "lut_path", "tr", "reverse")
+REVERSE_MAX = 10.0      # seconds: ffmpeg's reverse keeps every frame of the clip in memory
 
 
 def is_pro(item: dict) -> bool:
@@ -338,6 +342,12 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
     if not is_img:
         v += warp_filter(item.get("speed_warp"), min_speed, fps)
     v += f"fps={fps:.3f},trim=duration={dur:.3f},setpts=PTS-STARTPTS"
+    # played backwards: the part that would be shown, last frame first (short clips only — see REVERSE_MAX)
+    rev = bool(item.get("reverse")) and not is_img and dur <= REVERSE_MAX + 0.01
+    if item.get("reverse") and not is_img and not rev:
+        log.warning("reverse: clip is %.1f s — longer than %.0f s, played forwards", dur, REVERSE_MAX)
+    if rev:
+        v += ",reverse,setpts=PTS-STARTPTS"
     ap = item.get("alpha_path")
     cut = bool(item.get("cutout") and ap and not is_img and Path(ap).exists())
     if not cut:
@@ -369,7 +379,7 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
         edge = edge_filter(item.get("edge_shrink", 0), item.get("edge_feather", 0), H)
         ch.append(f"[{{IN{ai}}}:v]{pre_v}{setpts_for(pieces)},scale={src_w}:{src_h},{fit_f},setsar=1,"
                   f"{warp_filter(item.get('speed_warp'), min_speed, fps)}fps={fps:.3f},trim=duration={dur:.3f},"
-                  f"setpts=PTS-STARTPTS,format=yuv420p,extractplanes=y,{ALPHA_RANGE}{',' + edge if edge else ''}[{L}ct]")
+                  f"setpts=PTS-STARTPTS,{'reverse,setpts=PTS-STARTPTS,' if rev else ''}format=yuv420p,extractplanes=y,{ALPHA_RANGE}{',' + edge if edge else ''}[{L}ct]")
     if looks or mspec or cut:
         if cut:
             ch.append(v + f",format=rgba[{L}c]")
@@ -450,7 +460,7 @@ def build(item: dict, idx: int, W: int, H: int, fps: float, cur: str, work: Path
             a = ";".join(parts) + ";" + "".join(f"[{L}aq{j}]" for j in range(len(ap))) + f"concat=n={len(ap)}:v=0:a=1"
         ms = int(round(s * 1000))
         fd = min(0.05, dur / 4)
-        a += (f",atrim=0:{dur:.4f},aformat=sample_rates=48000:channel_layouts=mono,volume={vol:.3f},"
+        a += (f",atrim=0:{dur:.4f},{'areverse,asetpts=PTS-STARTPTS,' if rev else ''}aformat=sample_rates=48000:channel_layouts=mono,volume={vol:.3f},"
               f"afade=t=in:d={fd:.3f},afade=t=out:st={max(0.0, dur - fd):.3f}:d={fd:.3f},adelay={ms}|{ms}[{L}aud]")
         audio = (a, f"[{L}aud]")
     return {"inputs": inputs, "chains": ch, "out": out, "audio": audio}

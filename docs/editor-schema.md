@@ -612,3 +612,13 @@ Nothing is written: the editor (AI Studio → “Podcast की supporting clips
 
 Engine: `effects.frame_style`, `effects.ken_burns` (legacy overlay path; the pro compositor ignores them, like `anim`).
 Preview: `pro.js overlayFrame` (CSS radius / border / box-shadow, image transform).
+
+## Timeline: several items, copy / paste, ripple delete; reverse; freeze frame
+
+* `E.multi` (editor only, not saved): items chosen with Shift/Ctrl+click, Ctrl+A, Shift+A. Dragging one moves all;
+  Ctrl+C / X / V use `localStorage.vividora_clipb` (paste works in another project of the same workspace);
+  Shift+Del removes and slides later items of the same type + track left.
+* `broll[].reverse: true` — the shown part of an overlay **video** plays backwards (a PRO key → `engine/compose.py`;
+  clips longer than `compose.REVERSE_MAX` = 10 s play forwards, ffmpeg keeps every frame in memory).
+* `POST /api/projects/{id}/still {t}` → the frame at source second `t` as a Library image. “📸 Freeze frame” puts it
+  over the video for 2 s at the playhead (the sound keeps running — it is a held picture, not a stop in time).

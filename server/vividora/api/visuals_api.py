@@ -186,7 +186,43 @@ async def support_match(request: Request, user: dict):
                "ai": any(r["how"] == "ai" for r in res), "ai_on": bool(ask), "placed": sum(1 for r in res if r["start"] is not None), "total": len(res)})
 
 
+@require("editor")
+async def still(request: Request, user: dict):
+    """One frame of the main video → a photo in the Library (to hold it on screen, or for a thumbnail).
+    Body: {t: source seconds} → the library item."""
+    from starlette.concurrency import run_in_threadpool
+
+    from .. import thumbs
+    from .library import _probe_meta, _view
+    p = own_project(request, user)
+    d = await body(request)
+    rate_limit(request, "still", 30)
+    try:
+        t = max(0.0, float(d.get("t") or 0))
+    except (TypeError, ValueError):
+        raise ApiError(422, "t संख्या होनी चाहिए")
+    item_id = db.new_id()
+    name = f"{storage.safe_name(p.get('title') or 'video', 'video')[:40]} @ {int(t // 60)}m{t % 60:04.1f}s.jpg"
+    rel = str(Path(f"ws_{user['workspace_id']}") / "library" / "image" / f"{item_id[:8]}_frame.jpg")
+    dst = storage.ensure_parent(rel)
+
+    def grab() -> None:
+        img = thumbs.frame_image(p, t, max_w=1920)
+        img.convert("RGB").save(dst, "JPEG", quality=93)
+    try:
+        await run_in_threadpool(grab)
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(500, f"frame नहीं निकला: {str(e)[-200:]}")
+    item = {"id": item_id, "workspace_id": user["workspace_id"], "kind": "image", "name": name, "path": rel, "size": dst.stat().st_size,
+            "mime": "image/jpeg", "meta": {**_probe_meta(dst, "image"), "project_id": p["id"], "frame_at": round(t, 2)}, "created_by": user["id"],
+            "created_at": db.now(), "tags": "frame", "source": "frame", "license": "own", "channel_id": p.get("channel_id")}
+    with db.tx() as c:
+        db.insert(c, "library", item)
+    return ok(_view(db.get("library", item_id)), status=201)
+
+
 routes = [Route("/projects/{project_id}/visuals/plan", plan, methods=["POST"]),
+          Route("/projects/{project_id}/still", still, methods=["POST"]),
           Route("/projects/{project_id}/support/match", support_match, methods=["POST"]),
           Route("/projects/{project_id}/visuals/fetch", fetch, methods=["POST"]),
           Route("/visuals/jobs/{job_id}", job)]
