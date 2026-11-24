@@ -1035,7 +1035,7 @@ export function bindAutopilot(el) {
 // ====================================================================== shortcuts help (?)
 export function shortcutsHtml() {
   const K = [["Space", "चलाएँ / रोकें"], ["← / →", "1 frame (Shift = 1 s)"], ["Home / End", "शुरू / अंत"], ["I / O", "हिस्सा चुनें (In / Out)"], ["X", "In–Out हटाएँ (कट)"], ["S / C", "playhead पर split"],
-    ["Del / Backspace", "चुना item हटाएँ · Text से edit में: चुने शब्द काटें"], ["Ctrl+Z / Ctrl+Y", "undo / redo"], ["Ctrl+S", "सेव"], ["Ctrl+D", "duplicate"], ["F", "full screen"],
+    ["Del / Backspace", "चुना item हटाएँ · Text से edit में: चुने शब्द काटें"], ["Ctrl+Z / Ctrl+Y", "undo / redo"], ["Shift+click", "कई items साथ चुनें (फिर खींचें = सब साथ)"], ["Ctrl+A · Shift+A", "सब items · playhead के बाद के सब"], ["Ctrl+C / Ctrl+X / Ctrl+V", "copy / cut / playhead पर paste (दूसरे video में भी)"], ["Shift+Del", "हटाएँ और बाद वाले items को खाली जगह में खिसकाएँ"], ["Ctrl+S", "सेव"], ["Ctrl+D", "duplicate"], ["F", "full screen"],
     ["J / K / L", "shuttle: J = पीछे, K = रोकें, L = आगे (speed बढ़ता है)"],
     ["M", "playhead पर marker (Shift+M = chapter)"], ["K", "चुने clip/main video पर ◆ keyframe (position, zoom, घुमाव, opacity)"], ["Alt+← / Alt+→", "पिछला / अगला keyframe"],
     ["G", "snap on/off (timeline items एक-दूसरे से चिपके)"],

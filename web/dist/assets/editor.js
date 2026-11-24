@@ -529,6 +529,13 @@ function onKey(e) {
     if (e.key === "Escape" && i != null && !E.exportOpen) { e.preventDefault(); return moSelect(null); } }
   const v = $("#pv", E.root); const fps = E.p.meta?.fps || 30;
   if (e.key === "?" || (e.shiftKey && e.key === "/")) { e.preventDefault(); return showKeys(); }
+  { const mod = e.ctrlKey || e.metaKey; const K = e.key.toLowerCase();
+    if (mod && !e.shiftKey && K === "c") { e.preventDefault(); return copyItems(false); }
+    if (mod && !e.shiftKey && K === "x") { e.preventDefault(); return copyItems(true); }
+    if (mod && !e.shiftKey && K === "v") { e.preventDefault(); return pasteItems(); }
+    if (mod && !e.shiftKey && K === "a") { e.preventDefault(); return selectAllItems(false); }
+    if (!mod && e.shiftKey && K === "a") { e.preventDefault(); return selectAllItems(true); }
+    if (e.shiftKey && (e.key === "Delete" || e.key === "Backspace") && selectedSet().length) { e.preventDefault(); return deleteItems(true); } }
   if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { if (PRO.jumpKey(e.key === "ArrowRight" ? 1 : -1)) { e.preventDefault(); return; } }
   if ((e.key === "m" || e.key === "M") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); return PRO.addMarker(e.shiftKey ? "chapter" : "note"); }
   if ((e.key === "k" || e.key === "K") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); if (!PRO.keyAll()) E.ctx.toast("◆ keyframe के लिए पहले overlay clip या main video चुनें"); return; }
@@ -1093,6 +1100,7 @@ function cutTeardown() {
 
 // ---------- selection / inspector ----------
 function select(sel) {
+  if (!sel) E.multi = [];
   const wasCrop = cropView(); E.sel = sel; if (!(sel?.type === "video" || sel?.type === "seg")) E.cropMode = false;
   // a platform-only item (e.g. the Instagram "Follow" popup): show the preview of that platform so it can be seen/edited
   const it0 = sel?.type === "broll" ? selItem() : null; if (it0?.platforms?.length && !it0.platforms.includes(E.pvPlat || "youtube")) { E.pvPlat = it0.platforms[0]; const pp = $("#pv-plat", E.root); if (pp) pp.value = E.pvPlat; }
@@ -1118,6 +1126,7 @@ function selItem() {
   return null;
 }
 function deleteSel() {
+  if (E.canEdit && multiList().length > 1) return deleteItems(false);
   if (!E.canEdit || !E.sel) return;
   const { type, id } = E.sel; const fx = E.rs.effects;
   if (type === "cut") E.cuts = E.cuts.filter((c) => c.id !== id);
@@ -1266,6 +1275,7 @@ function renderInspector() {
 }
 function _renderInspector() {
   const ins = $("#inspector", E.root); const { esc } = E.ctx; let it = selItem(); const dis = E.canEdit ? "" : "disabled";
+  if (!E.montage && multiList().length > 1) { ins.innerHTML = multiHtml(dis); multiBind(ins); return; }
   if (!E.sel || !it) {
     if (E.montage) return moInspector(ins);
     ins.innerHTML = `<h3>Project</h3><div class="ikv"><span>लंबाई</span><b>${fmt(E.dur)} → ${fmt(outDur())}</b></div><div class="ikv"><span>कट</span><b>${E.cuts.filter((c) => c.enabled !== false).length}</b></div>
@@ -3007,7 +3017,7 @@ function renderTimeline() {
   const X = (src) => (src * pps).toFixed(1); const OX = (out) => X(srcOf(out)); const OW = (a, b) => Math.max(6, (srcOf(b) - srcOf(a)) * pps).toFixed(1);
   const step = pps >= 80 ? 0.5 : pps >= 40 ? 1 : pps >= 16 ? 2 : pps >= 8 ? 5 : 10;
   let ruler = ""; for (let t = 0; t <= E.dur; t += step) ruler += `<span style="left:${X(t)}px" class="${t % (step * 5) === 0 ? "maj" : ""}">${t % (step * 5) === 0 ? fmt(t).replace(/\.0$/, "") : ""}</span>`;
-  const sel = (type, id) => (E.sel?.type === type && E.sel.id === id ? "sel" : "");
+  const sel = (type, id) => (E.sel?.type === type && E.sel.id === id ? "sel" : "") + (multiHas(type, id) ? " msel" : "");
   const clipMarks = (E.p.meta?.clips || []).map((c, i) => `<div class="clipmark" style="left:${X(c.start)}px" title="${esc(c.name)}"><span>${i + 1}. ${esc(c.name.replace(/^clip\d+_/, "").slice(0, 16))}</span></div>`).join("");
   const speedRow = (E.speed || []).map((sp) => `<div class="speedblk ${sel("speed", sp.id)}" data-speed="${sp.id}" style="left:${X(sp.start)}px;width:${Math.max(6, (sp.end - sp.start) * pps).toFixed(1)}px" title="${sp.rate}×"><span>${sp.rate}×</span></div>`).join("");
   const segSel = E.sel?.type === "seg" ? segAt(E.sel.id) : null;
@@ -3132,12 +3142,64 @@ function bindTimeline() {
     if (type === "short") { const sc = E.shorts.find((x) => x.id === id); select({ type, id }); E.shortsDirty = true;
       if (e.target.classList.contains("h")) return dragEdge(e, sc, e.target.classList.contains("l") ? "start" : "end", "src"); return dragMove(e, sc, "short"); }
     const it = itemOf(type, id); if (!it) return;
+    if ((e.shiftKey || e.ctrlKey || e.metaKey) && MULTI_TYPES.includes(type)) { multiToggle(type, id); return select(E.multi.length ? E.multi[E.multi.length - 1] : (multiHas(type, id) || !E.multi.length ? { type, id } : E.sel)); }
+    if (!multiHas(type, id)) E.multi = [];                         // a plain click on something else ends the group
     if (E.sel?.type !== type || E.sel?.id !== id) select({ type, id });
     if (e.target.classList.contains("h")) return dragEdge(e, it, e.target.classList.contains("l") ? "start" : "end", "out", type);
     dragMove(e, it, type);
   }));
 }
 function itemOf(type, id) { const fx = E.rs.effects; return ({ title: fx.titles, broll: fx.broll, sfx: fx.sfx, fxclip: fx.fxclips }[type] || []).find((x) => x._id === id); }
+// ── several items at once: Shift / Ctrl + click adds to the selection, then move / copy / delete them together ──
+const MULTI_TYPES = ["title", "broll", "sfx", "fxclip"];
+function multiList() { const m = (E.multi || []).filter((x) => itemOf(x.type, x.id)); E.multi = m; return m; }
+function multiHas(type, id) { return (E.multi || []).some((x) => x.type === type && x.id === id); }
+function multiItems() { return multiList().map((x) => ({ ...x, it: itemOf(x.type, x.id) })); }
+function itemSpan(type, it) { return type === "sfx" ? [+it.at, +it.at + sfxSpan(it)] : [+it.start, +it.end]; }
+function itemShift(type, it, d) { if (type === "sfx") it.at = +Math.max(0, it.at + d).toFixed(2); else { const len = it.end - it.start; it.start = +Math.max(0, it.start + d).toFixed(2); it.end = +(it.start + len).toFixed(2); } }
+function arrOf(type) { const fx = E.rs.effects; if (type === "fxclip") fx.fxclips = fx.fxclips || []; return { title: fx.titles, broll: fx.broll, sfx: fx.sfx, fxclip: fx.fxclips }[type]; }
+function multiToggle(type, id) { const m = multiList(); const i = m.findIndex((x) => x.type === type && x.id === id);
+  if (i >= 0) m.splice(i, 1); else { if (!m.length && E.sel && MULTI_TYPES.includes(E.sel.type) && !(E.sel.type === type && E.sel.id === id)) m.push({ type: E.sel.type, id: E.sel.id }); m.push({ type, id }); }
+  E.multi = m.length > 1 ? m : []; }
+function selectedSet() { const m = multiList(); if (m.length > 1) return m.map((x) => ({ ...x })); return E.sel && MULTI_TYPES.includes(E.sel.type) && selItem() ? [{ type: E.sel.type, id: E.sel.id }] : []; }
+function selectAllItems(fromPlayhead) { const ot = outOf(E.t); const all = [];
+  for (const type of MULTI_TYPES) for (const it of arrOf(type) || []) { if (isLockedItem(type, it)) continue; if (!fromPlayhead || itemSpan(type, it)[0] >= ot - 0.01) all.push({ type, id: it._id }); }
+  if (!all.length) return E.ctx.toast(fromPlayhead ? "playhead के बाद कोई item नहीं" : "timeline पर कोई item नहीं");
+  E.multi = all.length > 1 ? all : []; select(all[0]); E.ctx.toast(`${all.length} items चुने — खींचकर साथ खिसकाएँ, Ctrl+C copy, Del हटाएँ`); }
+function isLockedItem(type, it) { return false; }
+// Ctrl+C / Ctrl+X: the chosen items, as they are (kept for this browser, so they can be pasted into another video too)
+function copyItems(cut) { const set = selectedSet(); if (!set.length) return E.ctx.toast("पहले timeline पर item चुनें (Shift+click से कई)");
+  const items = set.map((x) => ({ type: x.type, data: JSON.parse(JSON.stringify(itemOf(x.type, x.id))) })); const t0 = Math.min(...items.map((x) => itemSpan(x.type, x.data)[0]));
+  E.clipb = { t0, items }; try { localStorage.setItem("vividora_clipb", JSON.stringify(E.clipb)); } catch { /* private window */ }
+  if (cut) { if (!E.canEdit) return; for (const x of set) removeItem(x.type, x.id); E.multi = []; touch(); select(null); }
+  E.ctx.toast(`${items.length} item ${cut ? "cut" : "copy"} — playhead रखकर Ctrl+V`); }
+function removeItem(type, id) { const fx = E.rs.effects; const k = { title: "titles", broll: "broll", sfx: "sfx", fxclip: "fxclips" }[type]; fx[k] = (fx[k] || []).filter((t) => t._id !== id); }
+// Ctrl+V: at the playhead — the earliest copied item starts there, the others keep their distance
+function pasteItems() { if (!E.canEdit) return; let c = E.clipb; if (!c) { try { c = JSON.parse(localStorage.getItem("vividora_clipb") || "null"); } catch { c = null; } }
+  if (!c?.items?.length) return E.ctx.toast("पहले कुछ copy करें (Ctrl+C)"); const ot = outOf(E.t); const total = outDur(); const added = []; let skipped = 0;
+  for (const x of c.items) { if (!MULTI_TYPES.includes(x.type)) continue; const d = JSON.parse(JSON.stringify(x.data));
+    if (d.id && ["broll", "sfx"].includes(x.type) && !libItem(d.id)) { skipped++; continue; }                    // from another workspace: the file is not here
+    d._id = uid(); delete d._vz; delete d._sup; delete d.auto; const [a, b] = itemSpan(x.type, d); const st = +(ot + (a - c.t0)).toFixed(2); if (st >= total - 0.1) { skipped++; continue; }
+    if (x.type === "sfx") d.at = st; else { d.start = st; d.end = +Math.min(total, st + (b - a)).toFixed(2); }
+    arrOf(x.type).push(d); added.push({ type: x.type, id: d._id }); }
+  if (!added.length) return E.ctx.toast(skipped ? "paste नहीं हुआ — playhead video के आख़िर में है या file इस Library में नहीं" : "कुछ paste करने को नहीं");
+  touch(); E.multi = added.length > 1 ? added : []; select(added[0]); E.ctx.toast(`${added.length} item paste हुए${skipped ? ` (${skipped} छूटे)` : ""}`); }
+// delete the chosen items; ripple = everything after them on the same track slides left into the gap
+function deleteItems(ripple) { if (!E.canEdit) return; const set = selectedSet(); if (!set.length) return false;
+  const gone = set.map((x) => { const it = itemOf(x.type, x.id); const [a, b] = itemSpan(x.type, it); return { ...x, a, b, track: it.track || 0 }; });
+  for (const g of gone) removeItem(g.type, g.id);
+  if (ripple) for (const g of gone.sort((p, q) => q.a - p.a)) for (const it of arrOf(g.type) || []) if ((it.track || 0) === g.track && itemSpan(g.type, it)[0] >= g.b - 0.01) itemShift(g.type, it, -(g.b - g.a));
+  E.multi = []; touch(); select(null); E.ctx.toast(`${gone.length} item हटे${ripple ? " — बाद वाले आगे खिसक आए" : ""}`); return true; }
+function multiHtml(dis) { const m = multiItems(); const [a, b] = [Math.min(...m.map((x) => itemSpan(x.type, x.it)[0])), Math.max(...m.map((x) => itemSpan(x.type, x.it)[1]))]; const n = (t) => m.filter((x) => x.type === t).length;
+  return `<h3>${m.length} items चुने हैं</h3><div class="ikv"><span>कहाँ</span><b>${fmt(a)} – ${fmt(b)}</b></div>
+    <p class="small muted">${[["title", "text"], ["broll", "clip / photo / sticker"], ["sfx", "sound"], ["fxclip", "effect"]].filter(([t]) => n(t)).map(([t, l]) => `${n(t)} ${l}`).join(" · ")}</p>
+    <div class="mo-acts"><button class="btn small" data-mu="copy">📋 Copy</button><button class="btn small" data-mu="cut" ${dis}>✂ Cut</button><button class="btn small" data-mu="here" ${dis} title="पूरा group playhead पर ले आओ">⇤ playhead पर</button>
+      <button class="btn small" data-mu="l" ${dis}>◀ 0.1s</button><button class="btn small" data-mu="r" ${dis}>0.1s ▶</button><button class="btn small" data-mu="del" ${dis}>🗑 हटाएँ</button><button class="btn small" data-mu="rip" ${dis} title="हटाएँ और बाद वाले items को खाली जगह में खिसका दें (Shift+Del)">🗑⇤ हटाएँ + जगह भरें</button><button class="btn small quiet" data-mu="none">चुनाव हटाएँ</button></div>
+    <p class="small muted" style="margin-top:.5rem">किसी भी चुने item को खींचें — सब साथ चलेंगे। Shift+click = जोड़ें/हटाएँ · Ctrl+A = सब · Shift+A = playhead के बाद के सब · Ctrl+C / Ctrl+X / Ctrl+V · Shift+Del = जगह भरकर हटाएँ</p>`; }
+function multiBind(ins) { $$("[data-mu]", ins).forEach((b) => (b.onclick = () => { const k = b.dataset.mu; const m = multiItems();
+  if (k === "copy") return copyItems(false); if (k === "cut") return copyItems(true); if (k === "del") return deleteItems(false); if (k === "rip") return deleteItems(true); if (k === "none") { E.multi = []; return select(E.sel); }
+  const a = Math.min(...m.map((x) => itemSpan(x.type, x.it)[0])); const d = k === "here" ? outOf(E.t) - a : k === "l" ? -0.1 : 0.1; const dd = Math.max(d, -a);
+  for (const x of m) itemShift(x.type, x.it, dd); touch(); renderTimeline(); renderInspector(); })); }
 // snap a time (output clock) to the playhead / other item edges when within ~7px
 function snapOut(t, self) {
   const fx = E.rs.effects; const tol = 7 / E.pps; const cands = [0, outOf(E.t), outDur()];
@@ -3160,6 +3222,11 @@ function dragEdge(e, it, key, clock, type) {
 }
 function dragMove(e, it, type) {
   if (!E.canEdit) return; const pps = E.pps; const s0 = type === "sfx" ? it.at : it.start; const len = type === "sfx" ? 0 : it.end - it.start; let moved = false;
+  if (multiList().length > 1 && multiHas(type, it._id)) { // the whole group moves by the same amount (tracks stay)
+    const grp = multiItems().map((x) => ({ ...x, s0: itemSpan(x.type, x.it)[0] })); const first = Math.min(...grp.map((g) => g.s0));
+    return track(e, (ev, dx) => { let s = outOf(clamp(srcOf(s0) + dx / pps, 0, E.dur)); const ss = snapOut(s, it); if (ss !== s && !grp.some((g) => g.it !== it && (Math.abs(g.it.start - ss) < 1e-6 || Math.abs(g.it.end - ss) < 1e-6))) s = ss;
+      const d = Math.max(s - s0, -first); for (const g of grp) { const len2 = g.type === "sfx" ? 0 : g.it.end - g.it.start; const st = +(g.s0 + d).toFixed(2); if (g.type === "sfx") g.it.at = st; else { g.it.start = st; g.it.end = +(st + len2).toFixed(2); } }
+      renderTimeline(); renderInspector(); }, (m) => { if (m) { touch(); renderOverlay(); } }); }
   const want = { title: "text", broll: "broll", sfx: "audio", fxclip: "fx" }[type];
   track(e, (ev, dx) => { moved = true;
     if (type === "short") { const st = clamp(s0 + dx / pps, 0, E.dur - len); it.start = +st.toFixed(2); it.end = +(st + len).toFixed(2); }

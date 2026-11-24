@@ -682,3 +682,7 @@ svg.mpoly.mode-draw polygon, svg.mpoly.mode-draw circle { pointer-events: none; 
 .sup-how { white-space: nowrap; flex: none; margin-left: .4rem; }
 .sup-how.ok { color: #46c878; } .sup-how.warn { color: var(--amber); } .sup-how.err { color: var(--rose); }
 label.btn.disabled { opacity: .5; pointer-events: none; }
+
+/* several items chosen together */
+.itm.msel { outline: 2px solid var(--accent); outline-offset: -1px; }
+.itm.msel.sel { outline-color: var(--amber); }
