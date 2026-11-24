@@ -39,6 +39,7 @@ export function voiceView() {
   return `<div class="pghead"><div><h1>🎙 Voice Studio</h1><p class="muted">Text लिखें → AI आवाज़ बनाएँ (हिंदी, English और 600+ भाषाएँ)। अपने server पर चलता है — कोई credit नहीं लगता।</p></div></div>
   <div class="tl-wrap"><div class="tl-box">
     <div class="field"><label>Text (max 5000 अक्षर)</label><textarea id="vs-text" maxlength="5000" placeholder="यहाँ वह लिखें जो बुलवाना है…"></textarea></div>
+    <div class="field"><label>आवाज़ कहाँ से बने</label><select id="vs-src"><option value="">VoiceStudio — अपने server पर (मुफ़्त; CPU पर धीमा)</option></select><div class="small muted" id="vs-src-tip" style="margin-top:.25rem"></div></div>
     <div class="tl-row">
       <div class="field"><label>भाषा</label><select id="vs-lang"><option value="hi">हिंदी</option><option value="en">English</option><option value="mr">मराठी</option><option value="bn">বাংলা</option><option value="ta">தமிழ்</option><option value="te">తెలుగు</option><option value="gu">ગુજરાતી</option><option value="pa">ਪੰਜਾਬੀ</option><option value="ur">اردو</option></select></div>
       <div class="field"><label>Model</label><select id="vs-model"><option value="">Default</option></select></div>
@@ -55,22 +56,41 @@ export function voiceBind(c) {
   const opt = (x) => typeof x === "string" ? [x, x] : [x.id ?? x.name ?? x.value, x.name ?? x.label ?? x.id ?? x.value];
   const fill = (sel, list) => { $(sel).innerHTML = `<option value="">Default</option>` + (list || []).map((x) => { const [v, l] = opt(x); return v ? `<option value="${esc(v)}">${esc(l)}</option>` : ""; }).join(""); };
   ctx.api("GET", "/voicestudio/health").then((h) => { if (h.status !== "ok") st("⚠ VoiceStudio service बंद है (port 3900) — server पर `systemctl status voicestudio` देखें", true); }).catch(() => st("⚠ VoiceStudio से संपर्क नहीं हो पाया", true));
-  ctx.api("GET", "/voicestudio/models").then((r) => fill("#vs-model", r.models)).catch(() => {});
+  ctx.api("GET", "/voicestudio/models").then((r) => { fill("#vs-model", r.models); VSM = r.models || []; if (VSM.some((x) => x.id === "omnivoice")) $("#vs-model").value = "omnivoice"; loadVoices(); guard(); }).catch(() => {});
   const loadVoices = () => ctx.api("GET", "/voicestudio/voices" + ($("#vs-model").value ? "?model=" + encodeURIComponent($("#vs-model").value) : "")).then((r) => fill("#vs-voice", r.voices)).catch(() => {});
-  loadVoices(); $("#vs-model").onchange = loadVoices;
+  // the same page can use every other voice Vividora has (Kokoro on this server, fal.ai, RunPod, ElevenLabs) — much faster than a CPU model
+  let VSM = [];
+  const guard = () => { const m = VSM.find((x) => x.id === $("#vs-model").value); const lang = $("#vs-lang").value; const own = !$("#vs-src").value;
+    $("#vs-model").closest(".field").style.display = own ? "" : "none"; $("#vs-voice").closest(".field").style.display = own ? "" : "none";
+    const bad = own && m && m.langs && !m.langs.includes(lang);
+    const noOmni = own && !$("#vs-model").value && VSM.length && !VSM.some((x) => x.id === "omnivoice") && lang !== "en";
+    if (bad) st(`⚠ “${m.id}” सिर्फ़ ${m.langs.join(", ")} बोलता है — हिंदी / भारतीय भाषाओं के लिए Model में “omnivoice” चुनें, या ऊपर “आवाज़ कहाँ से बने” में दूसरी आवाज़ लें।`, true);
+    else if (noOmni) st("⚠ इस server के VoiceStudio में हिंदी बोलने वाला model (omnivoice) load नहीं है — ऊपर “आवाज़ कहाँ से बने” में दूसरी आवाज़ चुनें।", true);
+    else if ($("#vs-st")?.classList.contains("err")) st("");
+    return !bad; };
+  ctx.api("GET", "/v1/voices").then((r) => { const vs = (r.voices || []).filter((v) => v.engine !== "voicestudio"); const grp = { fal: "fal.ai (cloud GPU — तेज़, थोड़ा खर्च)", runpod: "RunPod (cloud GPU)", elevenlabs: "ElevenLabs", kokoro: "इसी server पर — Kokoro (मुफ़्त)", parler: "इसी server पर — Parler (मुफ़्त, धीमा)" };
+    const by = {}; vs.forEach((v) => (by[v.engine] = by[v.engine] || []).push(v));
+    $("#vs-src").innerHTML += Object.keys(by).map((e) => `<optgroup label="${esc(grp[e] || e)}">${by[e].map((v) => `<option value="${esc(v.id)}" data-lang="${esc(v.lang || "")}">${esc(v.name || v.id)}</option>`).join("")}</optgroup>`).join("");
+    $("#vs-src-tip").innerHTML = by.fal || by.runpod ? "जल्दी चाहिए तो fal.ai / RunPod की आवाज़ चुनें — कुछ सेकंड में बनती है।" : `और तेज़ आवाज़ें चाहिए? <a href="#/api">API &amp; Keys</a> में fal.ai की key डालें — यहाँ Chatterbox हिन्दी और “मेरी अपनी आवाज़” आ जाएँगी।`; }).catch(() => {});
+  $("#vs-src").onchange = () => { const o = $("#vs-src").selectedOptions[0]; if (o?.dataset.lang && [...$("#vs-lang").options].some((x) => x.value === o.dataset.lang)) $("#vs-lang").value = o.dataset.lang; guard(); };
+  $("#vs-lang").onchange = guard;
+  $("#vs-model").onchange = () => { loadVoices(); guard(); };
   $("#vs-speed").oninput = (e) => { $("#vs-sp-l").textContent = (+e.target.value).toFixed(2).replace(/0$/, "") + "×"; };
   $("#vs-go").onclick = async () => {
     const text = $("#vs-text").value.trim(); if (!text) return st("पहले text लिखें", true);
-    const btn = $("#vs-go"); btn.disabled = true; st("आवाज़ बन रही है… (CPU पर लंबे text में 1–2 मिनट लग सकते हैं)");
+    if (!guard()) return;
+    const src = $("#vs-src").value; const own = !src;
+    const btn = $("#vs-go"); btn.disabled = true; st(own ? "आवाज़ बन रही है… (अपने server के CPU पर: पहली बार model खुलने में 1–3 मिनट, फिर हर line 20–60 सेकंड)" : "आवाज़ बन रही है…");
     try {
-      const r0 = await ctx.api("POST", "/voiceover", { text, lang: $("#vs-lang").value, vs_model: $("#vs-model").value || undefined, vs_voice: $("#vs-voice").value || undefined, speed: +$("#vs-speed").value, voice: "vs_multi" });
+      const r0 = await ctx.api("POST", "/voiceover", own ? { text, lang: $("#vs-lang").value, vs_model: $("#vs-model").value || undefined, vs_voice: $("#vs-voice").value || undefined, speed: +$("#vs-speed").value, voice: "vs_multi" }
+        : { text, lang: $("#vs-lang").value, speed: +$("#vs-speed").value, voice: src });
       let item = null;
       for (let i = 0; i < 400 && !item; i++) {
         if (!$("#vs-st")) return; // left the page
         const s2 = await ctx.api("GET", "/voiceover/" + r0.job_id);
         if (s2.status === "failed") throw new Error(s2.error || "आवाज़ नहीं बन पाई");
         if (s2.status === "done") { item = s2.item; break; }
-        st(`आवाज़ बन रही है… ${s2.seconds}s (लंबे text में 1–2 मिनट लगते हैं, page खुला रखें)`); await sleep(2500);
+        st(`आवाज़ बन रही है… ${s2.seconds}s` + (own ? (s2.seconds > 90 ? " — बहुत देर लग रही है: VoiceStudio का model शायद पहली बार उतर रहा है या CPU पर अटका है। ऊपर “आवाज़ कहाँ से बने” में दूसरी आवाज़ चुनकर दोबारा बना सकते हैं।" : " (CPU पर धीमा है, page खुला रखें)") : "")); await sleep(2500);
       }
       if (!item) throw new Error("बहुत देर लग रही है — बाद में Library → Voice-over में देखें");
       $("#vs-out").innerHTML = `<audio controls src="${esc(item.url)}" style="width:100%"></audio><p><a class="btn small" href="${esc(item.url)}" download="${esc(item.name)}.wav">⬇ WAV download</a></p><p class="small muted">✓ Library → Voice-over में save है। Editor के «3D &amp; Voice» tab से सीधे timeline पर लग सकती है।</p>`;

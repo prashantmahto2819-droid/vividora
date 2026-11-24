@@ -90,6 +90,10 @@ async def create(request: Request, user: dict):
     lang = str(b.get("lang") or voice.get("lang") or "hi")[:8]
     if voice.get("engine") == "voicestudio" and b.get("lang"):
         voice = {**voice, "vs_language": lang}
+    if voice.get("engine") == "voicestudio" and voice.get("vs_model"):
+        from ..engine import voicestudio as _vs
+        if not _vs.speaks(voice["vs_model"], voice.get("vs_language") or lang):
+            raise ApiError(422, _vs.lang_hint(voice["vs_model"], voice.get("vs_language") or lang))
     name = (str(b.get("name") or "").strip() or "Voice-over · " + text[:30])[:120]
     ws = user["workspace_id"]
     cb = None

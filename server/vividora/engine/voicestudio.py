@@ -52,6 +52,26 @@ def health() -> dict:
 TTS_ENGINES = {"omnivoice", "cosyvoice", "kittentts", "mlx-audio", "voxcpm2", "moss-tts-nano", "gpt-sovits", "sherpa-onnx", "indextts2"}
 
 
+# Which languages a model can speak (None = many: let it try). A model asked for a language it does not know either fails
+# after a long wait or reads nonsense — the Voice Studio page and the API refuse such a pair at once.
+MODEL_LANGS: dict[str, set[str] | None] = {
+    "omnivoice": None, "sherpa-onnx": None,
+    "kittentts": {"en"}, "indextts2": {"en", "zh"}, "voxcpm2": {"en", "zh"}, "moss-tts-nano": {"en", "zh"},
+    "cosyvoice": {"en", "zh", "ja", "ko"}, "gpt-sovits": {"en", "zh", "ja", "ko"}, "mlx-audio": {"en"},
+}
+
+
+def speaks(model: str | None, lang: str) -> bool:
+    langs = MODEL_LANGS.get(model or "omnivoice")
+    return langs is None or (lang or "hi")[:2].lower() in langs
+
+
+def lang_hint(model: str, lang: str) -> str:
+    langs = sorted(MODEL_LANGS.get(model) or [])
+    return (f"“{model}” यह भाषा ({lang}) नहीं बोलता — यह सिर्फ़ {', '.join(langs)} के लिए है। "
+            "हिंदी और दूसरी भारतीय भाषाओं के लिए Model में “omnivoice” (या Default) चुनें।")
+
+
 def models() -> list[dict]:
     """TTS models (OpenAI-style /v1/models)."""
     try:
@@ -60,7 +80,7 @@ def models() -> list[dict]:
         ids = [(m.get("id") if isinstance(m, dict) else m) for m in items]
         ids = [i for i in ids if i in TTS_ENGINES]  # /v1/models also lists speech-to-text models (whisperx…) that cannot speak
         ids.sort(key=lambda i: (i != "omnivoice", i))
-        return [{"id": i, "name": i} for i in ids]
+        return [{"id": i, "name": i, "langs": sorted(MODEL_LANGS[i]) if MODEL_LANGS.get(i) else None} for i in ids]
     except Exception as e:  # noqa: BLE001
         log.warning("VoiceStudio models list failed: %s", e)
         return []
