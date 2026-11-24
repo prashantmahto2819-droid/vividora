@@ -287,6 +287,9 @@ class ElevenLabsBackend:
         api_key = os.getenv("ELEVENLABS_API_KEY", "")
         if not api_key:
             raise TTSMissing("ELEVENLABS_API_KEY सेट नहीं है — .env में API key डालें।")
+        from . import meter
+        meter.check("elevenlabs")
+        meter.add("elevenlabs", text[:60], len(text) / 1000.0)
         client = ELClient(api_key=api_key)
         voice_id = voice.get("elevenlabs_voice_id") or "21m00Tcm4TlvDq8ikWAM"  # default: Rachel
         model_id = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")

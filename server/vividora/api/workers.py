@@ -26,7 +26,7 @@ async def claim(request: Request):
         queue.touch_worker(c, name, kinds, data.get("info"))
         job = queue.claim(c, kinds, name)
     if job is None:
-        return ok({"job": None})
+        return ok({"job": None, "env": _provider_env()})      # so a waiting worker learns about a changed setting too
     project = db.get("projects", job["project_id"])
     assets = db.rows(db.conn().execute("SELECT id, kind, label, path, mime, meta FROM assets "
                                        "WHERE project_id = ? AND archived = 0", (project["id"],)))
@@ -35,7 +35,27 @@ async def claim(request: Request):
                                        ("id", "workspace_id", "title", "language", "meta", "transcript",
                                         "edl", "settings")},
                "assets": assets, "quota": {"ai_credits": saas.ai_credits_left(project["workspace_id"])},
-               "env": _provider_env()})
+               "env": _provider_env(), "spend_left": _spend_left()})
+
+
+def _spend_left():
+    try:
+        from .. import spend
+        return spend.left()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def spend_report(request: Request):
+    """A worker made a paid call (engine/meter.py) while running a job."""
+    from .. import spend
+    data = await body(request)
+    jid = request.headers.get("x-job")
+    job = db.get("jobs", jid) if jid else None
+    p = db.get("projects", job["project_id"]) if job else None
+    spend.record(data if isinstance(data, dict) else {}, workspace_id=p["workspace_id"] if p else None, project_id=p["id"] if p else None,
+                 worker=(job or {}).get("worker") or "worker")
+    return ok({"left": spend.left()})
 
 
 def _provider_env() -> dict:
@@ -177,6 +197,7 @@ async def activity(request: Request, user: dict):
 
 routes = [
     Route("/worker/claim", claim, methods=["POST"]),
+    Route("/worker/spend", require_worker(spend_report), methods=["POST"]),
     Route("/worker/jobs/{job_id}/heartbeat", heartbeat, methods=["POST"]),
     Route("/worker/jobs/{job_id}/done", done, methods=["POST"]),
     Route("/worker/jobs/{job_id}/failed", failed, methods=["POST"]),

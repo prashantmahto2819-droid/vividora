@@ -697,9 +697,33 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             prog = _progress(client, job["id"])
             rng = pl.get("range")
             window = (float(rng[0]), float(rng[1])) if isinstance(rng, (list, tuple)) and len(rng) == 2 else None
-            tr = transcribe_file(audio, language=pl.get("language", "hi"), prompt=pl.get("prompt"),
-                                 on_progress=lambda f, m: prog(f * 0.93, m), window=window,
-                                 alternatives=int(pl.get("alternatives", 0) or 0), model=pl.get("model") or None)
+            from ..engine import cloudasr, meter
+            dur_a = float((project.get("meta") or {}).get("duration") or 0)
+            eng = cloudasr.engine(dur_a, window=bool(window))
+            can_local = os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes") or os.getenv("WHISPER_MODEL") == "stub"
+            if eng == "local" and not can_local:      # this worker took the job only because the cloud was switched on
+                eng = cloudasr.first_cloud() or "local"
+            tr = None
+            if eng != "local":
+                svc = "fal_whisper" if eng == "fal" else "runpod_whisper"
+                try:
+                    meter.check(svc)
+                    tr = cloudasr.transcribe(audio, engine_name=eng, language=pl.get("language", "hi"), prompt=pl.get("prompt"), work=tmp / "asr",
+                                             window=window, on_progress=lambda f, m: prog(f * 0.93, m))
+                    meter.add(svc, f"{project.get('title') or 'video'} · {tr['audio_seconds'] / 60:.1f} min",
+                              tr["audio_seconds"] / 60 if eng == "fal" else tr["cloud_seconds"])
+                    from ..engine import wordfix
+                    tr = wordfix.clean_transcript(tr) or tr
+                except Exception as e:  # noqa: BLE001 — the cloud is an accelerator, never the only way
+                    if not can_local:
+                        raise RuntimeError(f"cloud transcript नहीं बना ({eng}): {str(e)[:200]} — और इस server पर local transcript चालू नहीं है (TRANSCRIBE_LOCAL=1)") from None
+                    log.warning("cloud transcript (%s) failed, making it here: %s", eng, e)
+                    prog(0.02, f"{eng} से नहीं बना — इसी server पर बना रहे हैं")
+                    tr = None
+            if tr is None:
+                tr = transcribe_file(audio, language=pl.get("language", "hi"), prompt=pl.get("prompt"),
+                                     on_progress=lambda f, m: prog(f * 0.93, m), window=window,
+                                     alternatives=int(pl.get("alternatives", 0) or 0), model=pl.get("model") or None)
             from ..engine import vocab
             tr, nfix = vocab.apply_fixes(tr, pl.get("fixes"))
             for alt in tr.get("alts") or []:
@@ -751,7 +775,8 @@ def main() -> None:
         kinds += ["matte", "matte_lib"]
     except ImportError:
         log.warning("onnxruntime नहीं — cutout (matte) jobs इस worker पर नहीं चलेंगे")
-    if os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes"):
+    local_asr = os.getenv("TRANSCRIBE_LOCAL", "").lower() in ("1", "true", "yes")
+    if local_asr:
         kinds.append("transcribe")
     if os.getenv("TTS_LOCAL", "").lower() in ("1", "true", "yes"):
         kinds.append("dub")  # AI voice-over on CPU — works, but slow (normally the GPU worker does it)
@@ -763,7 +788,15 @@ def main() -> None:
     elif lane == "heavy":
         kinds = [k for k in kinds if k in HEAVY_KINDS]
     client = ApiClient(base, token, name)
-    run_loop(client, kinds, handle, poll=float(os.getenv("POLL_SECONDS", "3")),
+
+    def live_kinds() -> list[str]:
+        """Transcripts are taken by this worker when it can make them itself, or when the dashboard says "on fal.ai /
+        RunPod" (then this CPU worker only sends the audio out) — the setting can change while the worker runs."""
+        from ..engine import cloudasr
+        if not local_asr and lane != "heavy" and cloudasr.engine_setting() != "local" and cloudasr.first_cloud():
+            return [*kinds, "transcribe"]
+        return kinds
+    run_loop(client, live_kinds, handle, poll=float(os.getenv("POLL_SECONDS", "3")),
              info={"ffmpeg": ffmpeg.have("ffmpeg"), "deepfilter": ffmpeg.have("deep-filter"), "lane": lane},
              once=os.getenv("ONCE") == "1")
 

@@ -45,7 +45,11 @@ class ApiClient:
 
     def claim(self, kinds: list[str], info: dict | None = None) -> dict | None:
         r = self._req("POST", "/worker/claim", {"kinds": kinds, "worker": self.worker, "info": info or {}})
+        _apply_env(r.get("env"))          # dashboard settings reach a waiting worker too (e.g. "transcript on fal.ai")
         return r if r.get("job") else None
+
+    def spend(self, entry: dict) -> None:
+        self._req("POST", "/worker/spend", entry)
 
     def heartbeat(self, job_id: str, progress: float | None = None, message: str | None = None) -> bool:
         r = self._req("POST", f"/worker/jobs/{job_id}/heartbeat",
@@ -117,10 +121,10 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
     """Claim → handle → report, forever. `handler(client, job, project, assets)` returns the result dict."""
     import logging
     log = logging.getLogger("vividora.worker")
-    log.info("worker %s ready for %s", client.worker, kinds)
+    log.info("worker %s ready for %s", client.worker, kinds() if callable(kinds) else kinds)
     while True:
         try:
-            claimed = client.claim(kinds, info)
+            claimed = client.claim(kinds() if callable(kinds) else kinds, info)
         except Exception as e:  # API down — wait and try again
             log.warning("API से संपर्क नहीं: %s", e)
             time.sleep(min(60, poll * 5))
@@ -134,6 +138,12 @@ def run_loop(client: ApiClient, kinds: list[str], handler, *, poll: float = 3.0,
         log.info("job %s %s (project %s)", job["id"], job["kind"], job["project_id"])
         client.job_id = job["id"]  # file downloads are scoped to this job's workspace on the server
         _apply_env(claimed.get("env"))
+        try:  # paid calls made while this job runs are counted on the server, against the month's limit
+            from ..engine import meter as _meter
+            _budget = claimed.get("spend_left")
+            _meter.configure(sink=client.spend, left=(lambda b=_budget: b))
+        except Exception:  # noqa: BLE001 — a GPU-only worker has no engine package
+            pass
         llm_before = 0
         try:  # plan quota: the worker's own AI calls stop when the workspace's credits are gone
             from ..engine import llm as _llm

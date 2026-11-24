@@ -60,7 +60,18 @@ async def delete_provider(request: Request, user: dict):
     return ok({"provider": next(r for r in provkeys.status() if r["env"] == env)})
 
 
+@require("editor")
+async def spend_summary(request: Request, user: dict):
+    """This month's paid-service spending. The log itself only for the server's owner."""
+    from .. import spend
+    s = spend.summary()
+    if not _operator(user):
+        s = {k: s[k] for k in ("period", "cap", "total", "left")}
+    return ok({**s, "can_edit": _operator(user)})
+
+
 routes = [
+    Route("/spend", spend_summary),
     Route("/providers", list_providers),
     Route("/providers/{env}", put_provider, methods=["PUT"]),
     Route("/providers/{env}", delete_provider, methods=["DELETE"]),

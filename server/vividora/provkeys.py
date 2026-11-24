@@ -58,7 +58,21 @@ CATALOG: list[dict[str, Any]] = [
     {"env": "TIKTOK_CLIENT_SECRET", "group": "social", "label": "TikTok client secret", "secret": True,
      "use": "ऊपर वाले client key के साथ", "link": "https://developers.tiktok.com/apps/"},
 ]
-GROUPS = {"site": "Site", "ai": "AI (लिखना / सोचना)", "media_ai": "AI image · video · voice",
+CATALOG += [
+    {"env": "TRANSCRIBE_ENGINE", "group": "run", "label": "Transcript कहाँ बने", "secret": False,
+     "choices": {"local": "यह server (Z440) — free, CPU पर धीमा", "fal": "fal.ai Whisper — सिर्फ़ काम के पैसे", "runpod": "RunPod serverless — सिर्फ़ काम के पैसे",
+                 "auto": "Auto — छोटी recording यहीं, लंबी cloud पर"},
+     "use": "cloud चुनने पर भी key न हो या cloud fail हो तो यह server ही बनाता है", "link": ""},
+    {"env": "TRANSCRIBE_AUTO_MIN", "group": "run", "label": "Auto: कितने मिनट से लंबी recording cloud पर जाए", "secret": False, "number": [1, 240],
+     "use": "खाली = 8 मिनट", "link": "", "placeholder": "8"},
+    {"env": "SPEND_CAP_USD", "group": "run", "label": "महीने की खर्च-सीमा (USD)", "secret": False, "number": [0, 100000],
+     "use": "इतना खर्च होते ही paid काम (cloud transcript, AI video, ElevenLabs) रुक जाते हैं। खाली = कोई सीमा नहीं, 0 = सब paid बंद", "link": "", "placeholder": "10"},
+    {"env": "RUNPOD_API_KEY", "group": "run", "label": "RunPod API key", "secret": True,
+     "use": "RunPod serverless (transcript, 3D rigging)", "link": "https://www.runpod.io/console/user/settings"},
+    {"env": "RUNPOD_WHISPER_ENDPOINT", "group": "run", "label": "RunPod Whisper endpoint ID", "secret": False,
+     "use": "RunPod → Serverless → “Faster Whisper” endpoint की ID (Min workers = 0 रखें)", "link": "https://www.runpod.io/console/serverless"},
+]
+GROUPS = {"run": "कहाँ चलाएँ · खर्च", "site": "Site", "ai": "AI (लिखना / सोचना)", "media_ai": "AI image · video · voice",
           "stock": "Stock video · photo · music · sound", "social": "YouTube · Instagram · TikTok"}
 BY_ENV = {c["env"]: c for c in CATALOG}
 # variables config.settings read once at start → kept in step
@@ -66,7 +80,8 @@ _SETTINGS = {"PUBLIC_URL": "public_url", "YT_CLIENT_ID": "yt_client_id", "YT_CLI
              "META_APP_ID": "meta_app_id", "META_APP_SECRET": "meta_app_secret",
              "TIKTOK_CLIENT_KEY": "tiktok_client_key", "TIKTOK_CLIENT_SECRET": "tiktok_client_secret"}
 # what a worker process uses itself (AI calls made while a job runs)
-WORKER_ENVS = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "FAL_KEY", "ELEVENLABS_API_KEY")
+WORKER_ENVS = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "FAL_KEY", "ELEVENLABS_API_KEY",
+               "TRANSCRIBE_ENGINE", "TRANSCRIBE_AUTO_MIN", "RUNPOD_API_KEY", "RUNPOD_WHISPER_ENDPOINT")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS provider_keys (
   env TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT);"""
@@ -129,6 +144,19 @@ def clean(env: str, value: Any) -> str:
         raise ValueError("value खाली है")
     if len(v) > 400 or any(ch in v for ch in "\n\r\t\0"):
         raise ValueError("value बहुत लंबी है या उसमें line break है")
+    if c.get("choices"):
+        if v not in c["choices"]:
+            raise ValueError("इनमें से एक चुनें: " + " | ".join(c["choices"]))
+        return v
+    if c.get("number"):
+        try:
+            n = float(v)
+        except ValueError:
+            raise ValueError("संख्या लिखें") from None
+        lo, hi = c["number"]
+        if n != n or not (lo <= n <= hi):
+            raise ValueError(f"{lo} से {hi} के बीच की संख्या लिखें")
+        return str(int(n)) if n == int(n) else str(n)
     if env == "PUBLIC_URL":
         v = v.rstrip("/")
         if not (v.startswith("https://") or v.startswith("http://")) or " " in v or len(v) < 11:

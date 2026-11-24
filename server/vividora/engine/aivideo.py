@@ -55,6 +55,8 @@ def animate(image: Path, prompt: str, dest: Path, *, call=None, download=None, p
     """Image → MP4 at dest. Raises RuntimeError on any failure or timeout."""
     if not provider():
         raise RuntimeError("AI video provider not configured")
+    from . import meter
+    meter.check("ai_video")
     call = call or _call
     base = os.getenv("FAL_QUEUE_BASE", "https://queue.fal.run")
     model = os.getenv("AI_VIDEO_MODEL", "fal-ai/ltx-video/image-to-video").strip("/")
@@ -88,6 +90,11 @@ def animate(image: Path, prompt: str, dest: Path, *, call=None, download=None, p
     (download or _download)(url, dest)
     if not dest.exists() or dest.stat().st_size < 1000:
         raise RuntimeError("fal: empty video")
+    try:
+        secs = float(os.getenv("AI_VIDEO_SECONDS") or 5)
+    except ValueError:
+        secs = 5.0
+    meter.add("ai_video", prompt[:80], secs)
     return dest
 
 

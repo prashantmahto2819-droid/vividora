@@ -109,3 +109,18 @@ restarting: `PUBLIC_URL`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `CLOUDFLARE_ACC
   claim, so the worker container needs no restart either.
 
 The other half of the page, `Vividora की API दें`, creates `vk_…` keys for your own software (described above).
+
+## Where the transcript is made, and the spending guard
+
+`TRANSCRIBE_ENGINE` (dashboard: API & Keys → “कहाँ चलाएँ · खर्च”) — `local` (this server's faster-whisper), `fal`
+(fal.ai Whisper), `runpod` (a RunPod **serverless** endpoint running the stock Faster Whisper worker), `auto` (recordings
+longer than `TRANSCRIBE_AUTO_MIN` minutes go to the cloud). `engine/cloudasr.py` cuts the audio into ~7-minute MP3s, sends
+them inline, joins the word times on one clock; the result has the local transcriber's shape, so vocabulary fixes, AI
+polish, auto-cut and captions work unchanged. A missing key, or a cloud failure, falls back to this server when it can
+transcribe itself (`TRANSCRIBE_LOCAL=1`). The CPU worker takes `transcribe` jobs itself whenever a cloud engine is on.
+
+`engine/meter.py` counts every paid call (`fal_whisper`, `runpod_whisper`, `ai_video`, `ai_image`, `elevenlabs`) with an
+estimated unit price; `spend.py` keeps the log (`spend_log`) and the month's total. `SPEND_CAP_USD` stops paid calls
+when the month's estimate reaches it (`meter.SpendCap`). Workers get the remaining budget with each claimed job and
+report what they spend (`POST /api/worker/spend`). `GET /api/spend` → totals (the log only for the operator admin).
+Nothing is kept running anywhere: fal.ai bills per call, RunPod serverless per second of a job.

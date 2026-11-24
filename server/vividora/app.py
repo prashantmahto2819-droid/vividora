@@ -138,6 +138,8 @@ def create_app() -> Starlette:
     db.init()
     from . import provkeys
     provkeys.init()          # service keys saved in the dashboard → os.environ / settings (before anything reads them)
+    from . import spend
+    spend.init()             # paid-service log + this process's meter
     ensure_admin()
     from .bootstrap import ensure_starter
     ensure_starter()

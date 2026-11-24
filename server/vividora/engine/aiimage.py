@@ -78,4 +78,9 @@ def generate(prompt: str, dest: Path, size: tuple[int, int] = (1280, 720), http=
         raise RuntimeError("provider did not return an image")
     dest = dest.with_suffix(".jpg" if data[:3] == b"\xff\xd8\xff" else ".png" if data[:4] == b"\x89PNG" else ".webp")
     dest.write_bytes(data)
+    try:
+        from . import meter
+        meter.add("ai_image", f"{prov}: {prompt[:70]}", 1)
+    except Exception:  # noqa: BLE001
+        pass
     return dest, prov
