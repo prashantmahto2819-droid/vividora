@@ -11,6 +11,8 @@ from __future__ import annotations
 HELP: dict[str, list[tuple[str, str]]] = {
     "PUBLIC_URL": [("भरा हो", "share links, webhook और social login के लिंक इसी पते से बनते हैं (जैसे https://studio.vividbrandify.com)"),
                    ("खाली हो", "लिंक में server का अंदरूनी पता आ सकता है — बाहर से नहीं खुलेंगे; Settings में चेतावनी दिखती है")],
+    "APP_WINDOWS_URL": [("भरा हो", "Home page (login से पहले) और “सीखें” page पर “Windows app download” बटन दिखता है"), ("खाली हो", "बटन नहीं दिखता; लोग फिर भी browser से “Install app” कर सकते हैं")],
+    "APP_ANDROID_URL": [("भरा हो", "“Android APK download” बटन दिखता है"), ("खाली हो", "बटन नहीं दिखता; phone पर “Add to Home screen” से app जैसा चलता है")],
     "GEMINI_API_KEY": [("डाली हो", "AI title / description / hashtags, script, Shorts के title, transcript की spelling सुधार, supporting clips को “खोलकर देखना”, visuals के सुझाव — सब चालू"),
                        ("न हो", "ये सब सादे नियमों से चलते हैं (कम समझदार); कोई काम रुकता नहीं")],
     "ANTHROPIC_API_KEY": [("डाली हो", "Gemini न हो तो वही काम Claude से (paid)। दोनों हों तो Gemini पहले"), ("न हो", "कुछ नहीं बदलता")],
@@ -94,6 +96,7 @@ SERVER_SWITCHES: list[tuple[str, str, str]] = [
     ("TTS_LOCAL=1", "यह server खुद AI आवाज़ (Kokoro / Parler) बना सकता है — CPU पर धीमा", "खाली हो तो local आवाज़ें GPU worker का इंतज़ार करती हैं; cloud आवाज़ें (fal / RunPod / ElevenLabs) फिर भी चलती हैं"),
     ("WITH_WHISPERX=1", "image में WhisperX install होता है (+2 GB) — तभी “शब्दों का सटीक समय” काम करता है", "docs/whisperx.md; गड़बड़ी पर यह line हटाकर दोबारा build"),
     ("WITH_OPENCLIP=1", "image में OpenCLIP install होता है (+2 GB, model +1.5 GB) — तभी “Clips को तस्वीर देखकर मिलाना” काम करता है", "docs/openclip.md"),
+    ("(GitHub) Apps workflow", "Windows .exe और Android .apk बनाता है — फिर API & Keys → “App की फ़ाइलें” में upload करें", "docs/apps.md"),
     ("PRICE_…", "खर्च के अंदाज़े की दरें (जैसे PRICE_FAL_WHISPER_MIN=0.004)", "असली bill से मिलाकर ठीक करें; नाम 💰 खर्च tab में लिखे हैं"),
 ]
 

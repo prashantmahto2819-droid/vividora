@@ -1,0 +1,7 @@
+{
+  "appId": "com.vividbrandify.vividora",
+  "appName": "Vividora",
+  "webDir": "www",
+  "server": { "url": "https://studio.vividbrandify.com", "cleartext": false, "allowNavigation": ["studio.vividbrandify.com"] },
+  "android": { "backgroundColor": "#141A24" }
+}

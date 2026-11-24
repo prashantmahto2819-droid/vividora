@@ -1,0 +1,17 @@
+{
+  "name": "vividora-desktop",
+  "version": "1.0.0",
+  "description": "Vividora Studio — desktop window for your Vividora site",
+  "main": "main.js",
+  "author": "Vividora",
+  "license": "UNLICENSED",
+  "scripts": { "start": "electron .", "dist": "electron-builder --win nsis --publish never" },
+  "devDependencies": { "electron": "33.2.1", "electron-builder": "25.1.8" },
+  "build": {
+    "appId": "com.vividbrandify.vividora",
+    "productName": "Vividora",
+    "files": ["main.js", "config.json", "icon.png"],
+    "win": { "target": "nsis", "icon": "icon.png", "artifactName": "Vividora-Setup.exe" },
+    "nsis": { "oneClick": true, "perMachine": false, "createDesktopShortcut": true, "shortcutName": "Vividora" }
+  }
+}

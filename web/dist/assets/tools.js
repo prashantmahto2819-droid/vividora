@@ -204,6 +204,20 @@ async function guideLoad() {
     <div class="tl-box" style="margin-bottom:.8rem"><h3 style="margin:0 0 .3rem">3 · Server की <code>.env</code> फ़ाइल वाले switch</h3><p class="small muted">ये dashboard में नहीं हैं — server पर <code>/srv/studio/vividora/.env</code> में line जोड़कर <code>docker compose --profile tunnel up -d --build</code> चलाना होता है।</p>${g.server.map((x) => `<div class="pk-row"><div class="pk-head"><code>${esc(x.name)}</code></div><p class="small" style="margin:.2rem 0">${esc(x.does)}</p><p class="small muted" style="margin:.1rem 0">${esc(x.note)}</p></div>`).join("")}</div>
     <div class="tl-box"><h3 style="margin:0 0 .5rem">4 · पहली बार जाँचने का क्रम</h3><ol style="margin:0;padding-left:1.2rem">${g.checklist.map((c) => `<li class="small" style="margin:.3rem 0">${esc(c)}</li>`).join("")}</ol></div>`;
 }
+// 📦 the built Windows installer / Android APK, kept on this server so the home page can offer them (docs/apps.md)
+async function appFilesLoad() {
+  const box = $("#app-files"); if (!box) return; let d = {}; try { d = await (await fetch("/api/app-links")).json(); } catch {}
+  const mb = (n) => (n / 1048576).toFixed(1) + " MB";
+  const row = (kind, label, ext) => { const here = (d[kind] || "").startsWith("/api/app-files"); return `<div class="pk-row"><div class="pk-head"><b>${label}</b>${here ? `<span class="pk-chip ok">✓ यहाँ रखी है · ${mb(d[kind + "_size"] || 0)}</span>` : d[kind] ? `<span class="pk-chip ok">link से</span>` : `<span class="pk-chip">नहीं रखी</span>`}${d[kind] ? `<a class="small" href="${esc(d[kind])}" target="_blank" rel="noopener">download जाँचें ↗</a>` : ""}</div>
+      <div class="pk-edit"><label class="btn small">${here ? "नई फ़ाइल से बदलें" : `${ext} फ़ाइल upload`}<input type="file" accept="${ext}" data-appup="${kind}" hidden></label>${here ? `<button class="btn small quiet" data-appdel="${kind}">हटाएँ</button>` : ""}<span class="small muted" data-appst="${kind}"></span></div></div>`; };
+  box.innerHTML = `<h3 style="margin:0 0 .3rem">📦 Windows / Android app की फ़ाइलें</h3><p class="small muted" style="margin:0 0 .5rem">GitHub पर “Apps” workflow से बनी <code>Vividora-Setup.exe</code> और <code>Vividora.apk</code> यहाँ रख दें — Home page (login से पहले) पर download के बटन अपने-आप आ जाते हैं। तरीका: <code>docs/apps.md</code>।</p>${row("windows", "🪟 Windows app", ".exe")}${row("android", "🤖 Android app", ".apk")}`;
+  box.querySelectorAll("[data-appup]").forEach((inp) => (inp.onchange = () => { const f = inp.files[0]; if (!f) return; const kind = inp.dataset.appup; const st = box.querySelector(`[data-appst="${kind}"]`);
+    const x = new XMLHttpRequest(); x.open("PUT", `/api/app-files/${kind}?filename=${encodeURIComponent(f.name)}`); x.setRequestHeader("authorization", "Bearer " + ctx.S.token); x.setRequestHeader("content-type", "application/octet-stream");
+    x.upload.onprogress = (e) => { if (e.lengthComputable) st.textContent = `upload ${Math.round(e.loaded / e.total * 100)}%`; };
+    x.onload = () => { if (x.status < 300) { ctx.toast("✅ app की फ़ाइल रख दी — Home page पर बटन आ गया"); appFilesLoad(); } else { let m = "upload नहीं हुआ"; try { m = JSON.parse(x.responseText).error || m; } catch {} st.textContent = m; ctx.toast(m); } };
+    x.onerror = () => { st.textContent = "upload टूट गया"; }; x.send(f); }));
+  box.querySelectorAll("[data-appdel]").forEach((b) => (b.onclick = async () => { if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "पक्का? (दोबारा दबाएँ)"; return; } try { await ctx.api("DELETE", "/app-files/" + b.dataset.appdel); appFilesLoad(); } catch (e) { ctx.toast(e.message); } }));
+}
 // outside-service keys (server: provkeys.py) — saved encrypted, used at once, no server restart
 async function provLoad() {
   const box = $("#pk-list"); if (!box) return;
@@ -220,6 +234,7 @@ async function provLoad() {
         ${can ? `<div class="pk-edit">${x.choices ? `<select>${Object.entries(x.choices).map(([k, l]) => `<option value="${esc(k)}" ${(x.shown || "local") === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`
           : `<input type="${x.secret ? "password" : x.number ? "number" : "text"}" ${x.number ? `min="${x.number[0]}" max="${x.number[1]}" step="any"` : ""} autocomplete="off" spellcheck="false" placeholder="${esc(x.placeholder || (x.number ? "" : x.set ? "नई key चिपकाएँ (बदलने के लिए)" : "key यहाँ चिपकाएँ"))}" value="${x.number && x.shown ? esc(x.shown) : ""}">`}<button class="btn small primary" data-pksave>Save</button>${x.source === "dashboard" ? `<button class="btn small quiet" data-pkdel title="यहाँ डाली key हटाएँ (.env वाली, अगर है, वापस चलने लगेगी)">हटाएँ</button>` : ""}</div>` : ""}
       </div>`).join("")}</div>`; }).join("");
+  if (can) { const ab = document.createElement("div"); ab.className = "tl-box"; ab.style.marginBottom = ".8rem"; ab.id = "app-files"; box.appendChild(ab); appFilesLoad(); }
   if (!can) return;
   box.querySelectorAll("[data-pk]").forEach((row) => { const env = row.dataset.pk; const inp = row.querySelector("input,select"); const sv = row.querySelector("[data-pksave]"); const dl = row.querySelector("[data-pkdel]");
     const save = async () => { const v = inp.value.trim(); if (!v) return ctx.toast("पहले value लिखें / चुनें"); sv.disabled = true;

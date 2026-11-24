@@ -217,7 +217,9 @@ function learnFab() {
 function render() {
   const app = $("#app");
   closeMenu(); learnFab();
-  if (!S.token) { ED.unmount(); TH.unmount(); VO.unmount(); app.dataset.mode = ""; app.innerHTML = loginView(); bindLogin(); return; }
+  if (!S.token) { ED.unmount(); TH.unmount(); VO.unmount(); app.dataset.mode = "";
+    if (showLanding()) { app.innerHTML = landingView(); bindLanding(); return; }
+    app.innerHTML = loginView(); bindLogin(); return; }
   if (S.route.kind === "signup" || S.route.kind === "forgot" || S.route.kind === "reset") { go("/"); return; }
   const r = S.route;
   if (S.user?.role !== "viewer") VO.mount({ api, toast, reload: () => { $("#app").dataset.mode = ""; load().then(render); } });
@@ -270,7 +272,9 @@ function render() {
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, dashboard: bindDashboard, copilot: bindCopilot, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts, voicestudio: () => TL.voiceBind({ S, api, toast, go }), image3d: () => TL.glbBind({ S, api, toast, go }), api: () => TL.apiBind({ S, api, toast, go }), help: () => LRN.learnPageBind(), documentary: () => TL.docBind({ S, api, toast, go }) };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts, voicestudio: () => TL.voiceBind({ S, api, toast, go }), image3d: () => TL.glbBind({ S, api, toast, go }), api: () => TL.apiBind({ S, api, toast, go }), help: () => { LRN.learnPageBind(); fetch("/api/app-links").then((r) => r.json()).then((d) => { const b = $("#help-apps"); if (!b) return;
+      b.innerHTML = `<section class="card" style="margin-top:1.2rem"><div class="card-h"><h2>📱 App की तरह चलाएँ</h2></div><p class="small muted">Computer (Chrome / Edge): address bar के दाएँ कोने में ⊕ “Install”। Android: menu ⋮ → “Add to Home screen”। iPhone (Safari): Share → “Add to Home Screen”।</p>
+        <div class="row" style="flex-wrap:wrap;gap:.5rem">${d.windows ? `<a class="btn small" href="${esc(d.windows)}" target="_blank" rel="noopener">🪟 Windows app download (.exe)</a>` : ""}${d.android ? `<a class="btn small" href="${esc(d.android)}" target="_blank" rel="noopener">🤖 Android app download (.apk)</a>` : ""}</div></section>`; }).catch(() => {}); }, documentary: () => TL.docBind({ S, api, toast, go }) };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
@@ -482,6 +486,46 @@ function bindHome() {
     else api("GET", "/storage").then((d) => { S.storageCache = { at: Date.now(), d }; if (document.body.contains(hs)) paint(d); }).catch((e) => { hs.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; });
   }
 }
+// ---------- public home page (before login) ----------
+let installEvt = null;   // Chrome / Edge: "Install app" offered by the browser
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; const b = document.getElementById("lp-install"); if (b) b.hidden = false; });
+function showLanding() { let skip = false; try { skip = sessionStorage.getItem("vividora_skip_home") === "1"; } catch {} return !skip && ["", "#", "#/", "#/welcome"].includes(location.hash.split("?")[0]); }
+const LP_FEATURES = [["🎙", "Record + teleprompter", "Browser से record करें — script सामने चलती रहती है, धीमी आवाज़ अपने-आप ऊँची।"],
+  ["✂️", "अपने-आप editing", "चुप्पी, अं-आं और दोबारा बोली lines कटती हैं; हर कट आप देखकर मंज़ूर करते हैं।"],
+  ["💬", "हिंदी captions", "शब्द-दर-शब्द karaoke captions; या अपनी SRT फ़ाइल दें।"],
+  ["🎬", "Timeline editor", "Text, stickers, effects, transitions, रंग, cutout, music — सब एक screen पर।"],
+  ["🎵", "Montage / Reels", "Clips + गाना → beat पर कटा reel; ऊपर से अपनी आवाज़ में शायरी या बात।"],
+  ["🎙️", "Podcast", "बोलने वाले पर अपने-आप close-up, दो कैमरे sync, supporting clips सही जगह।"],
+  ["🗣", "AI आवाज़", "Script से voice-over — तैयार आवाज़ें या आपकी अपनी आवाज़ का clone।"],
+  ["📱", "Shorts + thumbnail", "लंबी वीडियो से Shorts, और एक click में thumbnail।"],
+  ["🚀", "Publish", "YouTube, Instagram, Facebook — आपकी मंज़ूरी के बाद, तय समय पर।"]];
+function landingView() {
+  return `<div class="lp"><header class="lp-top"><div class="brand"><i></i>Vividora</div><span class="grow"></span><a class="btn small" href="#/" data-lp-login>Login</a></header>
+    <section class="lp-hero"><h1>आपका अपना AI video studio</h1><p>Record करें, upload करें — कट, captions, music, Shorts और thumbnail Vividora बनाता है। हर चीज़ आप बदल सकते हैं, और आपकी मंज़ूरी के बिना कुछ publish नहीं होता।</p>
+      <div class="lp-cta"><a class="btn primary" href="#/" data-lp-login>Login करके शुरू करें</a><a class="btn" href="#/signup" data-lp-signup hidden>नया account बनाएँ</a></div></section>
+    <section class="lp-sec"><h2>क्या-क्या कर सकते हैं</h2><div class="lp-grid">${LP_FEATURES.map(([i, t, d]) => `<div class="lp-card"><span class="lp-ico">${i}</span><b>${t}</b><p>${d}</p></div>`).join("")}</div></section>
+    <section class="lp-sec"><h2>3 कदम में वीडियो</h2><ol class="lp-steps"><li><b>Record या Upload</b> — phone या computer से।</li><li><b>जाँचें</b> — कट, captions और music देखें; जो बदलना हो बदलें।</li><li><b>Export / Publish</b> — YouTube, Reels, Shorts के लिए सही आकार में।</li></ol></section>
+    <section class="lp-sec" id="lp-apps"><h2>App की तरह चलाएँ</h2><p class="lp-muted">Vividora browser में चलता है — install करने पर अलग खिड़की और icon के साथ app जैसा खुलता है। Login के बाद इस्तेमाल होता है।</p>
+      <div class="lp-cta"><button class="btn primary" id="lp-install" ${installEvt ? "" : "hidden"}>📲 इस device पर install करें</button><a class="btn" id="lp-win" hidden target="_blank" rel="noopener">🪟 Windows app download (.exe)</a><a class="btn" id="lp-apk" hidden target="_blank" rel="noopener">🤖 Android app download (.apk)</a></div>
+      <div class="lp-how"><div><b>Windows / Mac (Chrome या Edge)</b><p>Address bar के दाएँ कोने में ⊕ “Install” दबाएँ, या menu ⋮ → “Install Vividora”।</p></div><div><b>Android (Chrome)</b><p>Menu ⋮ → “Add to Home screen” / “Install app”।</p></div><div><b>iPhone (Safari)</b><p>Share बटन → “Add to Home Screen”।</p></div></div></section>
+    <footer class="lp-foot">Login के बाद हर page पर ऊपर कोने का <b>ⓘ</b> उसी page का तरीका बताता है, और “सीखें” में सारे tutorials हैं।</footer></div>`;
+}
+function bindLanding() {
+  if (!$("#lp-css")) { const st = document.createElement("style"); st.id = "lp-css"; st.textContent = `.lp{max-width:1080px;margin:0 auto;padding:1rem max(16px,env(safe-area-inset-right,0px)) 3rem max(16px,env(safe-area-inset-left,0px))}.lp-top{display:flex;align-items:center;gap:.6rem;padding:.4rem 0 1rem}.lp .grow{flex:1}
+.lp-hero{padding:2.2rem 0 1.6rem}.lp-hero h1{font-size:clamp(1.8rem,5vw,3rem);line-height:1.15;margin:0 0 .8rem;text-wrap:balance}.lp-hero p{font-size:1.05rem;max-width:62ch;opacity:.85;margin:0 0 1.2rem;line-height:1.6}
+.lp-cta{display:flex;flex-wrap:wrap;gap:.6rem}.lp-sec{padding:1.6rem 0;border-top:1px solid var(--line)}.lp-sec h2{font-size:1.25rem;margin:0 0 .9rem}
+.lp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:.7rem}.lp-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.9rem}.lp-card p{margin:.3rem 0 0;font-size:.88rem;opacity:.8;line-height:1.5}.lp-ico{font-size:1.4rem;display:block;margin-bottom:.3rem}
+.lp-steps{margin:0;padding-left:1.3rem}.lp-steps li{margin:.5rem 0;line-height:1.5}.lp-muted{opacity:.8;max-width:65ch;line-height:1.55;margin:0 0 .9rem}
+.lp-how{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.7rem;margin-top:1rem}.lp-how>div{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem}.lp-how p{margin:.25rem 0 0;font-size:.85rem;opacity:.8;line-height:1.5}
+.lp [hidden]{display:none!important}
+.lp-foot{border-top:1px solid var(--line);padding-top:1rem;font-size:.85rem;opacity:.75}`; document.head.appendChild(st); }
+  const toLogin = (e, hash) => { e.preventDefault(); try { sessionStorage.setItem("vividora_skip_home", "1"); } catch {} if (location.hash === hash || (hash === "#/" && ["", "#", "#/"].includes(location.hash))) render(); else location.hash = hash; };
+  document.querySelectorAll("[data-lp-login]").forEach((a) => (a.onclick = (e) => toLogin(e, "#/")));
+  const su = $("[data-lp-signup]"); if (su) su.onclick = (e) => toLogin(e, "#/signup");
+  const ib = $("#lp-install"); if (ib) ib.onclick = async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch {} installEvt = null; ib.hidden = true; };
+  fetch("/api/app-links").then((r) => r.json()).then((d) => { const w = $("#lp-win"), a = $("#lp-apk"); if (w && d.windows) { w.href = d.windows; w.hidden = false; } if (a && d.android) { a.href = d.android; a.hidden = false; } }).catch(() => {});
+  fetch("/api/health").then((r) => r.json()).then((d) => { if (d.saas && su) su.hidden = false; }).catch(() => {});
+}
 function loginView() {
   const q = new URLSearchParams((location.hash.split("?")[1] || "")); const signup = /^#\/signup/.test(location.hash); const invite = q.get("invite") || "";
   if (signup) return `<div class="login"><form id="signup"><div class="brand"><i></i>Vividora</div><p class="muted">${invite ? "आपको इस studio में बुलाया गया है — अपना account बनाएँ।" : "नया account — 14 दिन का free trial, card नहीं चाहिए।"}</p>
@@ -505,7 +549,7 @@ function loginView() {
     <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
     <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Reset link भेजें</button>
     <p class="small muted" style="margin-top:.8rem;text-align:center"><a href="#/">← Login पर जाएँ</a></p></form></div>`;
-  return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका AI video studio — login करें और बनाना शुरू करें।</p>
+  return `<div class="login"><form id="login"><div class="brand"><i></i>Vividora</div><p class="muted">आपका AI video studio — login करें और बनाना शुरू करें। <a href="#/" id="to-home" class="small">← Home page</a></p>
     <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required placeholder="you@example.com"></div>
     <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
     <div id="login-err"></div><button class="btn primary" style="width:100%;justify-content:center">Login करें</button>
@@ -513,6 +557,7 @@ function loginView() {
     <p class="small muted" id="signup-link" style="margin-top:.4rem;text-align:center" hidden>नया हैं? <a href="#/signup"><b>Free trial शुरू करें →</b></a></p></form></div>`;
 }
 function bindLogin() {
+  const th = $("#to-home"); if (th) th.onclick = (e) => { e.preventDefault(); try { sessionStorage.removeItem("vividora_skip_home"); } catch {} if (["", "#", "#/"].includes(location.hash)) render(); else location.hash = "#/"; };
   // password was right but the account has 2-step verification: ask for the authenticator / recovery code
   const ask2fa = (form, r) => { const ch = r.challenge;
     form.innerHTML = `<div class="brand"><i></i>Vividora</div><p class="muted">🔐 2-step verification — authenticator app का 6 अंकों का code लिखें।<br><span class="small">phone नहीं है? 8 में से कोई एक recovery code (xxxx-xxxx) लिखें।</span></p>
@@ -1563,6 +1608,7 @@ function helpView() {
     ["tv", "Channels & Brand", "#/settings", "कई channels, brand kit और connections।"], ["gear", "Settings", "#/account", "Password, users और storage की सफ़ाई।"]];
   return `<div class="pghead"><div><h1>📚 सीखें</h1><p class="muted small">हर page और editor के हर tab का तरीका — छोटे कदमों में। किसी भी page पर ऊपर कोने का <b>ⓘ</b> दबाएँ तो उसी page का तरीका खुलता है।</p></div></div>
     ${LRN.learnPageHtml()}
+    <div id="help-apps"></div>
     <h2 style="margin:1.6rem 0 .6rem;font-size:1rem;opacity:.8">सारे modules</h2>
     <div class="helpgrid">${mods.map(([i, t, h, d]) => `<a class="hcard" href="${h}">${ic(i)}<b>${t}</b><span class="small muted">${d}</span></a>`).join("")}</div>
     <div class="hcols2"><section class="card"><div class="card-h"><h2>वीडियो कैसे बनता है</h2></div><ol class="steps"><li><b>Record / Upload</b> — Autopilot चालू रखें</li><li><b>जाँच</b> — preview, आवाज़ साफ़, चेहरा tracking</li><li><b>Transcript</b> — हिंदी शब्द-दर-शब्द timing</li><li><b>कट</b> — चुप्पी, अं-आं, दोबारा बोला हुआ</li><li><b>Render</b> — captions, zoom, music, Shorts + 3 thumbnails</li><li><b>मंज़ूरी</b> → <b>Publish</b> (★ thumbnail के साथ)</li></ol></section>

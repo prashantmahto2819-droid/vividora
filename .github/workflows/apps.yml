@@ -1,0 +1,85 @@
+# Builds the Windows installer (.exe) and the Android app (.apk) — both are windows onto your Vividora site.
+# Run it by hand: GitHub → Actions → "Apps" → Run workflow. The two files appear under "Artifacts" of that run
+# (and, when the repository is public, in the release "apps-latest"). See docs/apps.md.
+name: Apps
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: "Your Vividora address"
+        default: "https://studio.vividbrandify.com"
+        required: true
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults: { run: { working-directory: apps/windows } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Site address
+        shell: bash
+        run: echo "{ \"url\": \"${{ inputs.site }}\" }" > config.json
+      - run: npm install --no-audit --no-fund
+      - run: npx electron-builder --win nsis --publish never
+      - uses: actions/upload-artifact@v4
+        with: { name: Vividora-Windows, path: apps/windows/dist/Vividora-Setup.exe, if-no-files-found: error }
+  android:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: apps/android } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - name: Site address
+        run: |
+          HOST=$(echo "${{ inputs.site }}" | sed -E 's#^https?://##; s#/.*$##')
+          node -e "const f='capacitor.config.json',c=require('./'+f);c.server.url='${{ inputs.site }}';c.server.allowNavigation=['$HOST'];require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+      - run: npm install --no-audit --no-fund
+      - run: npx cap add android
+      - name: Camera, microphone, icon
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' $M
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do for n in ic_launcher ic_launcher_round ic_launcher_foreground; do cp ../../web/dist/icon-192.png android/app/src/main/res/mipmap-$d/$n.png 2>/dev/null || true; done; done
+          npx cap sync android
+      - name: Signing key (optional secrets ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD keep updates installable over the old app)
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KSP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS" ]; then echo "$KS" | base64 -d > "$HOME/vividora.jks"; echo "SIGN=1" >> $GITHUB_ENV; fi
+      - name: Build
+        env:
+          KSP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          cd android && chmod +x gradlew
+          if [ "$SIGN" = "1" ]; then
+            ./gradlew assembleRelease --no-daemon
+            BT=$(ls -d $ANDROID_HOME/build-tools/* | tail -1)
+            $BT/zipalign -f 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+            $BT/apksigner sign --ks "$HOME/vividora.jks" --ks-pass "pass:$KSP" --out ../Vividora.apk aligned.apk
+          else
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk ../Vividora.apk
+          fi
+      - uses: actions/upload-artifact@v4
+        with: { name: Vividora-Android, path: apps/android/Vividora.apk, if-no-files-found: error }
+  release:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apps-latest
+          name: Vividora apps
+          body: "Windows installer and Android app for ${{ inputs.site }}. Built by the Apps workflow."
+          files: |
+            out/Vividora-Setup.exe
+            out/Vividora.apk
