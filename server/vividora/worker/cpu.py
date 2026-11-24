@@ -701,6 +701,14 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             audio = _fetch(client, assets, "audio_asr", tmp)
             pl = job["payload"]
             prog = _progress(client, job["id"])
+            if pl.get("align_only"):
+                # a transcript that came from a subtitle file: only its word times are refined (WhisperX, when installed)
+                from ..engine import align
+                tr0 = project.get("transcript") or {"segments": []}
+                prog(0.3, "SRT के शब्दों का समय आवाज़ से मिला रहा हूँ")
+                tr1, n_al = align.refine(tr0, audio, pl.get("language", "hi"))
+                log.info("srt alignment: %s words moved", n_al)
+                return {"transcript": {**tr1, "fixes_applied": tr0.get("fixes_applied", 0)}}
             rng = pl.get("range")
             window = (float(rng[0]), float(rng[1])) if isinstance(rng, (list, tuple)) and len(rng) == 2 else None
             from ..engine import cloudasr, meter

@@ -1287,6 +1287,10 @@ function coverPos(fx, item) { const sa = (item?.meta?.width || 16) / (item?.meta
 // who speaks at source second t → a small name tag for the transcript list ("" when there is no speaker plan)
 function spkTag(t) { const P = E.rs.effects.speaker; if (!P || !Array.isArray(P.shots) || !P.shots.length) return ""; let who = null; for (const sh of P.shots) { if (sh.start > t) break; who = sh.who; } if (who == null) return "";
   const col = (Array.isArray(P.caption_colors) && P.caption_colors[who]) || SPK_COLORS[who % 3]; return `<span class="spktag" title="${E.ctx.esc(spkName(P, who))}" style="border-color:${col};color:${col}">${E.ctx.esc(spkName(P, who).replace(" व्यक्ति", ""))}</span>`; }
+// the "my own voice" preset needs a sample of the creator's voice in the Library (name / tag "myvoice")
+function myVoiceBox(dis, id) { const { esc } = E.ctx; const has = (E.lib || []).find((x) => /myvoice|my voice|मेरी आवाज़/i.test(x.name + " " + (x.tags || "")));
+  return `<div class="box" style="margin:.4rem 0"><b class="small">🎙 आपकी आवाज़ का नमूना</b><p class="small muted">${has ? `अभी का नमूना: <b>${esc(has.name)}</b>। नया डालेंगे तो वही इस्तेमाल होगा।` : "अभी कोई नमूना नहीं है।"} अपनी साफ़ आवाज़ की 10–20 सेकंड की recording दें (शोर और music के बिना)। सिर्फ़ अपनी ही आवाज़ डालें।</p><label class="btn small ${dis ? "disabled" : ""}">＋ नमूना upload<input type="file" id="${id}" accept=".mp3,.wav,.m4a,.ogg" hidden ${dis}></label><div id="lib-progress"></div></div>`; }
+async function myVoiceUpload(inp) { const f = inp.files[0]; if (!f) return; const ext = (f.name.match(/\.[a-z0-9]+$/i) || [".m4a"])[0]; const d = await libUpload("sfx", new File([f], "myvoice" + ext, { type: f.type })); if (d?.id) E.ctx.toast("आपकी आवाज़ का नमूना जुड़ गया ✓ — अब आवाज़ बनाएँ"); renderPanel(); }
 const SPK_COLORS = ["#FFFFFF", "#FFD400", "#7CE0FF"];
 // podcast captions: the text colour of whoever speaks at source second t ("" = the style's own colour)
 function spkColorAt(t) { const P = E.rs.effects.speaker; if (!P || P.enabled === false || !Array.isArray(P.caption_colors) || !Array.isArray(P.shots)) return ""; let who = null; for (const sh of P.shots) { if (sh.start > t) break; who = sh.who; } return (who != null && P.caption_colors[who]) || ""; }
@@ -2432,6 +2436,7 @@ function s3Html(dis) {
     <div class="box"><b>🎙 Voice-over (TTS)</b>
       ${field("Text (max 4000 अक्षर)", `<textarea id="vo-text" rows="5" maxlength="4000" placeholder="जो बुलवाना है यहाँ लिखें…" ${dis}>${esc(vo.text)}</textarea>`)}
       <div class="irow">${field("आवाज़", `<select id="vo-voice" ${dis}>${vOpts(vo.voice)}</select>`)}${field(`Speed <b id="vo-sp-l">${(+vo.speed).toFixed(2)}×</b>`, `<input type="range" id="vo-speed" min="0.6" max="1.6" step="0.05" value="${vo.speed}" ${dis}>`)}</div>
+      ${vo.voice === "fal_cb_myvoice" ? myVoiceBox(dis, "vo-myvoice") : ""}
       <button class="btn primary" id="vo-go" ${dl ? "disabled" : ""}>🔊 आवाज़ बनाओ और timeline में लगाओ</button>
       <div class="small ${vo.err ? "err" : "muted"}" id="vo-st" style="margin-top:.4rem;${vo.err ? "color:#ff6b5e" : ""}">${esc(vo.msg)}</div>
       <p class="small muted">आवाज़ audio lane पर लगती है; Audio tab → Voice-over में सहेजी रहती है।</p></div>`;
@@ -2446,7 +2451,8 @@ function s3Bind(panel) {
   on("#s3-voice", "onchange", (e) => { s.voice = e.target.value; });
   on("#s3-sec", "onchange", (e) => { s.seconds = clamp(+e.target.value || 6, 2, 30); e.target.value = s.seconds; });
   on("#vo-text", "oninput", (e) => { vo.text = e.target.value; });
-  on("#vo-voice", "onchange", (e) => { vo.voice = e.target.value; });
+  on("#vo-voice", "onchange", (e) => { vo.voice = e.target.value; renderPanel(); });
+  { const mv2 = $("#vo-myvoice", panel); if (mv2) mv2.onchange = () => myVoiceUpload(mv2); }
   on("#vo-speed", "oninput", (e) => { vo.speed = +e.target.value; const l = $("#vo-sp-l", panel); if (l) l.textContent = vo.speed.toFixed(2) + "×"; });
   on("#s3-glb", "onchange", (e) => s3Import(e.target));
   on("#s3-go", "onclick", s3Go);
@@ -2550,7 +2556,7 @@ function dubBox(dis, panel) {
     dubLinesBind(box, tracks);
     ["#dub-mode", "#dub-lang"].forEach((s) => { const el = q(s); if (el) el.onchange = () => { keep(); st.voice = ""; renderPanel(); }; });
     const voiceEl = q("#dub-voice"); if (voiceEl) voiceEl.onchange = () => { keep(); st.el_settings = null; renderPanel(); };
-    const mv = q("#dub-myvoice"); if (mv) mv.onchange = async () => { const f = mv.files[0]; if (!f) return; keep(); const ext = (f.name.match(/\.[a-z0-9]+$/i) || [".m4a"])[0]; const d = await libUpload("sfx", new File([f], "myvoice" + ext, { type: f.type })); if (d?.id) E.ctx.toast("आपकी आवाज़ का नमूना जुड़ गया ✓ — अब voice-over बनाएँ"); renderPanel(); };
+    const mv = q("#dub-myvoice"); if (mv) mv.onchange = () => { keep(); myVoiceUpload(mv); };
     ["#dub-script", "#dub-desc"].forEach((s) => { const el = q(s); if (el) el.oninput = el.onchange = keep; });
     ["#el-stability", "#el-similarity", "#el-style"].forEach((s) => { const el = q(s); if (el) el.oninput = () => { keep(); const ids = { "#el-stability": "el-stab-v", "#el-similarity": "el-sim-v", "#el-style": "el-style-v" }; const lbl = q("#" + ids[s]); if (lbl) lbl.textContent = (+el.value).toFixed(2); }; });
     const elBoost = q("#el-boost"); if (elBoost) elBoost.onchange = keep;
@@ -2631,7 +2637,7 @@ function dubBox(dis, panel) {
     <div class="irow">${field("क्या बनाना है", `<select id="dub-mode" ${dis}>${(E.montage ? ["script"] : ["revoice", "dub", "script"]).map((m) => `<option value="${m}" ${st.mode === m ? "selected" : ""}>${esc(D.modes[m] || m)}</option>`).join("")}</select>`)}
       ${field("भाषा", st.mode === "revoice" ? `<select disabled><option>${esc(D.langs[lang] || lang)} (transcript जैसी)</option></select>` : `<select id="dub-lang" ${dis}>${Object.entries(D.langs).map(([k, l]) => `<option value="${k}" ${st.lang === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}</div>
     ${field("आवाज़", `<select id="dub-voice" ${dis}>${voices.map((v) => `<option value="${v.id}" ${st.voice === v.id ? "selected" : ""}>${esc(v.label)}${v.cloud ? " ☁️" : ""}</option>`).join("")}</select>`)}
-    ${st.voice === "fal_cb_myvoice" ? (() => { const has = (E.lib || []).find((x) => /myvoice|my voice|मेरी आवाज़/i.test(x.name + " " + (x.tags || ""))); return `<div class="box" style="margin:.4rem 0"><b class="small">🎙 आपकी आवाज़ का नमूना</b><p class="small muted">${has ? `अभी का नमूना: <b>${esc(has.name)}</b>। नया डालेंगे तो वही इस्तेमाल होगा।` : "अभी कोई नमूना नहीं है।"} अपनी साफ़ आवाज़ की 10–20 सेकंड की recording दें (शोर और music के बिना)। सिर्फ़ अपनी ही आवाज़ डालें।</p><label class="btn small ${dis ? "disabled" : ""}">＋ नमूना upload<input type="file" id="dub-myvoice" accept=".mp3,.wav,.m4a,.ogg" hidden ${dis}></label><div id="lib-progress"></div></div>`; })() : ""}
+    ${st.voice === "fal_cb_myvoice" ? myVoiceBox(dis, "dub-myvoice") : ""}
     ${(() => { const sv = voices.find((v) => v.id === st.voice) || voices[0] || {}; if (sv.engine !== "elevenlabs") return ""; const es = st.el_settings || sv.elevenlabs_settings || {}; return `<div class="box" id="dub-el-controls" style="margin:6px 0;padding:8px 10px;border-left:3px solid var(--accent,#7c3aed)"><b class="small">⚡ ElevenLabs voice controls</b>
       <div class="irow">${field(`Stability <b id="el-stab-v">${(+(es.stability ?? 0.5)).toFixed(2)}</b>`, `<input type="range" id="el-stability" min="0" max="1" step="0.05" value="${es.stability ?? 0.5}" ${dis}>`)}</div>
       <div class="irow">${field(`Clarity + Similarity <b id="el-sim-v">${(+(es.similarity_boost ?? 0.75)).toFixed(2)}</b>`, `<input type="range" id="el-similarity" min="0" max="1" step="0.05" value="${es.similarity_boost ?? 0.75}" ${dis}>`)}</div>

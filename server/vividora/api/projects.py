@@ -714,6 +714,11 @@ async def transcript_import(request: Request, user: dict):
         if busy or p.get("status") in ("transcribing", "cutting"):
             service.set_status(c, p["id"], "review_cuts", changes["status_note"])
         service.log(c, user["workspace_id"], "transcript.import", user_id=user["id"], project_id=p["id"], detail={"words": nw})
+        import os
+        if (os.getenv("WORD_ALIGN") or "").strip().lower() == "whisperx" and service.asset_of(p["id"], "audio_asr"):
+            # a subtitle file has no word times: let WhisperX place every word (the worker leaves it as it is when not installed)
+            from .. import queue
+            queue.enqueue(c, p["id"], "transcribe", {"align_only": True, "later": True, "language": lang})
     return ok({"segments": len(tr["segments"]), "words": nw, "when": "now"})
 
 

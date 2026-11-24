@@ -21,7 +21,9 @@ def wav_bytes(seconds: float, sr: int = 44100) -> bytes:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(sr)
-        w.writeframes(b"\x10\x00\x10\x00" * int(seconds * sr))
+        n, half = int(seconds * sr), sr // 440             # a 220 Hz square tone (a silent file would be trimmed away as "no voice")
+        hi, lo = (6000).to_bytes(2, "little", signed=True) * 2, (-6000).to_bytes(2, "little", signed=True) * 2
+        w.writeframes(b"".join(hi if (i // half) % 2 == 0 else lo for i in range(n)))
     return b.getvalue()
 
 
