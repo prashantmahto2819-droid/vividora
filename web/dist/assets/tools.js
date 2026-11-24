@@ -68,9 +68,10 @@ export function voiceBind(c) {
     else if (noOmni) st("⚠ इस server के VoiceStudio में हिंदी बोलने वाला model (omnivoice) load नहीं है — ऊपर “आवाज़ कहाँ से बने” में दूसरी आवाज़ चुनें।", true);
     else if ($("#vs-st")?.classList.contains("err")) st("");
     return !bad; };
-  ctx.api("GET", "/v1/voices").then((r) => { const vs = (r.voices || []).filter((v) => v.engine !== "voicestudio"); const grp = { fal: "fal.ai (cloud GPU — तेज़, थोड़ा खर्च)", runpod: "RunPod (cloud GPU)", elevenlabs: "ElevenLabs", kokoro: "इसी server पर — Kokoro (मुफ़्त)", parler: "इसी server पर — Parler (मुफ़्त, धीमा)" };
+  ctx.api("GET", "/v1/voices").then((r) => { const vs = (r.voices || []).filter((v) => v.engine !== "voicestudio" && v.ready !== false);   // only what this server can really make const grp = { fal: "fal.ai (cloud GPU — तेज़, थोड़ा खर्च)", runpod: "RunPod (cloud GPU)", elevenlabs: "ElevenLabs", kokoro: "इसी server पर — Kokoro (मुफ़्त)", parler: "इसी server पर — Parler (मुफ़्त, धीमा)" };
     const by = {}; vs.forEach((v) => (by[v.engine] = by[v.engine] || []).push(v));
     $("#vs-src").innerHTML += Object.keys(by).map((e) => `<optgroup label="${esc(grp[e] || e)}">${by[e].map((v) => `<option value="${esc(v.id)}" data-lang="${esc(v.lang || "")}">${esc(v.name || v.id)}</option>`).join("")}</optgroup>`).join("");
+    if (!vs.length) $("#vs-src").closest(".field").querySelector("label").textContent = "आवाज़ कहाँ से बने (अभी सिर्फ़ VoiceStudio उपलब्ध है)";
     $("#vs-src-tip").innerHTML = by.fal || by.runpod ? "जल्दी चाहिए तो fal.ai / RunPod की आवाज़ चुनें — कुछ सेकंड में बनती है।" : `और तेज़ आवाज़ें चाहिए? <a href="#/api">API &amp; Keys</a> में fal.ai की key डालें — यहाँ Chatterbox हिन्दी और “मेरी अपनी आवाज़” आ जाएँगी।`; }).catch(() => {});
   $("#vs-src").onchange = () => { const o = $("#vs-src").selectedOptions[0]; if (o?.dataset.lang && [...$("#vs-lang").options].some((x) => x.value === o.dataset.lang)) $("#vs-lang").value = o.dataset.lang; guard(); };
   $("#vs-lang").onchange = guard;

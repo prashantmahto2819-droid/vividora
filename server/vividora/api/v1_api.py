@@ -36,8 +36,9 @@ async def me(request: Request, user: dict):
 @require("viewer")
 async def voices(request: Request, user: dict):
     from ..engine import tts
-    out = [{"id": v.get("id"), "name": v.get("name") or v.get("label"), "lang": v.get("lang"), "engine": v.get("engine"), "gender": v.get("gender")}
-           for v in tts.available_voices()]
+    # ready = this server can make it right now (a local voice whose packages are not installed here is listed but not ready)
+    out = [{"id": v.get("id"), "name": v.get("name") or v.get("label"), "lang": v.get("lang"), "engine": v.get("engine"), "gender": v.get("gender"),
+            "ready": tts.engine_ready(v.get("engine") or "")} for v in tts.available_voices()]
     return ok({"voices": out})
 
 

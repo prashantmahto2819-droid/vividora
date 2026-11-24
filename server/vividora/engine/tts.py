@@ -562,6 +562,26 @@ def backend_for(engine: str):
     return ParlerBackend()
 
 
+_READY: dict[str, tuple[float, bool]] = {}
+
+
+def engine_ready(engine: str) -> bool:
+    """Can THIS process make a voice with this engine right now (packages installed / key set / service up)?
+    Remembered for a minute: the voice lists ask for every preset."""
+    import time
+    now = time.time()
+    hit = _READY.get(engine)
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    try:
+        check_ready(engine)
+        ok_ = True
+    except Exception:  # noqa: BLE001 — missing package, key or service: simply not usable here
+        ok_ = False
+    _READY[engine] = (now, ok_)
+    return ok_
+
+
 def check_ready(engine: str) -> None:
     """Fail early (before any download/synthesis) with a clear Hindi message."""
     if not shutil.which("ffmpeg"):
