@@ -239,6 +239,10 @@ def create_app() -> Starlette:
                             hs.append((b"cache-control", b"public, max-age=31536000, immutable"))
                         else:
                             hs.append((b"cache-control", b"no-cache"))
+                            # a CDN in front (Cloudflare) must not keep its own copy of code or pages either
+                            hs = [(k, v) for k, v in hs if k.lower() not in (b"cdn-cache-control", b"cloudflare-cdn-cache-control")]
+                            hs.append((b"cdn-cache-control", b"no-store"))
+                            hs.append((b"cloudflare-cdn-cache-control", b"no-store"))
                     msg = {**msg, "headers": hs}
                 await send(msg)
             return await self.app(scope, receive, send2)
