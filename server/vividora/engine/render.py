@@ -444,11 +444,22 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     e_tr_default = (effects or {}).get("transition") or "none"
     segs = _segment_timeline(_plan_segments(keep, edl, e_tr_default, (effects or {}).get("speed") or edl.get("speed")))
     use_segments = any(fx.is_xfade(sg["tr"]) or sg["rate"] != 1.0 for sg in segs)
+    # podcast: captions in each speaker's colour (effects.speaker.caption_colors, one per person of the plan)
+    spk_c = e.get("speaker") if isinstance(e.get("speaker"), dict) else {}
+    spk_colors = [str(c) for c in spk_c.get("caption_colors")] if (spk_c.get("enabled", True) and isinstance(spk_c.get("caption_colors"), list)
+                                                                 and any(spk_c["caption_colors"]) and spk_c.get("shots")) else None
+
+    def src_words() -> list[dict]:
+        ws_ = words_of(transcript) if transcript else []
+        if spk_colors and ws_:
+            from . import speakers
+            ws_ = speakers.tag_words(ws_, spk_c["shots"])
+        return ws_
     if use_segments:
         new_dur = segs[-1]["out_start"] + segs[-1]["out_dur"]
         cuts = [sg["out_start"] for sg in segs[1:] if not fx.is_xfade(sg["tr"])]
         to_out = _src_to_out(segs)
-        raw_words = words_of(transcript) if transcript else []
+        raw_words = src_words()
         # a word that starts just inside a cut (or ends on a segment edge) used to vanish here;
         # map_words keeps every mostly-kept word
         words = map_words([{**wd, "end": min(wd["end"], wd["start"] + 3)} for wd in raw_words],
@@ -457,7 +468,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
     else:
         new_dur = sum(b - a for a, b in keep)
         cuts = _cut_points(keep)
-        words = remap_words(words_of(transcript), keep) if transcript else []
+        words = remap_words(src_words(), keep) if transcript else []
     dub_offset = 0.0
     if dub_path:
         # the dub is timed on the full video's output timeline; a Short starts somewhere inside it
@@ -771,7 +782,7 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             build_ass(words if (burn and style) else [], style or {}, w, h,
                       margin_v_ratio=float(preset.get("caption_margin_v", 0.2)),
                       scale=float(preset.get("caption_scale", 1.0)), hook=hook, duration=new_dur,
-                      extra_styles=[t_style] if t_style else None, extra_events=t_events),
+                      extra_styles=[t_style] if t_style else None, extra_events=t_events, speaker_colors=spk_colors),
             encoding="utf-8",
         )
         # ass + complex shaping: HarfBuzz places Devanagari matras (ि, र्) correctly

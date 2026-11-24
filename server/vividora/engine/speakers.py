@@ -429,3 +429,17 @@ def track_points(shot_list: list[dict], faces: list[dict], starts: list[float]) 
         pts.append([round(t, 3), round(cx, 4)])
         last = cx
     return pts
+
+
+def tag_words(words: list[dict], shot_list: list[dict]) -> list[dict]:
+    """Each word gets `spk` = who has the floor at its middle (shots and words on the same clock)."""
+    rows = sorted((s for s in shot_list or [] if isinstance(s, dict) and "who" in s), key=lambda s: float(s.get("start", 0)))
+    if not rows:
+        return words
+    out, i = [], 0
+    for w in words:
+        mid = (float(w["start"]) + float(w["end"])) / 2
+        while i + 1 < len(rows) and float(rows[i + 1]["start"]) <= mid:
+            i += 1
+        out.append({**w, "spk": int(rows[i]["who"])})
+    return out

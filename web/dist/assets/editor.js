@@ -864,7 +864,7 @@ function renderOverlay() {
       const item = libItem(b.id); const fit = b.fit || "cover"; const crop = fit === "cover" || fit === "pip"; const img = ["image", "sticker", "frame", "logo"].includes(item?.kind);
       const media = !item ? "" : img ? `<img src="${item.url}" draggable="false" style="width:100%;height:100%;display:block;object-fit:${crop ? "cover" : "fill"}">`
         : cutOn(b, item) ? `<div class="ov-cutslot" data-cut="${b._id}" data-fit="${fit === "free" ? "free" : "cover"}"></div>`
-        : `<video src="${item.url}" muted playsinline preload="auto" style="width:100%;height:100%;display:block;object-fit:${crop ? "cover" : "fill"}"></video>`;
+        : `<video src="${item.url}" muted playsinline preload="auto" style="width:100%;height:100%;display:block;object-fit:${crop ? "cover" : "fill"}${b.focus_x != null && fit === "cover" ? `;object-position:${coverPos(b.focus_x, item)}% 50%` : ""}"></video>`;
       mh += `<div class="ov-broll ${E.sel?.type === "broll" && E.sel.id === b._id ? "sel" : ""}" data-bid="${b._id}" style="position:absolute;overflow:hidden;border-radius:${fit === "pip" ? 6 : 0}px">${media}${crop ? `<span class="ov-tag">${esc(item?.name || "B-roll")}${b.cutout ? (cutOn(b, item) ? " · ✂ सिर्फ़ इंसान" : " · ✂ cutout बाकी") : ""}</span>` : ""}</div>`;
     }
     const frm = E.rs.effects.frame || {}; const frmi = frm.id && libItem(frm.id);
@@ -900,7 +900,7 @@ function renderOverlay() {
     if (ch) {
       const sc = (ov.size_scale || 1) * (E.ratio === "16:9" ? 0.8 : 1);
       const size = (cs.size || 0.06) * base * sc; const pos = ov.position || cs.position || "bottom";
-      const primary = ov.primary || cs.primary, hl = ov.highlight || cs.highlight, font = ov.font || cs.font;
+      const primary = spkColorAt(ch.words[0] ? (ch.words[0].start + ch.words[0].end) / 2 : ch.start) || ov.primary || cs.primary, hl = ov.highlight || cs.highlight, font = ov.font || cs.font;
       const glow = cs.glow ? `text-shadow:0 0 ${cs.glow * base * 1.5}px ${cs.outline_color},0 0 ${cs.glow * base * 3}px ${cs.outline_color};` : "";
       const stroke = cs.outline ? `-webkit-text-stroke:${cs.outline * base * 2}px ${cs.outline_color};paint-order:stroke fill;` : "";
       const box = cs.box === "line" ? `background:${cs.box_color || "#000"}${Math.round((cs.box_alpha ?? 0.6) * 255).toString(16).padStart(2, "0")};padding:.1em .35em;border-radius:.12em;` : "";
@@ -1255,6 +1255,10 @@ function spkSig() { return keeps().map(([a, b]) => a.toFixed(2) + "-" + b.toFixe
 function spkClose(f, zoom) { const z = clamp(clamp(0.36 / Math.max(0.05, f.h), 1.25, 2.4) * clamp(zoom || 1, 0.5, 2), 1.15, 3); const sl = 1 - 1 / z; const cy = f.y + 0.05 * f.h;
   return { zoom: +z.toFixed(3), x: +clamp((f.x - 0.5 / z) / sl, 0, 1).toFixed(4), y: +clamp((cy - 0.42 / z) / sl, 0, 1).toFixed(4) }; }
 function spkName(P, who) { const pp = (P.people || [])[who]; if (!pp) return "?"; if (pp.cam === 2) return "कैमरा 2"; const mains = (P.people || []).filter((x) => x.cam === 1); if (mains.length < 2) return "मुख्य कैमरा"; const i = mains.indexOf(pp); return i === 0 ? "बायाँ व्यक्ति" : i === mains.length - 1 ? "दायाँ व्यक्ति" : "बीच वाला"; }
+function coverPos(fx, item) { const sa = (item?.meta?.width || 16) / (item?.meta?.height || 9); const win = frameRatio() / sa; return win >= 0.99 ? 50 : +(clamp((fx - win / 2) / (1 - win), 0, 1) * 100).toFixed(1); }
+const SPK_COLORS = ["#FFFFFF", "#FFD400", "#7CE0FF"];
+// podcast captions: the text colour of whoever speaks at source second t ("" = the style's own colour)
+function spkColorAt(t) { const P = E.rs.effects.speaker; if (!P || P.enabled === false || !Array.isArray(P.caption_colors) || !Array.isArray(P.shots)) return ""; let who = null; for (const sh of P.shots) { if (sh.start > t) break; who = sh.who; } return (who != null && P.caption_colors[who]) || ""; }
 function spkApply(quiet) {
   const fx = E.rs.effects; const P = fx.speaker; if (!P || !Array.isArray(P.shots)) return;
   fx.fxclips = (fx.fxclips || []).filter((c) => !c._spk); fx.broll = (fx.broll || []).filter((b) => !b._spk);
@@ -1280,6 +1284,8 @@ function spkHtml(dis) {
     res = `<p class="small">👥 ${esc(ppl)} · ${P.shots.length} shots${P.cam ? ` · कैमरा 2 आवाज़ से ${P.cam.offset >= 0 ? "+" : ""}${(+P.cam.offset).toFixed(2)}s पर मिला${P.cam.confidence ? ` (भरोसा ${Math.round(P.cam.confidence)})` : ""}` : ""}</p>
       ${stale ? `<p class="small" style="color:var(--warn,#F2B33D)">⚠ इसके बाद कट बदले हैं — close-up पुराने समय पर हैं। <b>“दोबारा बैठाओ”</b> दबाएँ।</p>` : ""}
       <div class="irow" style="flex-wrap:wrap;gap:.35rem"><button class="btn primary" id="spk-apply" ${dis}>${applied ? "🔄 दोबारा बैठाओ" : "✅ timeline पर लगाओ"}</button>${applied ? `<button class="btn" id="spk-clear" ${dis}>✕ सब हटाओ</button>` : ""}</div>
+      <label class="chk small" style="margin-top:.4rem"><input type="checkbox" id="spk-capc" ${Array.isArray(P.caption_colors) ? "checked" : ""} ${dis}> Captions में हर बोलने वाले का अलग रंग</label>
+      ${Array.isArray(P.caption_colors) ? `<div class="irow" style="flex-wrap:wrap;gap:.5rem;align-items:center">${(P.people || []).map((x) => `<label class="small" style="display:flex;align-items:center;gap:.3rem"><input type="color" class="spk-col" data-who="${x.who}" value="${esc(P.caption_colors[x.who] || SPK_COLORS[x.who % 3])}" ${dis}> ${esc(spkName(P, x.who))}</label>`).join("")}</div>` : ""}
       <details class="spk-list" ${S.open ? "open" : ""}><summary class="small">हर shot देखें / बदलें (${P.shots.length})</summary>
       ${P.shots.slice(0, 400).map((sh, i) => `<div class="irow spk-row" data-spk="${i}" style="align-items:center;gap:.35rem"><button class="btn small quiet spk-seek">${fmt(sh.start)}</button><span class="small muted">${(sh.end - sh.start).toFixed(1)}s</span>
         <select class="spk-who" ${dis}>${(P.people || []).map((x) => opt(x.cam === 2 ? "cam" : "c" + x.who, sh.shot === "cam" ? "cam" : sh.shot === "close" || (P.main_close === false && sh.shot === "wide") ? "c" + sh.who : "", x.cam === 2 ? "🎥 कैमरा 2" : (P.main_close !== false ? "🔍 " + spkName(P, x.who) + " पास से" : "🎥 मुख्य कैमरा"))).join("")}${P.main_close !== false ? opt("wide", sh.shot === "wide" ? "wide" : "", "🖼 पूरा frame (wide)") : ""}</select></div>`).join("")}</details>`;
@@ -1316,6 +1322,8 @@ function spkBind(panel) {
   const ap = $("#spk-apply", panel); if (ap) ap.onclick = () => { spkApply(); re(); };
   const cl = $("#spk-clear", panel); if (cl) cl.onclick = () => { fx.fxclips = (fx.fxclips || []).filter((c) => !c._spk); fx.broll = (fx.broll || []).filter((b) => !b._spk); if (P) P.enabled = false; touch(); renderTimeline(); layoutFrame(); toast("Speaker close-up हट गए (योजना रखी है — “लगाओ” से वापस)"); re(); };
   const dl = $(".spk-list", panel); if (dl) dl.ontoggle = () => { S.open = dl.open; };
+  const cc = $("#spk-capc", panel); if (cc) cc.onchange = () => { if (cc.checked) P.caption_colors = (P.people || []).map((x) => SPK_COLORS[x.who % 3]); else delete P.caption_colors; touch(); renderOverlay(); re(); };
+  $$(".spk-col", panel).forEach((el) => (el.oninput = () => { P.caption_colors[+el.dataset.who] = el.value; touch(); renderOverlay(); }));
   $$("[data-spk]", panel).forEach((row) => { const sh = P.shots[+row.dataset.spk];
     $(".spk-seek", row).onclick = () => seek(sh.start + 0.05);
     $(".spk-who", row).onchange = (e) => { const v = e.target.value; delete sh.zoom; delete sh.x; delete sh.y;

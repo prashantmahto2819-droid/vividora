@@ -75,6 +75,7 @@ def chunk_words(words: list[dict], max_words: int, max_chars: int, gap_break: fl
             or chars + 1 + len(text) > max_chars
             or (prev is not None and w["start"] - prev["end"] > gap_break)
             or (prev is not None and prev["w"].rstrip().endswith(("।", ".", "?", "!", "॥")))
+            or (prev is not None and w.get("spk") is not None and prev.get("spk") is not None and w["spk"] != prev["spk"])   # another person speaks
         )
         if breaks:
             chunks.append(cur)
@@ -157,7 +158,10 @@ def resolve_style(style: dict, overrides: dict | None) -> dict:
 
 def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin_v_ratio: float,
               scale: float = 1.0, hook: dict | None = None, duration: float | None = None,
-              extra_styles: list[str] | None = None, extra_events: list[str] | None = None) -> str:
+              extra_styles: list[str] | None = None, extra_events: list[str] | None = None,
+              speaker_colors: list[str] | None = None) -> str:
+    """speaker_colors: text colour per speaker (words carry `spk`, see engine/speakers.tag_words) — a podcast's
+    captions show who is talking; a line never mixes two speakers."""
     base = min(width, height)
     size = round(style.get("size", 0.06) * base * scale)
     outline = round(style.get("outline", 0.005) * base, 1)
@@ -238,6 +242,12 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
         if end <= start:
             end = start + 0.3
 
+        prim, lead = primary, head
+        who = chunk[0].get("spk")
+        if speaker_colors and isinstance(who, int) and 0 <= who < len(speaker_colors) and speaker_colors[who]:
+            prim = ass_color(speaker_colors[who])
+            lead = "{" + prefix + f"\\c{prim}" + "}"
+
         def render(active: int | None, upto: int | None = None) -> str:
             parts = []
             for i, t in enumerate(texts):
@@ -246,18 +256,18 @@ def build_ass(words: list[dict], style: dict, width: int, height: int, *, margin
                 if active is not None and i == active:
                     if mode == "pop":
                         t = (f"{{\\c{hl}\\fscx100\\fscy100\\t(0,90,\\fscx{pop}\\fscy{pop})"
-                             f"\\t(90,180,\\fscx106\\fscy106)}}{t}{{\\c{primary}\\fscx100\\fscy100}}")
+                             f"\\t(90,180,\\fscx106\\fscy106)}}{t}{{\\c{prim}\\fscx100\\fscy100}}")
                     elif word_box:
                         bc = ass_color(box_c)
                         bw = round(0.012 * base, 1)
                         t = (f"{{\\c{hl}\\3c{bc}\\bord{bw}\\shad0}}{t}"
-                             f"{{\\c{primary}\\3c{outline_c}\\bord{outline}\\shad{shadow}}}")
+                             f"{{\\c{prim}\\3c{outline_c}\\bord{outline}\\shad{shadow}}}")
                     else:
-                        t = f"{{\\c{hl}}}{t}{{\\c{primary}}}"
+                        t = f"{{\\c{hl}}}{t}{{\\c{prim}}}"
                 parts.append(t)
                 if i < len(texts) - 1 and (upto is None or i < upto):
                     parts.append("\\N" if i in breaks else " ")
-            return head + "".join(parts)
+            return lead + "".join(parts)
 
         if mode == "line":
             lines.append(f"Dialogue: 0,{_t(start)},{_t(end)},Cap,,0,0,0,,{render(None)}")

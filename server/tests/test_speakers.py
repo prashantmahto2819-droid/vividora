@@ -197,6 +197,81 @@ def test_filters(tmp: Path):
     print("filters: close-up window lands on the subject; cover fill keeps the focus point ✓")
 
 
+def test_render(tmp: Path):
+    """The whole render: close-up clip on a wide output, the window on the speaker in a vertical one, coloured captions."""
+    from vividora.engine import presets, render
+    v = tmp / "two.mp4"
+    if not v.exists():
+        make_video(v)
+    meta = {"width": W, "height": H, "fps": FPS, "duration": 18.0, "has_audio": True}
+    shots = [{"start": 0, "end": 6, "who": 0, "shot": "close", "cx": 0.2656, **speakers.closeup({"x": 0.2656, "y": 0.43, "w": 0.23, "h": 0.2})},
+             {"start": 6, "end": 14, "who": 1, "shot": "close", "cx": 0.7344, **speakers.closeup({"x": 0.7344, "y": 0.43, "w": 0.23, "h": 0.2})},
+             {"start": 14, "end": 18, "who": 0, "shot": "wide", "cx": 0.2656}]
+    fxclips = [{"_spk": True, "kind": "effect", "id": "closeup", "params": {k: s[k] for k in ("zoom", "x", "y")}, "start": s["start"], "end": s["end"],
+                "track": 0, "enabled": True} for s in shots if s["shot"] == "close"]
+    def seg(a, words_):
+        return {"start": a, "end": a + len(words_), "text": " ".join(words_),
+                "words": [{"w": w_, "start": a + i, "end": a + i + 0.9} for i, w_ in enumerate(words_)]}
+    tr = {"segments": [seg(0.2, ["HELLO", "FRIENDS"]), seg(7.0, ["YES", "RIGHT", "TRUE"])]}
+    eff = {"speaker": {"enabled": True, "shots": shots, "faces": [{"x": 0.2656}, {"x": 0.7344}], "caption_colors": ["#FF0000", "#00FF00"]},
+           "fxclips": fxclips}
+    edl = {"duration": 18.0, "cuts": [{"start": 2.0, "end": 4.0, "enabled": True, "reason": "silence"}]}      # 2 s removed before the switch
+
+    def frame(f: Path, t: float, w: int, h: int):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(f), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                             capture_output=True).stdout
+        return np.frombuffer(raw, np.uint8).reshape(h, w, 3).astype(int)
+
+    def bright(im):          # where the grey "face" boxes are, as fractions of the width
+        g = im.mean(axis=2)[: int(im.shape[0] * 0.75)]
+        xs = np.where((g > 125).mean(axis=0) > 0.2)[0]
+        return (float(round(xs.min() / im.shape[1], 2)), float(round(xs.max() / im.shape[1], 2))) if len(xs) else None
+    style = presets.caption_style("karaoke") if "karaoke" in presets.caption_styles() else next(iter(presets.caption_styles().values()))
+    wide = {"id": "t-wide", "label": "t", "width": 640, "height": 360, "fit": "crop", "burn_captions": True, "caption_margin_v": 0.08,
+            "video": {"crf": 23, "preset": "ultrafast", "fps_max": 60}, "audio": {"loudness": -14, "true_peak": -1.5}}
+    tall = {**wide, "id": "t-tall", "width": 360, "height": 640, "caption_margin_v": 0.2}
+    r = render.render(video=v, audio=None, meta=meta, edl=edl, transcript=tr, preset=wide, style=style, out_dir=tmp / "ow", name="w",
+                      effects=json_copy(eff), encoder_preset="ultrafast")
+    f = Path(r["files"][0]["path"])
+    a, b, c = (frame(f, t, 640, 360) for t in (1.0, 6.0, 14.0))        # output seconds: left close-up, right close-up (4 s = source 6 s), wide
+    ba, bb, bc = bright(a), bright(b), bright(c)
+    # one face, 1.8× larger, as near the middle as the edge of the picture allows: the left one ends up a little left of centre,
+    # the right one a little right of it
+    assert abs(ba[0] - 0.27) < 0.03 and abs(ba[1] - 0.69) < 0.03, ba
+    assert abs(bb[0] - 0.31) < 0.03 and abs(bb[1] - 0.73) < 0.03 and bb[0] > ba[0], bb
+    assert bc[0] < 0.2 and bc[1] > 0.8, bc                               # both again
+    assert bright(frame(f, 3.5, 640, 360)) == ba, "the switch moves with the cut (source 6 s = output 4 s)"
+    # caption colours: red while the first person talks, green for the second
+    def cap_col(im):
+        low = im[int(im.shape[0] * 0.72):]
+        red = ((low[..., 0] > 180) & (low[..., 1] < 90) & (low[..., 2] < 90)).sum()
+        green = ((low[..., 1] > 180) & (low[..., 0] < 90) & (low[..., 2] < 90)).sum()
+        return red, green
+    ra, ga = cap_col(frame(f, 0.6, 640, 360))             # "HELLO" is being said: "FRIENDS" waits in the first person's colour
+    rb, gb = cap_col(frame(f, 5.5, 640, 360))             # source 7.5 s: the second person
+    assert ra > 30 and ga == 0 and gb > 30 and rb == 0, (ra, ga, rb, gb)
+    r = render.render(video=v, audio=None, meta=meta, edl=edl, transcript=tr, preset=tall, style=style, out_dir=tmp / "ot", name="t",
+                      effects=json_copy(eff), encoder_preset="ultrafast")
+    f = Path(r["files"][0]["path"])
+    ta, tb = bright(frame(f, 1.0, 360, 640)), bright(frame(f, 6.0, 360, 640))
+    # one face fills the vertical frame both times (the window went from the left person to the right one); without the plan the
+    # window would sit in the middle and show the wall between them
+    assert ta and tb and ta[0] < 0.2 and ta[1] > 0.8 and tb[0] < 0.2 and tb[1] > 0.8, (ta, tb)
+    off = json_copy(eff)
+    off["speaker"]["enabled"] = False
+    off["fxclips"] = []
+    r = render.render(video=v, audio=None, meta=meta, edl=edl, transcript=tr, preset=tall, style=style, out_dir=tmp / "on", name="n",
+                      effects=off, encoder_preset="ultrafast")
+    tn = bright(frame(Path(r["files"][0]["path"]), 1.0, 360, 640))
+    assert tn is None or tn != ta, (tn, ta)
+    print(f"render: wide close-ups {ba} → {bb} → wide {bc}; vertical window on the speaker {ta} / {tb} (without the plan: {tn}); caption colours follow ✓")
+
+
+def json_copy(x):
+    import json
+    return json.loads(json.dumps(x))
+
+
 if __name__ == "__main__":
     test_turns_unit()
     test_shots_unit()
@@ -205,4 +280,5 @@ if __name__ == "__main__":
         test_filters(tmp)
         main = test_scan_real(tmp)
         test_two_cameras(tmp, main)
+        test_render(tmp)
     print("ALL PASS")

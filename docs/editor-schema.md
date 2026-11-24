@@ -651,3 +651,6 @@ The editor (AI Studio → “Podcast: बोलने वाले पर कै
 
 Vertical outputs cut from a wide source (`fit: crop`): `_spk` close-up clips are skipped and the crop window jumps to the
 active speaker instead (`speakers.track_points` replaces the face track; needs `face_track != "off"`).
+
+`speaker.caption_colors` (optional, one hex colour per entry of `people`): burned captions use the colour of whoever speaks
+(`speakers.tag_words` marks every word, `captions.build_ass(speaker_colors=…)`); a caption line never mixes two speakers.
