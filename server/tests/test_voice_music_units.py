@@ -159,8 +159,54 @@ def test_music_start_and_at():
     assert levels(start=1, at=2) == [0.0, 0.0, 0.2, 0.3, 0.4, 0.1], levels(start=1, at=2)
 
 
+def test_volume_points_pitch_speed():
+    """Volume automation, separate fade in / out for music, pitch and speed for a sound clip — measured on real audio."""
+    import numpy as np
+    from vividora.engine import effects as fx
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=6:r=48000", "-af", "volume=4", str(TMP / "tone.wav")], check=True)
+
+    def lev(filters, secs=6):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(TMP / "tone.wav"), "-af", filters, "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+                             capture_output=True, check=True).stdout
+        a = np.frombuffer(raw, np.int16).astype(float) / 32768
+        return a, [round(float(np.abs(a[int(i * 4000):int((i + 1) * 4000)]).max()), 2) for i in range(int(secs * 2)) if len(a) >= (i + 1) * 4000]
+
+    # no points / all 1.0 → nothing is added to the graph
+    assert fx.vol_expr([]) == "" and fx.vol_expr([{"t": 1, "v": 1}, {"t": 3, "v": 1.0}]) == "" and fx.vol_expr([{"t": "x"}]) == ""
+    # 1.0 until 1 s → down to 0.2 at 2 s → stays → back to 1.0 at 5 s
+    e = fx.vol_expr([{"t": 5, "v": 1}, {"t": 1, "v": 1}, {"t": 2, "v": 0.2}, {"t": 4, "v": 0.2}])
+    _, l = lev(f"volume='{e}':eval=frame")
+    assert l[0] == l[1] == 0.5 and 0.09 <= l[5] <= 0.11 and 0.09 <= l[7] <= 0.11 and l[11] >= 0.45 and 0.2 < l[3] < 0.5, l
+    # the same points on a clip that starts 2 s into the video (music `at`): its t = 0 is the video's t = 2
+    e2 = fx.vol_expr([{"t": 2, "v": 0.2}, {"t": 3, "v": 1}], 2.0)
+    _, l2 = lev(f"volume='{e2}':eval=frame")
+    assert 0.09 <= l2[0] <= 0.31 and l2[3] == 0.5, l2
+
+    # music: fade-in 0 (starts at once), fade-out 2 s — different on each side
+    chain, lab = fx.music_chain("[0:a]", 1, volume=1.0, duck=False, duration=6.0, fade=1.5, fade_in=0, fade_out=2.0)
+    assert "afade=t=in" not in chain and "afade=t=out:st=4.000:d=2.00" in chain, chain
+    chain, _ = fx.music_chain("[0:a]", 1, volume=1.0, duck=False, duration=6.0, fade=1.5)
+    assert "afade=t=in:d=1.50" in chain and "afade=t=out:st=4.500:d=1.50" in chain and "eval=frame" not in chain      # default unchanged
+    chain, _ = fx.music_chain("[0:a]", 1, volume=1.0, duck=False, duration=6.0, kf=[{"t": 0, "v": 0.3}, {"t": 2, "v": 1}])
+    assert "eval=frame" in chain
+
+    # pitch +12 semitones: one octave up, same length; speed 2×: half as long, same pitch
+    def freq_len(filters):
+        a, _ = lev("aformat=sample_rates=48000," + filters.rstrip(","))
+        z = np.sum(np.abs(np.diff(np.signbit(a[800:-800]).astype(int)))) / 2 / ((len(a) - 1600) / 8000)
+        return round(float(z)), round(len(a) / 8000, 2)
+    assert fx.pitch_speed(0, 1) == "" and fx.pitch_speed(None, None) == ""
+    f1, n1 = freq_len(fx.pitch_speed(12, 1))
+    assert 860 <= f1 <= 900 and 5.9 <= n1 <= 6.1, (f1, n1)
+    f2, n2 = freq_len(fx.pitch_speed(0, 2))
+    assert 430 <= f2 <= 450 and 2.9 <= n2 <= 3.1, (f2, n2)
+    f3, n3 = freq_len(fx.pitch_speed(-12, 0.5))
+    assert 210 <= f3 <= 230 and 11.8 <= n3 <= 12.2, (f3, n3)
+
+
 if __name__ == "__main__":
     try:
+        test_volume_points_pitch_speed()
         test_music_start_and_at()
         test_text_helpers()
         test_line_cache_and_track()

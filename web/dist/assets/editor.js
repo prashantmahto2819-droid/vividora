@@ -775,8 +775,10 @@ function toggleFull() {
 }
 function splitItem(it, type) {
   const fx = E.rs.effects; const ot = +outOf(E.t).toFixed(2);
-  if (type === "sfx") { const len = it.dur || (libItem(it.id)?.meta?.duration || 0); if (!len || ot <= it.at + 0.05 || ot >= it.at + len - 0.05) return null;
-    const a = ot - it.at; const b = { ...JSON.parse(JSON.stringify(it)), _id: uid(), at: ot, trim: +((it.trim || 0) + a).toFixed(2), dur: +(len - a).toFixed(2) }; it.dur = +a.toFixed(2); fx.sfx.push(b); return b; }
+  if (type === "sfx") { const len = it.dur || (libItem(it.id)?.meta?.duration || 0) / clamp(+it.speed || 1, 0.5, 2); if (!len || ot <= it.at + 0.05 || ot >= it.at + len - 0.05) return null;
+    const a = ot - it.at; const sp = clamp(+it.speed || 1, 0.5, 2); const b = { ...JSON.parse(JSON.stringify(it)), _id: uid(), at: ot, trim: +((it.trim || 0) + a * sp).toFixed(2), dur: +(len - a).toFixed(2) }; it.dur = +a.toFixed(2);
+      if (it.vol_kf) { const k = volKfSorted(it); it.vol_kf = k.filter((q) => q.t <= a); b.vol_kf = k.filter((q) => q.t > a).map((q) => ({ t: +(q.t - a).toFixed(2), v: q.v })); if (!it.vol_kf.length) delete it.vol_kf; if (!b.vol_kf.length) delete b.vol_kf; }
+      if (it.fade_out) it.fade_out = 0; if (b.fade_in) b.fade_in = 0; fx.sfx.push(b); return b; }
   if (ot <= it.start + 0.05 || ot >= it.end - 0.05) return null;
   const b = { ...JSON.parse(JSON.stringify(it)), _id: uid(), start: ot }; it.end = ot; ({ title: fx.titles, broll: fx.broll, fxclip: fx.fxclips })[type].push(b); return b;
 }
@@ -799,7 +801,7 @@ function tool(name) {
   if (name === "dup") {
     const c = { ...JSON.parse(JSON.stringify(it)), _id: uid() };
     if (["title", "broll", "fxclip"].includes(sel.type)) { const len = it.end - it.start; c.start = it.end; c.end = +Math.min(outDur(), it.end + len).toFixed(2); ({ title: fx.titles, broll: fx.broll, fxclip: fx.fxclips })[sel.type].push(c); }
-    else if (sel.type === "sfx") { c.at = +(it.at + (it.dur || 1)).toFixed(2); fx.sfx.push(c); } else return;
+    else if (sel.type === "sfx") { c.at = +(it.at + sfxSpan(it)).toFixed(2); fx.sfx.push(c); } else return;
     touch(); select({ type: sel.type, id: c._id });
   }
 }
@@ -1182,6 +1184,80 @@ async function doSave(ed, loud) {
   finally { ed.saving = false; }
 }
 function field(label, inner) { return `<div class="ifield"><label>${label}</label>${inner}</div>`; }
+// ── Supporting clips of a talk (podcast): upload them, Vividora finds where each one belongs ──
+const SUP_HOW = { time: ["⏱ आपके लिखे समय पर", "ok"], ai: ["🤖 AI ने बात से मिलाया", "ok"], words: ["🎯 नाम / note के शब्द बोले गए", "ok"], order: ["↔ नाम के क्रम में (अंदाज़ा — जाँच लें)", "warn"], none: ["❓ जगह नहीं मिली — note लिखें या समय डालें", "err"] };
+function supState() { if (!E.sup) E.sup = { clips: [], res: null, layout: "cover", spread: true, img: 4, vid: 6, busy: false }; E.sup.clips = E.sup.clips.filter((c) => libItem(c.id)); return E.sup; }
+function supHtml(dis) {
+  const { esc } = E.ctx; const S = supState(); const pool = (E.lib || []).filter((x) => (x.kind === "broll" || x.kind === "image") && x.source !== "starter" && !S.clips.some((c) => c.id === x.id));
+  const R = S.res; const placed = R ? R.filter((r) => r.start != null).length : 0;
+  return `<div class="ph"><h3>📎 Podcast की supporting clips</h3><span class="small muted">अपने-आप सही जगह</span></div>
+    <p class="small muted">मुख्य video यह रहा। अब उससे जुड़ी <b>clips और photos</b> यहाँ डालें — Vividora आपकी बात सुनकर (transcript से) हर clip को वहीं लगाता है जहाँ आप उसके बारे में बोल रहे हैं। File का नाम साफ़ रखें (<code>taj mahal.jpg</code>) या नीचे एक-दो शब्द लिख दें; बिल्कुल पक्का समय चाहिए तो <code>1:23</code> लिख दें।</p>
+    <div class="irow" style="flex-wrap:wrap;gap:.35rem"><label class="btn small primary ${dis ? "disabled" : ""}">＋ clips / photos upload<input type="file" id="sup-up" accept="video/*,image/*" multiple hidden ${dis}></label>
+      ${pool.length ? `<select id="sup-pick" ${dis}><option value="">Library से जोड़ें…</option>${pool.slice(0, 200).map((x) => `<option value="${x.id}">${x.kind === "image" ? "🖼" : "🎞"} ${esc(x.name.slice(0, 40))}</option>`).join("")}</select>` : ""}</div>
+    <div id="lib-progress"></div>
+    ${S.clips.length ? `<ul class="plist suplist">${S.clips.map((c, i) => { const it = libItem(c.id); const img = it.kind === "image"; return `<li data-sup="${i}"><span class="supth" style="background-image:url('${img ? it.url : it.url.replace("/file?", "/frame?") + "&at=0.5"}')"></span><span class="grow" style="min-width:0"><span class="small" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${img ? "🖼" : "🎞"} ${esc(it.name)}</span><input class="sup-note" value="${esc(c.note || "")}" placeholder="यह किस बारे में है? (या समय 1:23)" ${dis}></span><button class="ibtn sup-x" title="list से हटाएँ" ${dis}>✕</button></li>`; }).join("")}</ul>
+      <div class="irow" style="flex-wrap:wrap;gap:.4rem;align-items:center"><select id="sup-layout" ${dis}><option value="cover" ${S.layout === "cover" ? "selected" : ""}>पूरी screen पर</option><option value="pip" ${S.layout === "pip" ? "selected" : ""}>छोटी खिड़की (आप दिखते रहें)</option></select>
+        <label class="small">photo <input type="number" id="sup-img" min="1.5" max="15" step="0.5" value="${S.img}" style="width:58px" ${dis}> s</label><label class="small">clip <input type="number" id="sup-vid" min="1.5" max="30" step="0.5" value="${S.vid}" style="width:58px" ${dis}> s तक</label></div>
+      <label class="chk small"><input type="checkbox" id="sup-spread" ${S.spread ? "checked" : ""} ${dis}> जिनकी जगह न मिले उन्हें नाम के क्रम में (1, 2, 3…) बीच-बीच में लगा दो</label>
+      <div class="irow" style="margin-top:.4rem"><button class="btn primary" id="sup-go" ${dis} ${S.busy ? "disabled" : ""}>${S.busy ? "⏳ बात से मिला रहे हैं…" : "🔍 सही जगह ढूँढो"}</button>${R && placed ? `<button class="btn" id="sup-apply" ${dis}>✅ ${placed} को timeline पर लगाओ</button>` : ""}</div>` : `<p class="small muted">अभी कोई supporting clip नहीं चुनी।</p>`}
+    ${R ? `<p class="small ${placed === R.length ? "muted" : ""}">${placed}/${R.length} की जगह मिली${S.ai ? " · AI ने बात समझकर मिलाया" : S.aiOn ? " · शब्दों से मिलाया" : ` · AI की key नहीं है (<a href="#/api">API & Keys</a> में Gemini डालें तो बात का मतलब समझकर मिलाएगा), अभी सिर्फ़ शब्दों से मिलाया`}। समय बदलना हो तो नीचे बदलें, फिर “लगाओ” दबाएँ।</p>
+      ${[...R.keys()].sort((a, b) => (R[a].start ?? 1e9) - (R[b].start ?? 1e9)).map((i) => { const r = R[i]; const [lab, cls] = SUP_HOW[r.how] || SUP_HOW.none; return `<div class="box aicard suprow ${r.start == null ? "off" : ""}" data-supr="${i}"><div class="row between"><b class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${r.kind === "image" ? "🖼" : "🎞"} ${esc(r.name)}</b><span class="small sup-how ${cls}">${lab}</span></div>
+        ${r.line ? `<p class="small muted">“${esc(r.line.slice(0, 130))}”</p>` : ""}
+        <div class="irow" style="align-items:center;gap:.35rem"><span class="small muted">कब</span><input type="number" class="supr-t" min="0" step="0.5" value="${r.start == null ? "" : (+r.start).toFixed(1)}" placeholder="—" style="width:76px" ${dis}><span class="small muted">s · ${r.start == null ? "" : fmt(r.start)}</span><span class="grow"></span>${r.start != null ? `<button class="btn small quiet supr-seek">यहाँ जाएँ</button>` : ""}</div></div>`; }).join("")}` : ""}`;
+}
+function supBind(panel) {
+  const S = supState(); const { api, toast } = E.ctx; const re = () => { const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; };
+  const up = $("#sup-up", panel); if (up) up.onchange = async () => { const files = [...up.files]; if (!files.length) return; let n = 0;
+    for (const f of files) { const isImg = f.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|gif)$/i.test(f.name); if (!isImg && !f.type.startsWith("video/") && !/\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(f.name)) { toast(`${f.name}: video या photo नहीं है — छोड़ दिया`); continue; }
+      const d = await libUpload(isImg ? "image" : "broll", f); if (d?.id) { S.clips.push({ id: d.id, note: "" }); n++; } }
+    S.res = null; if (n) toast(`${n} supporting file जुड़ी — अब “सही जगह ढूँढो” दबाएँ`); re(); };
+  const pk = $("#sup-pick", panel); if (pk) pk.onchange = () => { if (!pk.value) return; S.clips.push({ id: pk.value, note: "" }); S.res = null; re(); };
+  $$("[data-sup]", panel).forEach((li) => { const i = +li.dataset.sup; $(".sup-note", li).oninput = (e) => { S.clips[i].note = e.target.value; }; $(".sup-x", li).onclick = () => { S.clips.splice(i, 1); S.res = null; re(); }; });
+  const bind = (q, k, num) => { const el = $(q, panel); if (el) el.onchange = () => { S[k] = el.type === "checkbox" ? el.checked : num ? clamp(+el.value || 4, 1.5, 30) : el.value; }; };
+  bind("#sup-layout", "layout"); bind("#sup-img", "img", true); bind("#sup-vid", "vid", true); bind("#sup-spread", "spread");
+  const go = $("#sup-go", panel); if (go) go.onclick = async () => { if (!S.clips.length) return; S.busy = true; re();
+    try { const r = await api("POST", `/projects/${E.pid}/support/match`, { clips: S.clips.map((c) => ({ id: c.id, note: c.note || "" })), spread: S.spread, image_seconds: S.img, video_seconds: S.vid });
+      S.res = r.placements; S.ai = r.ai; S.aiOn = r.ai_on; toast(r.placed ? `${r.placed}/${r.total} clips की जगह मिली — देखकर “लगाओ” दबाएँ` : "किसी की जगह नहीं मिली — हर clip के नीचे एक-दो शब्द लिखें", 5000); } catch (err) { toast(err.message, 6000); }
+    S.busy = false; re(); };
+  $$("[data-supr]", panel).forEach((row) => { const r = S.res[+row.dataset.supr];
+    $(".supr-t", row).onchange = (e) => { const len = (r.end ?? 0) - (r.start ?? 0) || (r.kind === "image" ? S.img : S.vid); if (e.target.value === "") { r.start = r.end = null; r.how = "none"; } else { r.start = clamp(+e.target.value || 0, 0, Math.max(0, E.dur - 0.5)); r.end = r.start + len; r.how = "time"; r.line = ""; } re(); };
+    const sk = $(".supr-seek", row); if (sk) sk.onclick = () => seek(r.start + 0.05); });
+  const ap = $("#sup-apply", panel); if (ap) ap.onclick = () => { const fx = E.rs.effects; fx.broll = (fx.broll || []).filter((b) => !b._sup); let n = 0;
+    // on the edited timeline (cuts removed) the clips come closer together: none may run into the next one
+    const list = S.res.filter((r) => r.start != null && libItem(r.id)).map((r) => ({ r, st: +outOf(r.start).toFixed(2), len: Math.max(1, r.end - r.start) })).sort((x, y) => x.st - y.st);
+    list.forEach((x, k) => { const nxt = list[k + 1]; const en = +Math.min(outDur(), x.st + x.len, nxt ? nxt.st - 0.1 : 1e9).toFixed(2); if (en - x.st < 0.6) return;
+      fx.broll.push({ _id: "sup_" + uid(), _sup: x.r.id, id: x.r.id, start: x.st, end: en, fit: S.layout === "pip" ? "pip" : "cover", pos: "tr" }); n++; });
+    touch(); renderTimeline(); toast(`${n} supporting clips timeline पर लग गईं — हर एक को खींचकर खिसका सकते हैं (Ctrl+Z से वापस)`, 5000); re(); };
+}
+// ── sound: length of a sound clip on the timeline, and volume points (automation) ──
+function sfxSpan(s) { return +s.dur || Math.min((libItem(s.id)?.meta?.duration || 0.6) / clamp(+s.speed || 1, 0.5, 2), 600); }
+function volKfSorted(it) { return (it.vol_kf || []).filter((k) => k && isFinite(+k.t) && isFinite(+k.v)).map((k) => ({ t: Math.max(0, +k.t), v: clamp(+k.v, 0, 3) })).sort((a, b) => a.t - b.t); }
+// the points as an SVG line inside a timeline block that is `len` seconds long
+function volKfSvg(it, len) {
+  const k = volKfSorted(it); if (!k.length || !(len > 0)) return ""; const Y = (v) => (100 - clamp(v, 0, 2) * 50).toFixed(1); const X = (t) => (clamp(t / len, 0, 1) * 100).toFixed(2);
+  const pts = [[0, k[0].v], ...k.map((q) => [q.t, q.v]), [len, k[k.length - 1].v]];
+  return `<svg class="volkf" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts.map(([t, v]) => X(t) + "," + Y(v)).join(" ")}"/>${k.map((q) => `<circle cx="${X(q.t)}" cy="${Y(q.v)}" r="1.6"/>`).join("")}</svg>`;
+}
+// inspector block: `now` = where the playhead is on this item's own clock, `len` = how long it is
+function volKfHtml(it, now, len, dis, music) {
+  const k = volKfSorted(it);
+  return `<div class="box volkfbox"><b>🎚 आवाज़ कहाँ कम / ज़्यादा <span class="small muted">(volume points)</span></b>
+    <p class="small muted">${music ? "जैसे: शुरू में music तेज़, बोलना शुरू होते ही धीमा, आख़िर में फिर तेज़।" : "इस clip के अंदर आवाज़ ऊपर-नीचे।"} playhead जहाँ है वहाँ point जोड़ें, फिर उसका level खिसकाएँ — दो points के बीच आवाज़ धीरे-धीरे बदलती है।</p>
+    ${k.map((q, i) => `<div class="irow volkf-row" data-vk="${i}"><input type="number" class="vk-t" min="0" max="${Math.max(0, len).toFixed(1)}" step="0.1" value="${q.t.toFixed(1)}" title="कब (सेकंड)" ${dis}><input type="range" class="vk-v" min="0" max="2" step="0.05" value="${q.v}" ${dis}><span class="small vk-l">${Math.round(q.v * 100)}%</span><button class="ibtn vk-x" title="हटाएँ" ${dis}>✕</button></div>`).join("")}
+    <div class="irow" style="flex-wrap:wrap;gap:.3rem"><button class="btn small" data-vkadd ${dis}>＋ playhead पर point</button>${music ? `<button class="btn small quiet" data-vkpre="intro" ${dis} title="पहले 3 सेकंड तेज़, फिर सामान्य">Intro में तेज़</button><button class="btn small quiet" data-vkpre="outro" ${dis} title="आख़िरी 4 सेकंड में तेज़">आख़िर में तेज़</button>` : ""}${k.length ? `<button class="btn small quiet" data-vkclear ${dis}>सब हटाएँ</button>` : ""}</div></div>`;
+}
+function volKfBind(ins, it, nowFn, len) {
+  const save = (k, again = true) => { it.vol_kf = k.sort((a, b) => a.t - b.t).slice(0, 24); if (!it.vol_kf.length) delete it.vol_kf; touch(); if (again) renderInspector(); };
+  $$(".volkf-row", ins).forEach((row) => { const i = +row.dataset.vk; const k = volKfSorted(it);
+    $(".vk-v", row).oninput = (e) => { k[i].v = +e.target.value; $(".vk-l", row).textContent = Math.round(k[i].v * 100) + "%"; save(k, false); };
+    $(".vk-t", row).onchange = (e) => { k[i].t = clamp(+e.target.value || 0, 0, Math.max(0, len)); save(k); };
+    $(".vk-x", row).onclick = () => { k.splice(i, 1); save(k); }; });
+  const add = $("[data-vkadd]", ins); if (add) add.onclick = () => { const k = volKfSorted(it); const now = nowFn(); if (now < -0.05 || now > len + 0.05) return E.ctx.toast("playhead इस clip के बाहर है — पहले उसे clip के अंदर ले जाएँ"); const t = +clamp(now, 0, len).toFixed(1); if (k.some((q) => Math.abs(q.t - t) < 0.05)) return E.ctx.toast("यहाँ पहले से point है — playhead थोड़ा खिसकाएँ"); if (k.length >= 24) return E.ctx.toast("24 points से ज़्यादा नहीं");
+    let v = 1; if (k.length) { const b4 = k.filter((q) => q.t <= t).pop(), af = k.find((q) => q.t > t); v = b4 && af ? b4.v + (af.v - b4.v) * (t - b4.t) / Math.max(0.01, af.t - b4.t) : (b4 || af).v; } k.push({ t, v: +v.toFixed(2) }); save(k); };
+  $$("[data-vkpre]", ins).forEach((b) => (b.onclick = () => { const L = Math.max(4, len); const base = volKfSorted(it).filter((q) => b.dataset.vkpre === "intro" ? q.t > 4.6 : q.t < L - 5.6);
+    save(b.dataset.vkpre === "intro" ? [{ t: 0, v: 1.7 }, { t: 3, v: 1.7 }, { t: 4.5, v: 1 }, ...base] : [...base, { t: +(L - 5.5).toFixed(1), v: 1 }, { t: +(L - 4).toFixed(1), v: 1.7 }, { t: +L.toFixed(1), v: 1.7 }]); }));
+  const cl = $("[data-vkclear]", ins); if (cl) cl.onclick = () => save([]);
+}
 function num(id, v, step = 0.1, min = 0, max = 9999) { return `<input type="number" data-k="${id}" value="${(+v).toFixed(step < 1 ? 2 : 0)}" step="${step}" min="${min}" max="${max}">`; }
 function renderInspector() {
   _renderInspector();
@@ -1259,6 +1335,8 @@ function _renderInspector() {
     h = `<h3>Background music</h3><p class="small muted">${esc(libItem(it.id)?.name || "")}</p>
       <div class="irow">${field("volume", `<input type="range" data-k="volume" min="0" max="1" step="0.01" value="${it.volume ?? 0.18}" ${dis}>`)}${field("fade (s)", `<input type="range" data-k="fade" min="0" max="6" step="0.5" value="${it.fade ?? 1.5}" ${dis}>`)}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" data-k="duck" ${it.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा</label>${field("कितना", `<input type="range" data-k="duck_amount" min="0.1" max="1" step="0.05" value="${it.duck_amount ?? 0.6}" ${dis}>`)}</div>
+      <div class="irow">${field("शुरू में fade in (s)", `<input type="number" data-k="fade_in" min="0" max="20" step="0.5" value="${it.fade_in ?? ""}" placeholder="${it.fade ?? 1.5}" ${dis}>`)}${field("आख़िर में fade out (s)", `<input type="number" data-k="fade_out" min="0" max="20" step="0.5" value="${it.fade_out ?? ""}" placeholder="${it.fade ?? 1.5}" ${dis}>`)}</div>
+      ${volKfHtml(it, outOf(E.t), outDur(), dis, true)}
       <div class="irow">${field("गाना कहाँ से शुरू (s)", num("start", it.start || 0, 0.5, 0, Math.max(0, (libItem(it.id)?.meta?.duration || 600) - 1)))}${field("video में कब से (s)", num("at", it.at || 0, 0.5, 0, Math.max(0, E.dur - 0.5)))}</div>
       <p class="small muted">गाने का अच्छा हिस्सा (hook/chorus) सीधे चाहिए? “कहाँ से शुरू” में उसका second लिखें। ${it.fit ? "<b>Remix (fit) चालू है — तब “कहाँ से शुरू” नहीं लगता।</b>" : ""}</p>
       <div class="irow"><button class="btn small" data-act="audiotab">🎙 आवाज़ settings</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
@@ -1279,6 +1357,9 @@ function _renderInspector() {
     h = `<h3>${item?.kind === "music" ? "Audio clip" : "SFX / Audio"}</h3><p class="small muted">${esc(item?.name || "?")}${item?.meta?.duration ? " · " + fmt(item.meta.duration) : ""}</p><div class="irow">${field("कब", num("at", it.at, 0.05, 0))}${field("आवाज़", `<input type="range" data-k="volume" min="0" max="2" step="0.05" value="${it.volume ?? 0.8}" ${dis}>`)}</div>
       <div class="irow">${field("कितनी देर (s, खाली = पूरा)", `<input type="number" data-k="dur" min="0" step="0.1" value="${it.dur || ""}" placeholder="पूरा" ${dis}>`)}${field("शुरू से काटें (s)", num("trim", it.trim || 0, 0.1, 0))}${field("track", num("track", it.track || 0, 1, 0, 9))}</div>
       <div class="irow">${field("fade in (s)", num("fade_in", it.fade_in || 0, 0.1, 0, 10))}${field("fade out (s)", num("fade_out", it.fade_out || 0, 0.1, 0, 10))}<label class="chk small"><input type="checkbox" data-k="duck" ${it.duck ? "checked" : ""} ${dis}> बोलते समय धीमा</label></div>
+      <div class="irow">${field("Speed", `<select data-k="speed" ${dis}>${[[0.5, "0.5× धीमा"], [0.75, "0.75×"], [1, "1× सामान्य"], [1.25, "1.25×"], [1.5, "1.5×"], [2, "2× तेज़"]].map(([v, l]) => `<option value="${v}" ${(+it.speed || 1) === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}${field(`Pitch <b>${(+it.pitch || 0) > 0 ? "+" : ""}${+it.pitch || 0}</b> <span class="small muted">(सुर)</span>`, `<input type="range" data-k="pitch" min="-12" max="12" step="1" value="${+it.pitch || 0}" ${dis}>`)}</div>
+      <p class="small muted">Speed से सुर नहीं बदलता; Pitch से लंबाई नहीं बदलती (−12 = भारी/मोटी, +12 = पतली)। Pitch का असर export और “🔊 बदलाव सुनें” में सुनाई देता है, timeline के preview में नहीं।</p>
+      ${volKfHtml(it, outOf(E.t) - it.at, sfxSpan(it), dis, false)}
       <div class="irow"><button class="btn small" data-act="seek">यहाँ जाएँ</button><button class="btn small danger quiet" data-act="del">${ICON.trash} हटाएँ</button></div>`;
   } else if (type === "speed") {
     h = `<h3>Speed <span class="tag manual">${it.rate}×</span></h3><div class="irow">${field("से", num("start", it.start, 0.1, 0, E.dur))}${field("तक", num("end", it.end, 0.1, 0, E.dur))}</div>
@@ -1317,6 +1398,8 @@ function _renderInspector() {
     else if (k === "_kf") { if (el.checked) it.to = { x: it.x ?? 0.5, y: it.y ?? 0.5, scale: it.scale ?? 0.4 }; else delete it.to; touch(); renderInspector(); return; }
     else if (k === "_captext") { clearTimeout(E.capT); const ws = el._ws || it.words; E.capT = setTimeout(() => { if (!E) return; const nw = applyCaptionText({ words: ws }, el.value, true); el._ws = nw; if (nw.length) E.sel = { type: "caption", id: nw[0].start }; if (E.tab === "captions") renderPanel(); }, 350); return; }
     else if (k.startsWith("to.")) { it.to = it.to || {}; it.to[k.slice(3)] = +el.value; }
+    else if (type === "music" && (k === "fade_in" || k === "fade_out")) { if (el.value === "") delete it[k]; else it[k] = clamp(+el.value || 0, 0, 20); }
+    else if (type === "sfx" && k === "speed") { it.speed = +el.value || 1; if (it.speed === 1) delete it.speed; touch(); renderInspector(); return; }
     else if (el.type === "checkbox") it[k] = el.checked;
     else if (el.type === "number" || el.type === "range") it[k] = +el.value;
     else it[k] = el.value;
@@ -1368,6 +1451,7 @@ function _renderInspector() {
     const n = parseFloat(a.slice(1)); if (a[0] === "s") cutEdit([[it.start + n, it.end]]); else cutEdit([[it.start, it.end + n]]); }));
   $$("[data-cutword]", ins).forEach((b) => (b.onclick = () => { if (!E.canEdit) return; const [ws, we] = b.dataset.cutword.split("|").map(Number); const pad = 0.04;
     cutEdit([[it.start, ws - pad], [we + pad, it.end]]); E.ctx.toast(`“${b.textContent}” वापस जोड़ा`); }));
+  if (type === "music") volKfBind(ins, it, () => outOf(E.t), outDur()); else if (type === "sfx") volKfBind(ins, it, () => outOf(E.t) - it.at, sfxSpan(it));
   $$("[data-act]", ins).forEach((b) => (b.onclick = () => {
     const a = b.dataset.act;
     if (a === "del") deleteSel();
@@ -1478,12 +1562,12 @@ function renderPanel() {
   } else if (t === "ai") {
     const A = E.ai; const K = { hook: "🎬 Hook video (शुरुआत)", broll: "🎞 B-roll", background: "🖼 Cutout background", thumbnail: "🏷 Thumbnail background" };
     const V = E.vz, vp = V?.providers || {}; const SRC = [["stock_video", "Stock video (Pixabay)", vp.stock], ["stock_photo", "Stock photo (Pixabay)", vp.stock], ["ai_image", "AI तस्वीर", !!vp.ai_image], ["ai_video", `AI video${vp.ai_video_usd ? " ≈ $" + vp.ai_video_usd + "/clip" : ""}`, !!vp.ai_video && !!vp.ai_image], ["library", "मेरी Library से", true]];
-    h = `<div class="ph"><h3>🎬 आवाज़ से visuals</h3><span class="small muted">अपने-आप</span></div>
+    h = supHtml(dis) + `<div class="ph" style="margin-top:1.2rem"><h3>🎬 आवाज़ से visuals</h3><span class="small muted">अपने-आप</span></div>
       <p class="small muted">आप जो बोलते हैं उसके हिसाब से Vividora लाइनें चुनता है, हर लाइन के लिए खोज के शब्द और AI prompt पहले से तैयार करता है, और आपके चुने source से video/तस्वीर लाकर उसी जगह timeline पर लगा देता है। हर चीज़ बदली जा सकती है।</p>
       <div class="irow"><select id="vz-n" title="कितनी लाइनें">${[4, 6, 8, 12].map((n) => `<option ${n === (E.vzN || 6) ? "selected" : ""}>${n}</option>`).join("")}</select><button class="btn small primary" id="vz-go" ${dis}>✨ सुझाव बनाएँ</button>${V?.items?.length ? `<button class="btn small" id="vz-all" ${dis}>सब लगाएँ</button>` : ""}</div>
       ${V ? `<label class="chk small"><input type="checkbox" id="vz-sfx" ${E.vzSfx !== false ? "checked" : ""}> हर visual के साथ हल्की whoosh आवाज़</label>
         ${V.items.length ? "" : `<p class="note">कोई लाइन नहीं मिली — वीडियो बहुत छोटा है या transcript में बोलने वाली लाइनें नहीं हैं।</p>`}
-        ${!vp.stock && !vp.ai_image ? `<p class="note">अभी सिर्फ़ “मेरी Library से” चलेगा। Stock के लिए <code>.env</code> में <code>PIXABAY_API_KEY</code>, AI तस्वीर के लिए <code>CLOUDFLARE_ACCOUNT_ID</code> + <code>CLOUDFLARE_API_TOKEN</code>, AI video के लिए <code>FAL_KEY</code> डालें।</p>` : ""}
+        ${!vp.stock && !vp.ai_image ? `<p class="note">अभी सिर्फ़ “मेरी Library से” चलेगा। keys <a href="#/api">API & Keys</a> page में डालें: Stock के लिए <code>PIXABAY_API_KEY</code>, AI तस्वीर के लिए <code>CLOUDFLARE_ACCOUNT_ID</code> + <code>CLOUDFLARE_API_TOKEN</code>, AI video के लिए <code>FAL_KEY</code> डालें।</p>` : ""}
         ${V.items.some((x) => x.by === "words") ? `<p class="small muted">⚠ AI (Gemini) नहीं मिला, इसलिए खोज के शब्द आपकी लाइन से ही लिए गए हैं। Stock खोज English में बेहतर चलती है — शब्द English में बदल लें।</p>` : ""}
         ${V.items.map((x, i) => { const ai = x.src === "ai_image" || x.src === "ai_video"; return `<div class="box aicard" data-vzrow="${i}"><div class="row between"><b>⏱ ${fmt(x.start)}</b><span class="small ${x.status === "error" ? "err" : "muted"}">${esc(x.msg || "")}</span></div>
           <p class="small muted">“${esc(x.text.slice(0, 140))}”</p>
@@ -1775,6 +1859,7 @@ function bindPanel() {
       x.status = "done"; x.msg = `${it.source === "pixabay" ? "Pixabay" : it.source === "ai" ? "AI" : "Library"}: ${it.name || ""}`.slice(0, 60); touch(); renderTimeline();
     } catch (er) { x.status = "error"; x.msg = er.message; }
     if (E.tab === "ai") renderPanel(); };
+  if (E.tab === "ai") supBind(panel);
   on("#vz-go", "onclick", async (e) => { e.target.disabled = true; e.target.textContent = "सोच रहे हैं…"; E.vzN = +$("#vz-n", panel).value;
     try { await flush(); const r = await api("POST", `/projects/${E.pid}/visuals/plan`, { max_items: E.vzN }); const pv = r.providers || {};
       const def = pv.stock ? "stock_video" : pv.ai_image ? "ai_image" : "library";
@@ -2938,10 +3023,10 @@ function renderTimeline() {
   const titleEl = (t, R) => `<div class="itm title ${sel("title", t._id)}" data-item="title:${t._id}" style="left:${OX(t.start)}px;width:${OW(t.start, t.end)}px;${rowCss(R, t)}"><i class="h l"></i>${apTag(t)}<span>${esc(t.text)}</span><i class="h r"></i></div>`;
   const hookEl = E.rs.hook.text ? `<div class="itm hook ${sel("hook", "h")}" data-hook="1" style="left:0;width:${OW(0, Math.min(outDur(), E.rs.hook.seconds || 3))}px"><span>HOOK ${esc(E.rs.hook.text)}</span></div>` : "";
   const brollEl = (b, R) => `<div class="itm broll ${sel("broll", b._id)}" data-item="broll:${b._id}" style="left:${OX(b.start)}px;width:${OW(b.start, b.end)}px;${rowCss(R, b)}"><i class="h l"></i>${apTag(b)}<span>${esc(libItem(b.id)?.name || "B-roll")}${b.fit === "pip" ? " · PiP" : ""}${b.speed_ramp?.length > 1 ? " · ⤳" : +b.speed && +b.speed !== 1 ? ` · ${b.speed}×` : ""}${b.mask?.shape ? " · ⬭" : ""}${b.blend_mode && b.blend_mode !== "normal" ? " · " + b.blend_mode : ""}${+b.volume > 0 ? " · 🔊" : ""}${b.blend && b.blend !== "normal" ? " · " + b.blend : ""}${b.platforms?.length ? ` · ${b.platforms.map((x) => ({ youtube: "YT", instagram: "IG", facebook: "FB" }[x])).join("/")}` : ""}</span><i class="h r"></i></div>`;
-  const sfxLen = (s) => { const it = libItem(s.id); return s.dur || Math.min(it?.meta?.duration || 0.6, 600); };
-  const sfxEl = (s, R) => { const it = libItem(s.id); const w = Math.max(14, sfxLen(s) * pps); return `<div class="itm sfx ${sel("sfx", s._id)}" data-item="sfx:${s._id}" style="left:${OX(s.at)}px;width:${w.toFixed(1)}px;${rowCss(R, s)}" title="${esc(it?.name || "audio")}">${w >= 28 ? `<i class="h l"></i>` : ""}${apTag(s)}<span>${it?.kind === "music" ? "♪ " : ""}${esc(it?.name || "sfx")} · ${Math.round((s.volume ?? 0.8) * 100)}%</span>${w >= 28 ? `<i class="h r"></i>` : ""}</div>`; };
+  const sfxLen = sfxSpan;
+  const sfxEl = (s, R) => { const it = libItem(s.id); const w = Math.max(14, sfxLen(s) * pps); return `<div class="itm sfx ${sel("sfx", s._id)}" data-item="sfx:${s._id}" style="left:${OX(s.at)}px;width:${w.toFixed(1)}px;${rowCss(R, s)}" title="${esc(it?.name || "audio")}">${w >= 28 ? `<i class="h l"></i>` : ""}${apTag(s)}${volKfSvg(s, sfxLen(s))}<span>${it?.kind === "music" ? "♪ " : ""}${esc(it?.name || "sfx")} · ${Math.round((s.volume ?? 0.8) * 100)}%${s.speed && s.speed !== 1 ? ` · ${s.speed}×` : ""}${+s.pitch ? ` · ♪${+s.pitch > 0 ? "+" : ""}${+s.pitch}` : ""}</span>${w >= 28 ? `<i class="h r"></i>` : ""}</div>`; };
   const fxEl = (c, R) => `<div class="itm fxc ${c.kind === "filter" ? "filter" : ""} ${c.enabled === false ? "off" : ""} ${sel("fxclip", c._id)}" data-item="fxclip:${c._id}" style="left:${OX(c.start)}px;width:${OW(c.start, c.end)}px;${rowCss(R, c)}"><i class="h l"></i><span>${c.kind === "filter" ? "🎨" : "✨"} ${esc(fxClipLabel(c))}</span><i class="h r"></i></div>`;
-  const audio = (fx.music.id ? `<div class="itm music ${sel("music", "m")}" data-item="music:m" style="left:${(clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5)) * pps).toFixed(1)}px;width:${((E.dur - clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5))) * pps).toFixed(1)}px"><span>♪ ${esc(libItem(fx.music.id)?.name || "music")} · ${Math.round(fx.music.volume * 100)}%${fx.music.duck !== false ? " · duck" : ""}</span></div>` : "");
+  const audio = (fx.music.id ? `<div class="itm music ${sel("music", "m")}" data-item="music:m" style="left:${(clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5)) * pps).toFixed(1)}px;width:${((E.dur - clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5))) * pps).toFixed(1)}px">${volKfSvg({ vol_kf: volKfSorted(fx.music).map((q) => ({ t: q.t - clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5)), v: q.v })).filter((q) => q.t >= 0) }, outDur() - clamp(+fx.music.at || 0, 0, Math.max(0, E.dur - 0.5)))}<span>♪ ${esc(libItem(fx.music.id)?.name || "music")} · ${Math.round(fx.music.volume * 100)}%${fx.music.duck !== false ? " · duck" : ""}</span></div>` : "");
   const shortsRow = E.shorts.map((sc) => `<div class="itm short ${sc.selected === false ? "off" : ""} ${sel("short", sc.id)}" data-item="short:${sc.id}" style="left:${X(sc.start)}px;width:${Math.max(8, (sc.end - sc.start) * pps).toFixed(1)}px"><i class="h l"></i><span>${esc(sc.title || sc.id)} · ${(sc.end - sc.start).toFixed(0)}s</span><i class="h r"></i></div>`).join("");
   const peaks = E.p.meta?.peaks || [];
   const wave = peaks.length ? `<canvas class="wave" width="${Math.ceil(E.dur * pps)}" height="46"></canvas>` : "";
@@ -3062,9 +3147,9 @@ function snapOut(t, self) {
 function dragEdge(e, it, key, clock, type) {
   if (!E.canEdit) return; const pps = E.pps; e.preventDefault();
   if (type === "sfx") { // audio clip: left edge trims the start, right edge sets the length
-    const len0 = it.dur || libItem(it.id)?.meta?.duration || 1, at0 = it.at, trim0 = it.trim || 0;
+    const sp0 = clamp(+it.speed || 1, 0.5, 2); const len0 = it.dur || (libItem(it.id)?.meta?.duration || 1) / sp0, at0 = it.at, trim0 = it.trim || 0;
     return track(e, (ev, dx) => { const d = dx / pps;
-      if (key === "start") { const dd = clamp(d, -trim0, len0 - 0.1); it.at = +(at0 + dd).toFixed(2); it.trim = +(trim0 + dd).toFixed(2); it.dur = +(len0 - dd).toFixed(2); }
+      if (key === "start") { const dd = clamp(d, -trim0 / sp0, len0 - 0.1); it.at = +(at0 + dd).toFixed(2); it.trim = +(trim0 + dd * sp0).toFixed(2); it.dur = +(len0 - dd).toFixed(2); }
       else it.dur = +clamp(len0 + d, 0.1, 600).toFixed(2);
       renderTimeline(); renderInspector(); }, (m) => { if (m) touch(); }, 1);
   }
@@ -3094,7 +3179,7 @@ function splitAtPlayhead() {
   if (sel && it && ["title", "broll", "sfx", "fxclip"].includes(sel.type)) {
     const b = splitItem(it, sel.type);
     if (b) { touch(); select({ type: sel.type, id: b._id }); E.ctx.toast("✂ दो हिस्से बने"); return; }
-    const [a, e] = sel.type === "sfx" ? [it.at, it.at + (it.dur || libItem(it.id)?.meta?.duration || 0)] : [it.start, it.end];
+    const [a, e] = sel.type === "sfx" ? [it.at, it.at + sfxSpan(it)] : [it.start, it.end];
     E.ctx.toast(`playhead ${fmt(ot)} पर है, चुना item ${fmt(a)}–${fmt(e)} पर — playhead को उस item के ऊपर लाएँ`); return;
   }
   if (sel && it && sel.type === "short") { if (E.t <= it.start + 0.5 || E.t >= it.end - 0.5) return E.ctx.toast("playhead इस Short के बीच रखें"); const b = { ...JSON.parse(JSON.stringify(it)), id: "m" + uid().slice(0, 4), start: +E.t.toFixed(2) }; it.end = +E.t.toFixed(2); E.shorts.push(b); E.shortsDirty = true; touch(); select({ type: "short", id: b.id }); return; }

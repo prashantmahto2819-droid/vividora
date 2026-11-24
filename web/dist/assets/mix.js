@@ -14,6 +14,9 @@ let specs = new Map();           // key → spec (what should exist)
 let duckLevel = 1;               // smoothed duck factor for music
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// volume points [{t, v}] → the multiplier at time t (straight lines, flat outside) — same as engine/effects.vol_expr
+function kfAt(kf, t) { const k = kf.filter((q) => q && isFinite(+q.t) && isFinite(+q.v)).map((q) => [Math.max(0, +q.t), clamp(+q.v, 0, 3)]).sort((a, b) => a[0] - b[0]); if (!k.length) return 1;
+  if (t <= k[0][0]) return k[0][1]; for (let i = 1; i < k.length; i++) if (t < k[i][0]) return k[i - 1][1] + (k[i][1] - k[i - 1][1]) * (t - k[i - 1][0]) / Math.max(0.001, k[i][0] - k[i - 1][0]); return k[k.length - 1][1]; }
 
 function lanes() { return (H.fx().track_audio && typeof H.fx().track_audio === "object") ? H.fx().track_audio : {}; }
 // final gain of a lane after volume, mute and solo (solo on any lane mutes the others) — mirrors engine/effects.py track_gain
@@ -29,12 +32,12 @@ export function laneGain(lane) {
 function collect() {
   const fx = H.fx(); const out = new Map(); const dur = H.outDur();
   if (fx.music?.id) { const it = H.libItem(fx.music.id); if (it?.url) {
-    const f = Math.min(+fx.music.fade || 0, (dur - clamp(+fx.music.at || 0, 0, Math.max(0, dur - 0.5))) / 3);
+    const f = Math.min(+fx.music.fade || 0, (dur - clamp(+fx.music.at || 0, 0, Math.max(0, dur - 0.5))) / 3); const span = dur - clamp(+fx.music.at || 0, 0, Math.max(0, dur - 0.5)); const one = (v) => (v == null || v === "" ? f : Math.min(Math.max(0, +v || 0), span / 2));
     const mAt = clamp(+fx.music.at || 0, 0, Math.max(0, dur - 0.5));
-    out.set("music", { key: "music", url: it.url, start: mAt, end: dur, trim: fx.music.fit ? 0 : Math.max(0, +fx.music.start || 0), vol: fx.music.volume ?? 0.18, fadeIn: f, fadeOut: f, loop: true, rate: 1, lane: "audio", duck: fx.music.duck !== false ? (fx.music.duck_amount ?? 0.6) : 0 }); } }
+    out.set("music", { key: "music", url: it.url, start: mAt, end: dur, trim: fx.music.fit ? 0 : Math.max(0, +fx.music.start || 0), vol: fx.music.volume ?? 0.18, fadeIn: one(fx.music.fade_in), fadeOut: one(fx.music.fade_out), kf: fx.music.vol_kf, kfClock: "out", loop: true, rate: 1, lane: "audio", duck: fx.music.duck !== false ? (fx.music.duck_amount ?? 0.6) : 0 }); } }
   for (const s of fx.sfx || []) { const it = H.libItem(s.id); if (!it?.url) continue;
-    const len = s.dur || Math.min(it.meta?.duration || 0.6, 600);
-    out.set("sfx:" + s._id, { key: "sfx:" + s._id, url: it.url, start: +s.at || 0, end: (+s.at || 0) + len, trim: +s.trim || 0, vol: s.volume ?? 0.8, fadeIn: +s.fade_in || 0, fadeOut: +s.fade_out || 0, loop: false, rate: 1, lane: `audio:${s.track || 0}`, duck: 0 }); }
+    const sp = clamp(+s.speed || 1, 0.5, 2); const len = s.dur || Math.min((it.meta?.duration || 0.6) / sp, 600);
+    out.set("sfx:" + s._id, { key: "sfx:" + s._id, url: it.url, start: +s.at || 0, end: (+s.at || 0) + len, trim: +s.trim || 0, vol: s.volume ?? 0.8, fadeIn: +s.fade_in || 0, fadeOut: +s.fade_out || 0, loop: false, rate: sp, kf: s.vol_kf, lane: `audio:${s.track || 0}`, duck: 0 }); }
   for (const b of fx.broll || []) { if (!(+b.volume > 0)) continue; const it = H.libItem(b.id); if (!it?.url || it.kind === "image") continue;
     out.set("broll:" + b._id, { key: "broll:" + b._id, url: it.url, start: +b.start, end: +b.end, trim: +b.trim_in || 0, vol: +b.volume, fadeIn: 0, fadeOut: 0, loop: false, rate: +b.speed > 0 ? +b.speed : 1, lane: `broll:${b.track || 0}`, duck: 0, overlay: true }); }
   const vt = fx.voice_track; if (vt && vt !== "original") { const a = (E.p.assets || []).find((x) => x.id === vt); if (a?.url)
@@ -109,6 +112,7 @@ export function tick(t) {
     let g = s.vol * laneGain(s.lane);
     if (s.fadeIn > 0 && local < s.fadeIn) g *= local / s.fadeIn;
     if (s.fadeOut > 0 && len - local < s.fadeOut) g *= Math.max(0, (len - local) / s.fadeOut);
+    if (s.kf && s.kf.length) g *= kfAt(s.kf, s.kfClock === "out" ? out : local);
     if (s.duck > 0) g *= 1 - clamp(s.duck, 0, 1) * 0.85 * duckLevel;
     n.gain.gain.setTargetAtTime(clamp(g, 0, 2), now, 0.03);
   }

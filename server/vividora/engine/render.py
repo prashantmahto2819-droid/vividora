@@ -281,9 +281,13 @@ def _shift_items(e: dict, off: float) -> None:
             dur = float(s.get("dur", 0) or 0)
             if dur and dur + at <= 0.05:
                 continue
-            it["trim"] = round(float(s.get("trim", 0) or 0) - at, 3)
+            spd_ = max(0.5, min(2.0, float(s.get("speed") or 1)))
+            it["trim"] = round(float(s.get("trim", 0) or 0) - at * spd_, 3)
             if dur:
                 it["dur"] = round(dur + at, 3)
+            if s.get("vol_kf"):      # volume points are on the clip's own clock, which now starts later
+                it["vol_kf"] = [{"t": max(0.0, float(k["t"]) + at), "v": k["v"]} for k in s["vol_kf"] if isinstance(k, dict) and "t" in k and "v" in k]
+            it["fade_in"] = 0
         sfx.append(it)
     e["sfx"] = sfx
 
@@ -829,7 +833,10 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
                                           duck=bool(music.get("duck", True)), duration=new_dur,
                                           fade=float(music.get("fade", 1.5)), duck_amount=float(music.get("duck_amount", 0.6)),
                                           start=0.0 if music.get("fit") else float(music.get("start", 0) or 0),
-                                          at=float(music.get("at", 0) or 0))
+                                          at=float(music.get("at", 0) or 0),
+                                          fade_in=music.get("fade_in") if music.get("fade_in") not in (None, "") else None,
+                                          fade_out=music.get("fade_out") if music.get("fade_out") not in (None, "") else None,
+                                          kf=music.get("vol_kf"))
             chains.append(chain)
             next_in += 1
         g1 = fx.track_gain(e, "audio")  # lane A1: voice + AI voice-over + music
@@ -846,12 +853,27 @@ def render(*, video: Path, audio: Path | None, meta: dict, edl: dict, transcript
             inputs += ["-i", str(s["path"])]
             ms = int(float(s.get("at", 0)) * 1000)
             trim, dur = float(s.get("trim", 0) or 0), float(s.get("dur", 0) or 0)
-            clip = f"atrim=start={trim:.3f}" + (f":duration={dur:.3f}" if dur > 0 else "") + ",asetpts=PTS-STARTPTS," if (trim or dur) else ""
+            # `dur` is the length on the timeline; at another speed that much × speed of the file is used
+            spd = max(0.5, min(2.0, float(s.get("speed") or 1)))
+            clip = f"atrim=start={trim:.3f}" + (f":duration={dur * spd:.3f}" if dur > 0 else "") + ",asetpts=PTS-STARTPTS," if (trim or dur) else ""
+            tune = fx.pitch_speed(s.get("pitch"), spd)
             fades = ""
             if float(s.get("fade_in", 0) or 0) > 0:
                 fades += f"afade=t=in:d={float(s['fade_in']):.2f},"
-            if float(s.get("fade_out", 0) or 0) > 0 and dur > 0:
-                fades += f"afade=t=out:st={max(0.0, dur - float(s['fade_out'])):.3f}:d={float(s['fade_out']):.2f},"
+            if float(s.get("fade_out", 0) or 0) > 0:
+                length = dur
+                if length <= 0:      # whole file: its real length is needed to know where the fade-out starts
+                    try:
+                        length = max(0.0, float(ffmpeg.probe(Path(s["path"])).get("duration") or 0) - trim) / spd
+                    except Exception:  # noqa: BLE001
+                        length = 0.0
+                if length > 0:
+                    fo_ = min(float(s["fade_out"]), length)
+                    fades += f"afade=t=out:st={max(0.0, length - fo_):.3f}:d={fo_:.2f},"
+            auto = fx.vol_expr(s.get("vol_kf"))
+            if auto:
+                fades += f"volume='{auto}':eval=frame,"
+            fades = tune + fades
             if i in ducked:
                 chains.append(f"[{next_in}:a]{clip}aformat=sample_rates=48000:channel_layouts=mono,{fades}"
                               f"volume={float(s.get('volume', 0.8)) * gk:.3f},adelay={ms}|{ms}[sfxr{i}];"

@@ -578,3 +578,25 @@ All 16 ids of `presets.sticker_anims` animate in the export (`effects._free_over
 (`pro.js stickerAnim`, same maths): fade, pop, bounce, zoom, slide_up, slide_left, drop, shake, float, spin, flip,
 elastic, wiggle, glitch, rotate_in. An overlay that uses a pro field (mask, keyframes, blend mode, speed…) goes through
 the compositor (`engine/compose.py`), which ignores `anim` — use keyframes there.
+
+## Sound batch: volume points, fades, speed, pitch
+
+| item | field | meaning |
+|---|---|---|
+| `effects.music` | `fade_in`, `fade_out` | seconds, each side on its own (absent → the single `fade`) |
+| `effects.music` | `vol_kf: [{t, v}]` | volume points on the **output timeline**; `v` multiplies `volume` (0–3), straight lines between points |
+| `effects.sfx[]` | `vol_kf: [{t, v}]` | the same, `t` from the clip's own start |
+| `effects.sfx[]` | `speed` | 0.5–2 (pitch kept). `dur` stays the length **on the timeline**; `dur × speed` of the file is used |
+| `effects.sfx[]` | `pitch` | −12…+12 semitones (length kept) |
+| `effects.sfx[]` | `fade_out` | now also works when `dur` is empty (the file's real length is read) |
+
+Engine: `effects.vol_expr`, `effects.pitch_speed`, `effects.music_chain`; preview: `mix.js` (`kfAt`; pitch is not previewed).
+
+## Supporting clips of a talk
+
+`POST /api/projects/{id}/support/match` `{clips: [{id, note?}], spread?, image_seconds?, video_seconds?, use_ai?}` →
+`{placements: [{id, name, kind, start, end, i, line, score, how}], ai, ai_on, placed, total}` (SOURCE seconds).
+`how`: `time` (a time written in the note / name) · `ai` (LLM matched the meaning) · `words` (name / tags / note words
+were spoken — Devanagari speech and Latin file names are compared) · `order` (left-overs spread in name order) · `none`.
+Nothing is written: the editor (AI Studio → “Podcast की supporting clips”) shows the list and adds `broll` items
+(`_sup`) when the creator presses “लगाओ”. Engine: `engine/supportmatch.py`.

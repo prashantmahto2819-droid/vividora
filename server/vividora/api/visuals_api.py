@@ -146,6 +146,47 @@ async def job(request: Request, user: dict):
     return ok({k: v for k, v in j.items() if k != "ws"})
 
 
+@require("editor")
+async def support_match(request: Request, user: dict):
+    """Supporting clips / photos of a talk → where each belongs (engine/supportmatch.py). Nothing is changed here: the
+    editor shows the suggestion and puts the clips on the timeline when the creator agrees.
+    Body: {clips: [{id, note?}], spread?: true, image_seconds?: 4, video_seconds?: 6, use_ai?: true}"""
+    from starlette.concurrency import run_in_threadpool
+
+    from ..engine import llm, supportmatch
+    p = own_project(request, user)
+    d = await body(request)
+    rate_limit(request, "support_match", 20)
+    segs = ((p.get("transcript") or {}).get("segments")) or []
+    if not segs:
+        raise ApiError(409, "इस वीडियो का transcript नहीं है — बोले गए शब्दों के बिना जगह नहीं ढूँढी जा सकती। Captions tab से transcript बनाएँ।")
+    raw = d.get("clips") if isinstance(d.get("clips"), list) else []
+    clips = []
+    for c in raw[:60]:
+        if not isinstance(c, dict):
+            continue
+        it = db.get("library", str(c.get("id") or ""))
+        if not it or it["workspace_id"] != user["workspace_id"]:
+            continue
+        meta = it.get("meta") or {}
+        is_img = it["kind"] in ("image", "sticker", "logo") or str(it.get("mime") or "").startswith("image/")
+        clips.append({"id": it["id"], "name": it["name"], "tags": [str(t) for t in (meta.get("tags") or [])][:12], "note": str(c.get("note") or "")[:200],
+                      "kind": "image" if is_img else "video", "duration": float(meta.get("duration") or 0)})
+    if not clips:
+        raise ApiError(422, "पहले supporting clips / photos चुनें या upload करें")
+    edl = p.get("edl") or {}
+    dur = float((p.get("meta") or {}).get("duration") or edl.get("duration") or 0) or None
+    ask = llm.ask_json if (d.get("use_ai", True) and llm.available()) else None
+    num = lambda k, dv, lo, hi: max(lo, min(hi, float(d.get(k) or dv)))  # noqa: E731
+    res = await run_in_threadpool(lambda: supportmatch.match(
+        segs, clips, cuts=edl.get("cuts") or [], duration=dur, spread=bool(d.get("spread", True)),
+        image_seconds=num("image_seconds", 4, 1.5, 15), video_seconds=num("video_seconds", 6, 1.5, 30), ask=ask))
+    names = {c["id"]: c for c in clips}
+    return ok({"placements": [{**r, "name": names[r["id"]]["name"], "kind": names[r["id"]]["kind"]} for r in res],
+               "ai": any(r["how"] == "ai" for r in res), "ai_on": bool(ask), "placed": sum(1 for r in res if r["start"] is not None), "total": len(res)})
+
+
 routes = [Route("/projects/{project_id}/visuals/plan", plan, methods=["POST"]),
+          Route("/projects/{project_id}/support/match", support_match, methods=["POST"]),
           Route("/projects/{project_id}/visuals/fetch", fetch, methods=["POST"]),
           Route("/visuals/jobs/{job_id}", job)]

@@ -205,9 +205,50 @@ def flash_filter(cut_times: list[float], color: str = "white", alpha: float = 0.
     return f"drawbox=color={color}@{alpha}:t=fill:enable='{enable}'"
 
 
+def vol_expr(points, offset: float = 0.0) -> str:
+    """Volume automation: [{t, v}] (seconds, multiplier 0..3) → an ffmpeg expression in `t`, straight lines between the
+    points, flat before the first and after the last. `offset` is added to t (a clip that starts later on the timeline).
+    '' when there is nothing to automate."""
+    pts = []
+    for p_ in points or []:
+        try:
+            t_, v_ = float(p_["t"]), float(p_["v"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if t_ == t_ and v_ == v_:
+            pts.append((max(0.0, t_), max(0.0, min(3.0, v_))))
+    pts = sorted({round(t_, 3): v_ for t_, v_ in pts}.items())[:24]
+    if not pts or (len(pts) == 1 and abs(pts[0][1] - 1) < 1e-3) or all(abs(v_ - 1) < 1e-3 for _, v_ in pts):
+        return ""
+    tt = f"(t+{offset:.3f})" if offset else "t"
+    expr = f"{pts[-1][1]:.4f}"
+    for (t0, v0), (t1, v1) in reversed(list(zip(pts, pts[1:]))):
+        seg = f"{v0:.4f}+({v1 - v0:.4f})*({tt}-{t0:.3f})/{max(0.001, t1 - t0):.3f}"
+        expr = f"if(lt({tt}\\,{t1:.3f})\\,{seg}\\,{expr})"
+    return f"if(lt({tt}\\,{pts[0][0]:.3f})\\,{pts[0][1]:.4f}\\,{expr})"
+
+
+def pitch_speed(pitch: float = 0.0, speed: float = 1.0) -> str:
+    """Filters (with a trailing comma, or '') for a 48 kHz stream: pitch in semitones (the length stays), then speed
+    0.5–2× (the pitch stays)."""
+    out = ""
+    try:
+        pitch = max(-12.0, min(12.0, float(pitch or 0)))
+        speed = max(0.5, min(2.0, float(speed or 1)))
+    except (TypeError, ValueError):
+        return ""
+    if abs(pitch) > 0.01:
+        f = 2 ** (pitch / 12)
+        out += f"asetrate={48000 * f:.1f},aresample=48000,atempo={1 / f:.5f},"
+    if abs(speed - 1) > 0.005:
+        out += f"atempo={speed:.4f},"
+    return out
+
+
 def music_chain(voice_label: str, music_index: int, *, volume: float = 0.18, duck: bool = True,
                 duration: float, fade: float = 1.5, duck_amount: float = 0.6,
-                start: float = 0.0, at: float = 0.0) -> tuple[str, str]:
+                start: float = 0.0, at: float = 0.0, fade_in: float | None = None, fade_out: float | None = None,
+                kf=None) -> tuple[str, str]:
     """Mix background music under the voice. Returns (filter_text, output_label).
     duck_amount 0..1 — how much the music drops while someone speaks.
     start: skip this many seconds into the song; at: the music comes in at this second of the video."""
@@ -215,10 +256,16 @@ def music_chain(voice_label: str, music_index: int, *, volume: float = 0.18, duc
     start = max(0.0, float(start or 0))
     span = duration - at
     fade = max(0.0, min(float(fade), span / 3))
+    # fade_in / fade_out (when given) replace the single "fade" on their side; kf = volume points on the video's clock
+    fi = fade if fade_in is None else max(0.0, min(float(fade_in), span / 2))
+    fo = fade if fade_out is None else max(0.0, min(float(fade_out), span / 2))
+    auto = vol_expr(kf, at)
     m = (f"[{music_index}:a]aformat=sample_rates=48000:channel_layouts=mono,"
          + (f"atrim=start={start:.3f}:duration={span:.3f}" if (start or at) else f"atrim=0:{duration:.3f}")
          + f",asetpts=PTS-STARTPTS,volume={volume:.3f}"
-         + (f",afade=t=in:d={fade:.2f},afade=t=out:st={max(0.0, span - fade):.3f}:d={fade:.2f}" if fade > 0 else "")
+         + (f",volume='{auto}':eval=frame" if auto else "")
+         + (f",afade=t=in:d={fi:.2f}" if fi > 0 else "")
+         + (f",afade=t=out:st={max(0.0, span - fo):.3f}:d={fo:.2f}" if fo > 0 else "")
          + (f",adelay={int(at * 1000)}:all=1" if at > 0 else "")
          + "[mus]")
     if duck:
