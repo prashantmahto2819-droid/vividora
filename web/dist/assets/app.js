@@ -6,6 +6,7 @@ import * as VO from "./voice.js";
 import * as CHS from "./chars.js";
 import * as SCN from "./scenes.js";
 import * as TL from "./tools.js";
+import * as LRN from "./learn.js";
 // 3D Studio (characters / scenes): lazy — three.js (~700 KB) only loads when the page opens
 const C3D = { mod: null, async mount(kind, root, ctx) { const ui = await import("./chars3d-ui.js"); const sc = await import("./scenes3d.js"); this.mod = { ui, sc }; return kind === "scenes3d" ? sc.mountScenes(root, ctx) : ui.mountStudio(root, ctx); },
   unmount() { this.mod?.ui.unmountStudio(); this.mod?.sc.unmountScenes(); } };
@@ -158,7 +159,7 @@ const NAV = [
   ["Design · आवाज़ · 3D", [["thumbs", "#/thumbs", "image", "Thumbnails"], ["templates", "#/templates", "image", "Templates"], ["voicestudio", "#/voicestudio", "music", "Voice Studio (TTS)", 1], ["characters", "#/characters", "person", "Characters", 1], ["scenes", "#/scenes", "clap", "Scenes", 1], ["characters3d", "#/characters3d", "cube", "3D Studio", 1], ["image3d", "#/image3d", "cube", "Image → 3D (.glb)", 1]]],
   ["Channel बढ़ाएँ", [["plan", "#/plan", "bulb", "Plan"], ["trends", "#/trends", "trend", "Trends"], ["analytics", "#/analytics", "chart", "Analytics"], ["dashboard", "#/dashboard", "grid", "Dashboard"], ["copilot", "#/copilot", "pulse", "Copilot"], ["publish", "#/publish", "send", "Publish"]]],
   ["Library & Brand", [["library", "#/library", "lib", "Library"], ["settings", "#/settings", "tv", "Channels & Brand"]]],
-  ["Settings", [["account", "#/account", "gear", "Account & Security"], ["api", "#/api", "gear", "API & Keys", 1], ["users", "#/users", "tv", "Users", 2], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "Help"]]],
+  ["Settings", [["account", "#/account", "gear", "Account & Security"], ["api", "#/api", "gear", "API & Keys", 1], ["users", "#/users", "tv", "Users", 2], ["status", "#/status", "pulse", "Status"], ["help", "#/help", "help", "सीखें (Tutorials)"]]],
 ];
 // the pages of the "Settings" family link to each other from a strip at the top of each
 function settingsHub() {
@@ -204,9 +205,18 @@ function bindShell() {
 
 // ---------- views ----------
 const EDITOR_STATUS = ["review_cuts", "rendering", "review_output", "approved"];
+// ⓘ in the corner of every page: the lesson of the page (or editor tab) you are on
+function learnFab() {
+  if (!$("#lrn-css")) { const st = document.createElement("style"); st.id = "lrn-css"; st.textContent = LRN.LEARN_CSS; document.head.appendChild(st); }
+  let b = $("#lrn-fab");
+  if (!S.token || S.route.kind === "record") { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement("button"); b.id = "lrn-fab"; b.className = "lrn-fab"; b.title = "यह कैसे इस्तेमाल करें"; b.setAttribute("aria-label", "इस page का तरीका"); b.textContent = "i"; document.body.appendChild(b);
+    b.onclick = () => LRN.openLesson(LRN.lessonKey(S.route, location.hash, document.querySelector(".ed-tabs button.on")?.dataset.tab)); }
+  b.classList.toggle("in-editor", S.route.kind === "projects" && !!S.route.id);
+}
 function render() {
   const app = $("#app");
-  closeMenu();
+  closeMenu(); learnFab();
   if (!S.token) { ED.unmount(); TH.unmount(); VO.unmount(); app.dataset.mode = ""; app.innerHTML = loginView(); bindLogin(); return; }
   if (S.route.kind === "signup" || S.route.kind === "forgot" || S.route.kind === "reset") { go("/"); return; }
   const r = S.route;
@@ -260,7 +270,7 @@ function render() {
   app.innerHTML = shellHTML(main, ["home", "projects", "thumbs", "publish", "library", "help", "trends", "templates"].includes(r.kind) && !detail);
   bindShell();
   const binds = { new: bindNew, users: bindUsers, settings: bindSettings, plan: bindPlan, analytics: bindAnalytics, dashboard: bindDashboard, copilot: bindCopilot, library: bindLibrary, home: bindHome,
-                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts, voicestudio: () => TL.voiceBind({ S, api, toast, go }), image3d: () => TL.glbBind({ S, api, toast, go }), api: () => TL.apiBind({ S, api, toast, go }), documentary: () => TL.docBind({ S, api, toast, go }) };
+                  publish: bindPublish, trends: bindTrends, account: bindAccount, thumbs: bindCards, compress: bindCompress, templates: bindTemplates, billing: bindBilling, admin: bindAdmin, characters: () => CHS.bind({ S, api, toast, go }), scenes: () => SCN.bind({ S, api, toast, go }), "yt-shorts": bindYtShorts, voicestudio: () => TL.voiceBind({ S, api, toast, go }), image3d: () => TL.glbBind({ S, api, toast, go }), api: () => TL.apiBind({ S, api, toast, go }), help: () => LRN.learnPageBind(), documentary: () => TL.docBind({ S, api, toast, go }) };
   if (detail) { if (S.project) bindProject(S.project); } else if (r.kind === "projects") bindProjects(); else (binds[r.kind] || (() => {}))();
 }
 
@@ -1551,7 +1561,9 @@ function helpView() {
     ["trend", "Trends", "#/trends", "Google Trends, YouTube Top और आपके पसंदीदा channels।"], ["send", "Publish", "#/publish", "YouTube, Instagram, Facebook और TikTok पर — मंज़ूरी के बाद, तय समय पर।"],
     ["chart", "Analytics", "#/analytics", "क्या चल रहा है — style, hook और लंबाई से सीख।"], ["grid", "Dashboard", "#/dashboard", "Projects, publishes, renders, storage — सब stats एक नज़र में।"], ["lib", "Library", "#/library", "Music, SFX, stickers, frames और LUTs — सब licence-safe।"],
     ["tv", "Channels & Brand", "#/settings", "कई channels, brand kit और connections।"], ["gear", "Settings", "#/account", "Password, users और storage की सफ़ाई।"]];
-  return `<div class="pghead"><div><h1>Help</h1><p class="muted small">Vividora के सारे modules — एक नज़र में।</p></div></div>
+  return `<div class="pghead"><div><h1>📚 सीखें</h1><p class="muted small">हर page और editor के हर tab का तरीका — छोटे कदमों में। किसी भी page पर ऊपर कोने का <b>ⓘ</b> दबाएँ तो उसी page का तरीका खुलता है।</p></div></div>
+    ${LRN.learnPageHtml()}
+    <h2 style="margin:1.6rem 0 .6rem;font-size:1rem;opacity:.8">सारे modules</h2>
     <div class="helpgrid">${mods.map(([i, t, h, d]) => `<a class="hcard" href="${h}">${ic(i)}<b>${t}</b><span class="small muted">${d}</span></a>`).join("")}</div>
     <div class="hcols2"><section class="card"><div class="card-h"><h2>वीडियो कैसे बनता है</h2></div><ol class="steps"><li><b>Record / Upload</b> — Autopilot चालू रखें</li><li><b>जाँच</b> — preview, आवाज़ साफ़, चेहरा tracking</li><li><b>Transcript</b> — हिंदी शब्द-दर-शब्द timing</li><li><b>कट</b> — चुप्पी, अं-आं, दोबारा बोला हुआ</li><li><b>Render</b> — captions, zoom, music, Shorts + 3 thumbnails</li><li><b>मंज़ूरी</b> → <b>Publish</b> (★ thumbnail के साथ)</li></ol></section>
       <section class="card"><div class="card-h"><h2>Tips</h2></div><ul class="hlist">${TIPS.map((t) => `<li>${t}</li>`).join("")}</ul>
@@ -1670,6 +1682,7 @@ function showOnboarding() {
     { href: "#/templates", icon: "📋", title: "Templates देखें", desc: `${(S.templates || []).length || 80}+ industry templates`, tag: "तैयार" },
     { href: "#/characters", icon: "👤", title: "2D / 3D Characters", desc: "200+ animated characters — Pixar quality", tag: "नया" },
     { href: "#/settings", icon: "🎨", title: "Brand Kit सेट करें", desc: "logo, रंग, font, watermark", tag: "" },
+    { href: "#/help", icon: "📚", title: "सीखें — 2 मिनट में", desc: "हर page का तरीका; बाद में कभी भी ऊपर कोने का ⓘ दबाएँ", tag: "tutorial" },
   ];
   overlay.innerHTML = `<div class="onboard-card">
     <div class="onboard-header">
