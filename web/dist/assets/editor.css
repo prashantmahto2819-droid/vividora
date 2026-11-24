@@ -689,3 +689,5 @@ label.btn.disabled { opacity: .5; pointer-events: none; }
 .cutrep { margin: .5rem 0; }
 .cutrep-row { display: flex; align-items: center; gap: .5rem; padding: .15rem 0; }
 .cutrep-row label { flex: 1; min-width: 0; } .cutrep-row .btn.on { background: var(--amber); color: #111; }
+
+.spktag{display:inline-block;font-size:.66rem;line-height:1;padding:.14rem .32rem;border:1px solid;border-radius:.6rem;margin:0 .25rem;white-space:nowrap;opacity:.9}

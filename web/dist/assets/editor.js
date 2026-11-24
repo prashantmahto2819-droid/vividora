@@ -1284,6 +1284,9 @@ function spkClose(f, zoom) { const z = clamp(clamp(0.36 / Math.max(0.05, f.h), 1
   return { zoom: +z.toFixed(3), x: +clamp((f.x - 0.5 / z) / sl, 0, 1).toFixed(4), y: +clamp((cy - 0.42 / z) / sl, 0, 1).toFixed(4) }; }
 function spkName(P, who) { const pp = (P.people || [])[who]; if (!pp) return "?"; if (pp.cam === 2) return "कैमरा 2"; const mains = (P.people || []).filter((x) => x.cam === 1); if (mains.length < 2) return "मुख्य कैमरा"; const i = mains.indexOf(pp); return i === 0 ? "बायाँ व्यक्ति" : i === mains.length - 1 ? "दायाँ व्यक्ति" : "बीच वाला"; }
 function coverPos(fx, item) { const sa = (item?.meta?.width || 16) / (item?.meta?.height || 9); const win = frameRatio() / sa; return win >= 0.99 ? 50 : +(clamp((fx - win / 2) / (1 - win), 0, 1) * 100).toFixed(1); }
+// who speaks at source second t → a small name tag for the transcript list ("" when there is no speaker plan)
+function spkTag(t) { const P = E.rs.effects.speaker; if (!P || !Array.isArray(P.shots) || !P.shots.length) return ""; let who = null; for (const sh of P.shots) { if (sh.start > t) break; who = sh.who; } if (who == null) return "";
+  const col = (Array.isArray(P.caption_colors) && P.caption_colors[who]) || SPK_COLORS[who % 3]; return `<span class="spktag" title="${E.ctx.esc(spkName(P, who))}" style="border-color:${col};color:${col}">${E.ctx.esc(spkName(P, who).split(" ")[0])}</span>`; }
 const SPK_COLORS = ["#FFFFFF", "#FFD400", "#7CE0FF"];
 // podcast captions: the text colour of whoever speaks at source second t ("" = the style's own colour)
 function spkColorAt(t) { const P = E.rs.effects.speaker; if (!P || P.enabled === false || !Array.isArray(P.caption_colors) || !Array.isArray(P.shots)) return ""; let who = null; for (const sh of P.shots) { if (sh.start > t) break; who = sh.who; } return (who != null && P.caption_colors[who]) || ""; }
@@ -1697,7 +1700,7 @@ function renderPanel() {
         ${E.capSel.size ? `<button class="btn small" id="cap-sel-rel" ${dis}>🔄 चुनी ${E.capSel.size} lines दोबारा सुनो</button><button class="btn small danger quiet" id="cap-sel-del" ${dis}>🗑 चुनी lines हटाएँ</button>` : `<span class="small muted">☐ से कई lines चुनें</span>`}</div>
       <ul class="plist caps">${(() => { const cs = captionChunks(); const firstOf = new Set(); return cs.map((c) => { const seg = segOfWord(c.words[0]); const showAlts = seg && seg.alts?.length && !firstOf.has(seg) && firstOf.add(seg);
         const busy = rangeBusy(c.start, c.end); const sel = E.sel?.type === "caption" && captionAt(E.sel.id)?.start === c.start;
-        return `<li data-capst="${c.start}" class="${sel ? "sel" : ""} ${busy ? "busy" : ""}"><input type="checkbox" class="capchk" data-capst="${c.start}" ${E.capSel.has(c.start) ? "checked" : ""} ${dis}><span class="small muted capt">${fmt(c.start)}</span>
+        return `<li data-capst="${c.start}" class="${sel ? "sel" : ""} ${busy ? "busy" : ""}"><input type="checkbox" class="capchk" data-capst="${c.start}" ${E.capSel.has(c.start) ? "checked" : ""} ${dis}><span class="small muted capt">${fmt(c.start)}</span>${spkTag(c.start + 0.05)}
           <input class="capedit" data-capst="${c.start}" value="${esc(c.words.map((w) => w.w).join(" "))}" ${dis} ${busy ? "disabled" : ""}>
           ${busy ? `<span class="spin" title="दोबारा सुन रहे…"></span>` : `<button class="ibtn" data-caprel="${c.start}" title="🔄 दोबारा सुनो — सिर्फ़ यह line फिर से transcribe" ${dis}>🔄</button>`}<button class="ibtn" data-capdel="${c.start}" title="यह caption हटाएँ" ${dis} ${busy ? "disabled" : ""}>${ICON.trash}</button>
           ${showAlts ? altsHtml(seg, dis) : ""}</li>`; }).join(""); })() || `<li class="small muted">अभी कोई caption नहीं</li>`}</ul>`;
