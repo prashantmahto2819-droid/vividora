@@ -3,7 +3,10 @@
 #   docker compose up -d --build
 services:
   api:
-    build: ./server
+    build:
+      context: ./server
+      args:
+        WITH_WHISPERX: ${WITH_WHISPERX:-0}      # 1 = also install WhisperX (exact word times, +2 GB) — docs/whisperx.md
     image: vividora/server
     restart: always
     env_file: .env

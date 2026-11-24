@@ -133,9 +133,10 @@ async def list_items(request: Request, user: dict):
         args.append(f"%,{safe_tag},%")
     text = request.query_params.get("q")
     if text:
-        q += " AND (name LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')"
+        # also what the AI saw inside the clip (meta.ai_seen, written when supporting clips are matched) — "पहाड़", "laptop" …
+        q += " AND (name LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR meta LIKE ? ESCAPE '\\')"
         safe_text = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        args += [f"%{safe_text}%", f"%{safe_text}%"]
+        args += [f"%{safe_text}%", f"%{safe_text}%", f'%"ai_seen": "%{safe_text}%']
     rows = db.rows(db.conn().execute(q + " ORDER BY created_at DESC LIMIT 1500", args))
     return ok([_view(r) for r in rows])
 

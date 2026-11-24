@@ -286,8 +286,14 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
             transcript = project.get("transcript") or {"segments": []}
             duration = float(project["meta"].get("duration") or 0)
             audio = _fetch(client, assets, "audio_asr", tmp, required=False)
-            sil = ffmpeg.silences(audio) if audio else []
+            sil, sil_by = (ffmpeg.silences(audio) if audio else []), "loudness"
+            from ..engine import vad
+            if audio and vad.engine_setting() == "silero":
+                smart = vad.silences(audio, duration)
+                if smart is not None:
+                    sil, sil_by = smart, "silero"
             edl = autocut.build_edl(transcript, duration, sil, job["payload"].get("options"))
+            edl.setdefault("stats", {})["silence_engine"] = sil_by
             if not job["payload"].get("visual"):
                 return {"edl": edl}
             # transcript-free cut: scene changes (on the 720p proxy) become markers; long dead air is cut by the silences above
@@ -724,6 +730,12 @@ def handle(client: ApiClient, job: dict, project: dict, assets: list[dict]) -> d
                 tr = transcribe_file(audio, language=pl.get("language", "hi"), prompt=pl.get("prompt"),
                                      on_progress=lambda f, m: prog(f * 0.93, m), window=window,
                                      alternatives=int(pl.get("alternatives", 0) or 0), model=pl.get("model") or None)
+            if not window:
+                from ..engine import align
+                if align.wanted() and align.available():
+                    prog(0.94, "शब्दों का समय ठीक कर रहा हूँ (WhisperX)")
+                    tr, n_al = align.refine(tr, audio, pl.get("language", "hi"))
+                    log.info("word alignment: %s words moved", n_al)
             from ..engine import vocab
             tr, nfix = vocab.apply_fixes(tr, pl.get("fixes"))
             for alt in tr.get("alts") or []:

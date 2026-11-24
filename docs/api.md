@@ -166,3 +166,10 @@ transcribe job is cancelled; cuts and effects are untouched).
   (text → video in the AI picture's shape, $0.02 / second at 720p; `RUNPOD_VIDEO_DRAFT=1` = 75 % cheaper previews).
 * Every request passes the spending limit; the answer's own `output.cost` is what gets recorded (`runpod_tts`, `runpod_tts_sec`, `runpod_video`).
 * Transcript on RunPod stays the creator's own "Faster Whisper" serverless endpoint (`RUNPOD_WHISPER_ENDPOINT`) — RunPod has no public Whisper endpoint.
+
+### Smarter silence and word times (both off by default)
+
+* `SILENCE_ENGINE=silero` (API & Keys): auto-cut silences come from Silero VAD (`engine/vad.py`, the model inside faster-whisper)
+  instead of ffmpeg's loudness rule; `edl.stats.silence_engine` says which one was used. No voice heard / model missing → loudness rule.
+* `WORD_ALIGN=whisperx` + image built with `WITH_WHISPERX=1`: `engine/align.py` refines word times after a transcript (docs/whisperx.md).
+* `GET /api/library?q=` also searches what the AI saw inside a clip (`meta.ai_seen`).

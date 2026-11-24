@@ -73,6 +73,12 @@ CATALOG += [
     {"env": "AI_VIDEO_PROVIDER", "group": "run", "label": "AI video clips कहाँ बनें", "secret": False,
      "choices": {"auto": "Auto — fal.ai हो तो वही, नहीं तो RunPod", "fal": "fal.ai (AI तस्वीर को हिलाता है)", "runpod": "RunPod p-video (बात से सीधा clip, ~$0.02/सेकंड)"},
      "use": "दोनों keys हों तब चुनें; जिसकी key नहीं उसका विकल्प काम नहीं करेगा", "link": ""},
+    {"env": "SILENCE_ENGINE", "group": "run", "label": "चुप्पी कैसे पहचानें (auto-cut)", "secret": False,
+     "choices": {"loudness": "आवाज़ की ऊँचाई से (पहले जैसा)", "silero": "Silero — इंसानी आवाज़ पहचानकर (शोर / पंखे / music में बेहतर)"},
+     "use": "नई upload और “transcript दोबारा बनाएँ” पर लागू। model न चले तो अपने-आप पहले वाला तरीका", "link": ""},
+    {"env": "WORD_ALIGN", "group": "run", "label": "शब्दों का सटीक समय (WhisperX)", "secret": False,
+     "choices": {"off": "बंद (Whisper का अपना समय)", "whisperx": "WhisperX — हर शब्द आवाज़ से मिलाकर (worker में whisperx install होना चाहिए)"},
+     "use": "karaoke captions और text से कट ज़्यादा सटीक। install न हो तो कुछ नहीं बदलता। देखें docs/whisperx.md", "link": ""},
     {"env": "RUNPOD_WHISPER_ENDPOINT", "group": "run", "label": "RunPod Whisper endpoint ID", "secret": False,
      "use": "RunPod → Serverless → “Faster Whisper” endpoint की ID (Min workers = 0 रखें)", "link": "https://www.runpod.io/console/serverless"},
 ]
@@ -85,7 +91,7 @@ _SETTINGS = {"PUBLIC_URL": "public_url", "YT_CLIENT_ID": "yt_client_id", "YT_CLI
              "TIKTOK_CLIENT_KEY": "tiktok_client_key", "TIKTOK_CLIENT_SECRET": "tiktok_client_secret"}
 # what a worker process uses itself (AI calls made while a job runs)
 WORKER_ENVS = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "FAL_KEY", "ELEVENLABS_API_KEY",
-               "TRANSCRIBE_ENGINE", "TRANSCRIBE_AUTO_MIN", "RUNPOD_API_KEY", "RUNPOD_WHISPER_ENDPOINT", "AI_VIDEO_PROVIDER")
+               "TRANSCRIBE_ENGINE", "TRANSCRIBE_AUTO_MIN", "RUNPOD_API_KEY", "RUNPOD_WHISPER_ENDPOINT", "AI_VIDEO_PROVIDER", "SILENCE_ENGINE", "WORD_ALIGN")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS provider_keys (
   env TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT);"""

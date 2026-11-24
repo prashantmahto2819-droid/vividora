@@ -28,3 +28,12 @@ RUN mkdir -p /usr/local/share/fonts/vividora && cp fonts/*.ttf /usr/local/share/
 ENV PYTHONUNBUFFERED=1 PRESETS_DIR=/app/presets WEB_DIST=/app/web-dist
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "vividora.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Optional: WhisperX forced alignment (exact word times). Off unless the image is built with WITH_WHISPERX=1 (.env) —
+# it brings CPU PyTorch (~2 GB). Kept last so a normal build never pays for it. See docs/whisperx.md
+ARG WITH_WHISPERX=0
+RUN if [ "$WITH_WHISPERX" = "1" ]; then \
+      pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu \
+      && pip install --no-cache-dir whisperx \
+      && python -c "import whisperx, faster_whisper; print('whisperx ok')"; \
+    fi
