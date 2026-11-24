@@ -240,6 +240,67 @@ async def still(request: Request, user: dict):
     return ok(_view(db.get("library", item_id)), status=201)
 
 
+def _music(job_id: str, ws: str, user_id: str, opts: dict) -> None:
+    st = _JOBS[job_id]
+    try:
+        from ..engine import aimusic
+        from .library import _add_file, _view
+        with tempfile.TemporaryDirectory(prefix="vividora-aimusic-") as d:
+            st["message"] = "fal.ai पर music बन रहा है… (आधे से एक मिनट)"
+            out = aimusic.generate(opts["prompt"], opts["seconds"], Path(d) / "ai_music.mp3")
+            st["message"] = "Library में रख रहा हूँ…"
+            item = _add_file(ws, user_id, "music", out, name=opts["name"], tags=",".join(x for x in ("ai", opts.get("mood") or "") if x),
+                             source="ai", license="AI-generated (fal.ai) — अपने video में इस्तेमाल के लिए", channel_id=opts.get("channel_id"), move=True)
+        with db.tx() as c:
+            db.update(c, "library", item["id"], {"meta": {**(item.get("meta") or {}), "ai_prompt": opts["prompt"][:400]}})
+        st.update(status="done", message="तैयार", item=_view(db.get("library", item["id"])))
+    except Exception as e:  # noqa: BLE001 — the job reports it
+        log.info("ai music failed: %s", e)
+        st.update(status="error", error=str(e)[:300], message="नहीं हो पाया")
+    finally:
+        st["ended"] = time.time()
+
+
+@require("editor")
+async def music_generate(request: Request, user: dict):
+    """Background music from a description (engine/aimusic.py, fal.ai). Body: {mood?, text?, seconds?: 10–180, name?,
+    project_id?} → 202 {job, usd}; GET /visuals/jobs/{job} → `item` = the new Library music."""
+    from ..engine import aimusic
+    d = await body(request)
+    rate_limit(request, "music_generate", 10)
+    if not aimusic.ready():
+        raise ApiError(409, "fal.ai की key नहीं है — Settings → API & Keys में FAL_KEY डालें (music का दाम: लगभग $0.02 प्रति मिनट)")
+    mood = d.get("mood") if d.get("mood") in aimusic.MOODS else None
+    try:
+        seconds = max(10.0, min(180.0, float(d.get("seconds") or 60)))
+    except (TypeError, ValueError):
+        raise ApiError(422, "seconds संख्या होनी चाहिए")
+    text = str(d.get("text") or "")[:300]
+    if not mood and not text.strip():
+        raise ApiError(422, "mood चुनें या लिखें कि कैसा music चाहिए")
+    channel = None
+    if d.get("project_id"):
+        p = db.get("projects", str(d["project_id"]))
+        channel = p.get("channel_id") if p and p["workspace_id"] == user["workspace_id"] else None
+    label = aimusic.MOODS[mood][0].split(" / ")[0] if mood else text[:30]
+    opts = {"prompt": aimusic.build_prompt(mood, text), "seconds": seconds, "mood": mood, "channel_id": channel,
+            "name": (str(d.get("name") or "").strip() or f"AI music · {label} · {int(seconds)}s")[:100]}
+    ws = user["workspace_id"]
+    with _LOCK:
+        if any(j["ws"] == ws and j["status"] == "running" and j.get("source") == "ai_music" for j in _JOBS.values()):
+            raise ApiError(429, "एक music अभी बन रहा है — उसे पूरा होने दें")
+        job_id = db.new_id()
+        _JOBS[job_id] = {"ws": ws, "status": "running", "message": "शुरू…", "source": "ai_music", "started": time.time()}
+    threading.Thread(target=_music, args=(job_id, ws, user["id"], opts), daemon=True).start()
+    return ok({"job": job_id, "usd": aimusic.estimate_usd(seconds)}, status=202)
+
+
+@require("viewer")
+async def music_moods(request: Request, user: dict):
+    from ..engine import aimusic
+    return ok({"ready": aimusic.ready(), "usd_per_min": aimusic.estimate_usd(60), "moods": [{"id": k, "label": v[0]} for k, v in aimusic.MOODS.items()]})
+
+
 _SCANS: dict[tuple, dict] = {}      # (file, mtime) → speakers.scan result; a second plan with another style is instant
 
 
@@ -363,6 +424,8 @@ async def speakers_plan(request: Request, user: dict):
 
 routes = [Route("/projects/{project_id}/visuals/plan", plan, methods=["POST"]),
           Route("/projects/{project_id}/speakers/plan", speakers_plan, methods=["POST"]),
+          Route("/music/generate", music_generate, methods=["POST"]),
+          Route("/music/moods", music_moods),
           Route("/projects/{project_id}/still", still, methods=["POST"]),
           Route("/projects/{project_id}/support/match", support_match, methods=["POST"]),
           Route("/projects/{project_id}/visuals/fetch", fetch, methods=["POST"]),

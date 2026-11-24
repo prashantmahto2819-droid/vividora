@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 SEEN: list[tuple[str, dict]] = []
+KEY: str | None = "Key test-key"
 
 
 def wav_bytes(seconds: float, sr: int = 44100) -> bytes:
@@ -38,7 +39,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
-        assert self.headers.get("Authorization") == "Key test-key"
+        assert KEY is None or self.headers.get("Authorization") == KEY
         SEEN.append((self.path.strip("/"), body))
         n = len(SEEN)
         base = f"http://127.0.0.1:{self.server.server_port}"
@@ -49,11 +50,13 @@ class H(BaseHTTPRequestHandler):
         if self.path.startswith("/st/"):
             return self._json({"status": "COMPLETED"})
         if self.path.startswith("/res/"):
-            return self._json({"audio": {"url": f"{base}/file/{self.path.split('/')[-1]}.wav"}})
+            n = int(self.path.split("/")[-1])
+            key = "audio_file" if "music" in SEEN[n - 1][0] else "audio"
+            return self._json({key: {"url": f"{base}/file/{n}.wav"}})
         if self.path.startswith("/file/"):
             n = int(self.path.split("/")[-1].split(".")[0])
             text = SEEN[n - 1][1].get("text") or SEEN[n - 1][1].get("prompt") or ""
-            d = wav_bytes(len(text) / 14.0)
+            d = wav_bytes(float(SEEN[n - 1][1]["duration"]) if "duration" in SEEN[n - 1][1] else len(text) / 14.0)
             self.send_response(200)
             self.send_header("content-type", "audio/wav")
             self.send_header("content-length", str(len(d)))
@@ -98,8 +101,23 @@ def main():
         m, b = SEEN[n0]
         assert m == "fal-ai/kokoro/hindi" and b == {"prompt": "नमस्ते दोस्तों।", "voice": "hm_psi", "speed": 1.0}, (m, b)
     chars = sum(len(b.get("text") or b.get("prompt")) for _, b in SEEN)
-    assert all(k == "fal_tts" for k, _, _ in spent) and abs(sum(u for _, u, _ in spent) - chars / 1000) < 0.01
-    assert abs(sum(c for _, _, c in spent) - chars / 1000 * 0.025) < 1e-3, spent
+    # AI music: one request, an MP3 of the asked length, priced per minute
+    from vividora.engine import aimusic
+    with tempfile.TemporaryDirectory() as d:
+        n0, s0 = len(SEEN), len(spent)
+        prompt = aimusic.build_prompt("indian", "हल्की बाँसुरी")
+        assert "sitar" in prompt and "हल्की बाँसुरी" in prompt and "no vocals" in prompt
+        mp3 = aimusic.generate(prompt, 45, Path(d) / "m.mp3")
+        m, b = SEEN[n0]
+        assert m == "cassetteai/music-generator" and b == {"prompt": prompt, "duration": 45}, (m, b)
+        import subprocess
+        dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(mp3)], capture_output=True, text=True).stdout)
+        assert abs(dur - 45) < 0.5 and mp3.read_bytes()[:3] in (b"ID3", b"\xff\xfb\x90") or mp3.stat().st_size > 10000, dur
+        assert spent[s0] == ("ai_music", 0.75, 0.015), spent[s0]
+        assert aimusic.estimate_usd(180) == 0.06
+    spent_tts = [x for x in spent if x[0] == "fal_tts"]
+    assert abs(sum(u for _, u, _ in spent_tts) - chars / 1000) < 0.01
+    assert abs(sum(c for _, _, c in spent_tts) - chars / 1000 * 0.025) < 1e-3, spent
     # the spending limit stops the next line
     meter.configure(lambda e: None, lambda: 0.0)
     try:
@@ -108,7 +126,8 @@ def main():
         raise AssertionError("limit reached → must stop")
     except meter.SpendCap:
         pass
-    print(f"fal voices: {len(calls)} Chatterbox requests (≤ 300 chars each, nothing lost), Kokoro body ✓, ${sum(c for _, _, c in spent):.4f} recorded, limit stops ✓")
+    print(f"fal voices: {len(calls)} Chatterbox requests (≤ 300 chars each, nothing lost), Kokoro body ✓, ${sum(c for _, _, c in spent_tts):.4f} recorded, limit stops ✓")
+    print("AI music: one request, 45 s MP3, $0.015 recorded ✓")
     print("ALL PASS")
 
 

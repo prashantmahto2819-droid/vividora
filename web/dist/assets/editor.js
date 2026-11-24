@@ -1247,6 +1247,34 @@ function supBind(panel) {
       fx.broll.push({ _id: "sup_" + uid(), _sup: x.r.id, id: x.r.id, start: x.st, end: en, fit: S.layout === "pip" ? "pip" : "cover", pos: "tr" }); n++; });
     touch(); renderTimeline(); toast(`${n} supporting clips timeline पर लग गईं — हर एक को खींचकर खिसका सकते हैं (Ctrl+Z से वापस)`, 5000); re(); };
 }
+// ── AI music: background music from a description (engine/aimusic.py, fal.ai — paid per minute of music) ──
+const AIM_MOODS = [["podcast", "Podcast के नीचे"], ["calm", "शांत / soft"], ["motivational", "Motivational / जोश"], ["corporate", "Corporate / साफ़-सुथरा"], ["lofi", "Lo-fi / chill"], ["emotional", "भावुक / emotional"], ["energetic", "तेज़ / energetic"], ["suspense", "Suspense / रहस्य"], ["indian", "भारतीय / Indian"], ["devotional", "भक्ति / peaceful"]];
+function aimState() { if (!E.aim) E.aim = { mood: "calm", text: "", secs: 0, busy: false, msg: "", err: "" }; if (!E.aim.secs) E.aim.secs = clamp(Math.round(outDur() || 60), 10, 180); return E.aim; }
+function aimHtml(dis) {
+  const { esc } = E.ctx; const A = aimState();
+  return `<div class="box audioctl"><b>🎼 AI से नया music बनाओ</b> <span class="small muted">fal.ai · लगभग $${(0.02 * A.secs / 60).toFixed(3)}</span>
+    <p class="small muted">Library में मनचाहा गाना नहीं मिला? mood चुनें (या लिखें कैसा चाहिए) — बिना आवाज़ वाला नया background music बनकर Library में आ जाता है और इस video पर लग जाता है।</p>
+    <div class="irow" style="flex-wrap:wrap;gap:.35rem;align-items:center"><select id="aim-mood" ${dis}>${AIM_MOODS.map(([k, l]) => `<option value="${k}" ${A.mood === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <label class="small"><input type="number" id="aim-secs" min="10" max="180" step="5" value="${A.secs}" style="width:64px" ${dis}> s</label></div>
+    <input id="aim-text" value="${esc(A.text)}" placeholder="और बताना हो तो: जैसे “हल्की बाँसुरी, धीमी ताल” (ज़रूरी नहीं)" style="width:100%;margin-top:.35rem" ${dis}>
+    <div class="irow" style="margin-top:.4rem"><button class="btn" id="aim-go" ${dis} ${A.busy ? "disabled" : ""}>${A.busy ? "⏳ " + esc(A.msg || "बन रहा है…") : "🎼 music बनाओ"}</button></div>
+    ${A.err ? `<p class="small" style="color:var(--bad,#e66)">${A.err.includes("API & Keys") ? esc(A.err).replace("API &amp; Keys", `<a href="#/api">API &amp; Keys</a>`) : esc(A.err)}</p>` : ""}</div>`;
+}
+function aimBind(panel) {
+  const A = aimState(); const { api, toast } = E.ctx; const fx = E.rs.effects; const re = () => { const sc = panel.scrollTop; renderPanel(); panel.scrollTop = sc; };
+  const m = $("#aim-mood", panel); if (!m) return; m.onchange = () => { A.mood = m.value; };
+  const sc_ = $("#aim-secs", panel); sc_.onchange = () => { A.secs = clamp(Math.round(+sc_.value || 60), 10, 180); re(); };
+  const tx = $("#aim-text", panel); tx.oninput = () => { A.text = tx.value; };
+  $("#aim-go", panel).onclick = async () => { A.busy = true; A.err = ""; A.msg = "शुरू…"; re();
+    try { const { job } = await api("POST", "/music/generate", { mood: A.mood, text: A.text, seconds: A.secs, project_id: E.pid }); const pid = E.pid;
+      for (;;) { await new Promise((r) => setTimeout(r, 2000)); if (E.pid !== pid) return; const j = await api("GET", `/visuals/jobs/${job}`);
+        if (j.status === "running") { if (j.message !== A.msg) { A.msg = j.message; const b = $("#aim-go", E.root); if (b) b.textContent = "⏳ " + A.msg; } continue; }
+        if (j.status === "error") throw new Error(j.error || "नहीं हो पाया");
+        const it = j.item; E.lib = E.lib || []; if (!E.lib.some((y) => y.id === it.id)) E.lib.unshift(it);
+        fx.music = { ...(fx.music || {}), id: it.id }; touch(); toast(`🎼 “${it.name}” बन गया और background music में लग गया — ▶ चलाकर सुनें (पसंद न आए तो दोबारा बनाएँ)`, 6000); break; }
+    } catch (err) { A.err = err.message; }
+    A.busy = false; re(); };
+}
 // ── podcast: the camera follows whoever speaks (engine/speakers.py) ──
 // The plan lives in effects.speaker (SOURCE seconds). "लगाओ" turns it into ordinary timeline clips: a Close-up effect clip
 // for every close shot, an overlay clip of the second camera for every camera-2 shot — each can be moved or deleted.
@@ -2055,6 +2083,7 @@ function bindPanel() {
     const out = $(`[data-vcv="${k}"]`, panel); if (out) out.textContent = el.value; if (k === "volume") applyPreviewVolume(); touch(); }));
   on("#mus-duck", "onchange", (e) => { fx.music.duck = e.target.checked; touch(); });
   on("#mus-clear", "onclick", () => { fx.music.id = ""; touch(); renderPanel(); });
+  aimBind(panel);
   if (E.tab === "audio") dubBox(null, panel);
   on("#wm-op", "oninput", (e) => { fx.watermark.opacity = +e.target.value; touch(); });
   on("#wm-size", "oninput", (e) => { fx.watermark.size = +e.target.value; touch(); });
@@ -2344,6 +2373,7 @@ function audioControls(dis) {
         <div class="irow">${slider("reverb")}${slider("echo")}</div><div class="irow">${slider("echo_ms")}${slider("chorus")}</div>
         <div class="irow">${slider("pitch")}${slider("width")}</div>
         <p class="small muted">“बदलाव सुनें” से 12 s में सुनें, फिर A/B से original से मिलाएँ। सब 0 = कोई effect नहीं।</p></details></div>
+    ${aimHtml(dis)}
     <div class="box audioctl"><b>🎵 Background music</b>${music.id ? `<p class="small">${esc(libItem(music.id)?.name || music.id)}</p>` : `<p class="small muted">नीचे music में “लगाएँ” दबाएँ</p>`}
       <div class="irow">${field(`volume <b id="mus-vol-v">${Math.round((music.volume ?? 0.18) * 100)}%</b>`, `<input type="range" id="mus-vol" min="0" max="1" step="0.01" value="${music.volume ?? 0.18}" ${dis}>`)}${field("fade in/out (s)", `<input type="range" id="mus-fade" min="0" max="6" step="0.5" value="${music.fade ?? 1.5}" ${dis}>`)}</div>
       <div class="irow"><label class="chk small"><input type="checkbox" id="mus-duck" ${music.duck !== false ? "checked" : ""} ${dis}> बोलते समय धीमा (duck)</label>${field("कितना धीमा", `<input type="range" id="mus-damt" min="0.1" max="1" step="0.05" value="${music.duck_amount ?? 0.6}" ${dis}>`)}</div>

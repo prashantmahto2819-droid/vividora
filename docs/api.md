@@ -138,3 +138,10 @@ With `FAL_KEY` set (API & Keys) the voice list gains `fal_cb_hindi`, `fal_cb_hin
 `engine/tts.py FalBackend` sends each line through fal's queue (`engine/cloudasr.fal_run`); every request is checked against the
 monthly spending limit and recorded as `fal_tts` (price override: `PRICE_FAL_TTS_1K`). A CPU worker takes `dub` jobs as soon as a
 cloud voice key (fal.ai / ElevenLabs) is present.
+
+### AI music
+
+`GET /api/music/moods` → `{ready, usd_per_min, moods: [{id, label}]}`.
+`POST /api/music/generate` `{mood?, text?, seconds?: 10–180, name?, project_id?}` → `202 {job, usd}`; `GET /api/visuals/jobs/{job}` →
+`item` = the new Library music (`source: "ai"`, `meta.ai_prompt`). `engine/aimusic.py`: fal.ai `cassetteai/music-generator`
+(`FAL_MUSIC_MODEL` to change), instrumental only, recorded as `ai_music` ($0.02 / minute, `PRICE_AI_MUSIC_MIN`), stopped by the spending limit.
