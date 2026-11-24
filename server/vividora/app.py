@@ -179,6 +179,8 @@ def create_app() -> Starlette:
     from .api import voiceover_api
     api_routes += voiceover_api.routes  # editor voice-over: text → library 'voice' item (async)
     from .api import documentary_api, keys_api, providers_api, sfx_api, v1_api, visuals_api
+    from .api import teams_api
+    api_routes += teams_api.routes
     api_routes += providers_api.routes
     api_routes += keys_api.routes + sfx_api.routes + documentary_api.routes + visuals_api.routes + v1_api.routes  # API keys + public /api/v1 integration API (n8n, Zapier, your own apps)
     routes = [Mount("/api", routes=api_routes), *publish.public_routes]

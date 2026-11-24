@@ -173,3 +173,12 @@ transcribe job is cancelled; cuts and effects are untouched).
   instead of ffmpeg's loudness rule; `edl.stats.silence_engine` says which one was used. No voice heard / model missing → loudness rule.
 * `WORD_ALIGN=whisperx` + image built with `WITH_WHISPERX=1`: `engine/align.py` refines word times after a transcript (docs/whisperx.md).
 * `GET /api/library?q=` also searches what the AI saw inside a clip (`meta.ai_seen`).
+
+### Library folders and teams
+
+`library.scope`: `ws` (shared with the workspace) · `user:<id>` (personal — not even an admin sees it) · `team:<id>`.
+`GET /api/library` returns what the caller may see (`?scope=ws|me|team:<id>` narrows); `PUT /api/library?...&scope=` chooses the folder
+(403 for a folder that is not theirs); `PATCH /api/library/{id} {scope}` moves an item (who added it, or an admin).
+`GET /api/teams` → `{teams, scopes, can_manage, users}` · `POST /api/teams {name, leader_id?, members}` (admin) ·
+`PATCH /api/teams/{id}` (admin; the leader may change members) · `DELETE /api/teams/{id}` (admin; its items become shared).
+Items referenced by a project keep working for everyone who opens that project — folders decide what is *listed*.

@@ -650,3 +650,7 @@ button.nav-sec.shut i { transform: rotate(-90deg); }
 .hub a { padding: .3rem .75rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font-size: .85rem; white-space: nowrap; }
 .hub a:hover { color: var(--text); }
 .hub a.on { background: var(--amber); border-color: var(--amber); color: #111; font-weight: 600; }
+
+.lcard .lscope{position:absolute;left:6px;top:6px;font-size:.66rem;padding:.12rem .4rem;border-radius:.6rem;background:#000a;color:#fff;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lcard .lmove{width:100%;margin-top:.3rem;font-size:.72rem}
+.libscopes{margin-bottom:.3rem}

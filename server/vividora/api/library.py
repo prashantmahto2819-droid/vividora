@@ -118,6 +118,15 @@ def _view(item: dict) -> dict:
 async def list_items(request: Request, user: dict):
     q = "SELECT * FROM library WHERE workspace_id = ?"
     args: list = [user["workspace_id"]]
+    # shared items, my own folder, my teams' folders (teams_api.visible_scopes); ?scope= narrows to one of them
+    from .teams_api import visible_scopes
+    scopes = visible_scopes(user)
+    want = request.query_params.get("scope")
+    if want:
+        want = f"user:{user['id']}" if want in ("me", "mine") else want
+        scopes = [x for x in scopes if x == want]
+    q += f" AND scope IN ({','.join('?' * len(scopes)) or "''"})"
+    args += scopes
     kind = request.query_params.get("kind")
     if kind in KINDS:
         q += " AND kind = ?"
@@ -145,7 +154,7 @@ STARTER = Path(__file__).resolve().parent.parent.parent / "starter"
 
 
 def _add_file(workspace_id: str, user_id: str | None, kind: str, src: Path, *, name: str, tags: str, source: str,
-              license: str, channel_id: str | None = None, move: bool = False, analyse: bool = True) -> dict:
+              license: str, channel_id: str | None = None, move: bool = False, analyse: bool = True, scope: str = "ws") -> dict:
     import shutil
     item_id = db.new_id()
     rel = str(Path(f"ws_{workspace_id}") / "library" / kind / f"{item_id[:8]}_{storage.safe_name(src.name)}")
@@ -157,7 +166,7 @@ def _add_file(workspace_id: str, user_id: str | None, kind: str, src: Path, *, n
     item = {"id": item_id, "workspace_id": workspace_id, "kind": kind, "name": name[:120], "path": rel,
             "size": dst.stat().st_size, "mime": storage.guess_mime(rel), "meta": meta,
             "created_by": user_id, "created_at": db.now(), "tags": tags, "source": source, "license": license,
-            "channel_id": channel_id}
+            "channel_id": channel_id, "scope": scope}
     with db.tx() as c:
         db.insert(c, "library", item)
     return item
@@ -790,6 +799,8 @@ async def upload(request: Request, user: dict):
     kind = request.query_params.get("kind", "")
     if kind not in KINDS:
         raise ApiError(422, f"kind must be one of {', '.join(KINDS)}")
+    from .teams_api import check_scope
+    up_scope = check_scope(user, request.query_params.get("scope"))      # ws (shared) | me | team:<id>
     name = storage.safe_name(request.query_params.get("filename", ""), f"{kind}.bin")
     ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
     if ext not in KINDS[kind]:
@@ -816,6 +827,15 @@ async def upload(request: Request, user: dict):
             f.write(part)
     try:
         meta = _probe_meta(path, kind)
+        if ext in (".webm", ".opus", ".ogg") and not meta.get("duration"):
+            # a recording made in the browser has no length in its header: rewrite the container once (no re-encoding)
+            fixed = path.with_name(path.stem + "_fx" + path.suffix)
+            r_ = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(path), "-c", "copy", str(fixed)], capture_output=True, timeout=300)
+            if r_.returncode == 0 and fixed.exists() and fixed.stat().st_size > 1000:
+                fixed.replace(path)
+                meta = _probe_meta(path, kind)
+            else:
+                fixed.unlink(missing_ok=True)
         storage.validate_media(path, kind)  # the bytes must really be the media type the name claims
     except ApiError:
         path.unlink(missing_ok=True)  # a rejected LUT / fake file never stays in the library
@@ -827,7 +847,7 @@ async def upload(request: Request, user: dict):
             "path": rel, "size": written, "mime": storage.guess_mime(rel),
             "meta": meta, "created_by": user["id"], "created_at": db.now(),
             "tags": tags, "source": "upload", "license": "own",
-            "channel_id": request.query_params.get("channel") or None}
+            "channel_id": request.query_params.get("channel") or None, "scope": up_scope}
     with db.tx() as c:
         db.insert(c, "library", item)
         service.log(c, user["workspace_id"], "library.add", user_id=user["id"],
@@ -896,6 +916,10 @@ def _item(request: Request, user: dict | None = None) -> dict:
     item = db.get("library", request.path_params["item_id"])
     if not item or (user and item["workspace_id"] != user["workspace_id"]):
         raise ApiError(404, "library item not found")
+    if user and "role" in user and (item.get("scope") or "ws") != "ws":
+        from .teams_api import visible_scopes
+        if item["scope"] not in visible_scopes(user):          # somebody else's personal / team folder
+            raise ApiError(404, "library item not found")
     return item
 
 
@@ -910,6 +934,12 @@ async def rename(request: Request, user: dict):
         changes["tags"] = ",".join(t.strip() for t in str(data["tags"]).split(",") if t.strip())[:300]
     if isinstance(data.get("meta"), dict):
         changes["meta"] = {**item["meta"], **data["meta"]}
+    if "scope" in data:
+        # move between folders: the person who added it, or an admin
+        from .teams_api import check_scope
+        if user["role"] != "admin" and item.get("created_by") != user["id"]:
+            raise ApiError(403, "इसे वही दूसरे folder में रख सकता है जिसने जोड़ा था (या admin)")
+        changes["scope"] = check_scope(user, data.get("scope"))
     if changes:
         with db.tx() as c:
             db.update(c, "library", item["id"], changes)

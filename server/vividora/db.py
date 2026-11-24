@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS library (
   kind TEXT NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
   mime TEXT, meta TEXT NOT NULL DEFAULT '{}', created_by TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS library_ws ON library(workspace_id, kind);
+CREATE TABLE IF NOT EXISTS teams (
+  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, leader_id TEXT, created_by TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS team_members (
+  team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE, user_id TEXT NOT NULL, PRIMARY KEY (team_id, user_id));
 CREATE TABLE IF NOT EXISTS connections (
   id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   platform TEXT NOT NULL, name TEXT NOT NULL, external_id TEXT, secrets TEXT NOT NULL DEFAULT '{}',
@@ -224,6 +229,8 @@ MIGRATIONS = [
     ("users", "totp_pending", "TEXT"),     # encrypted secret while the user is still setting up
     ("users", "totp_last", "INTEGER NOT NULL DEFAULT 0"),  # last accepted time-step (replay guard)
     ("users", "totp_recovery", "TEXT"),    # JSON list of sha256(recovery code)
+    # who sees a Library item: 'ws' = everyone in the workspace (shared), 'user:<id>' = that person only, 'team:<id>' = that team
+    ("library", "scope", "TEXT NOT NULL DEFAULT 'ws'"),
 ]
 
 

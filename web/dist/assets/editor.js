@@ -1320,6 +1320,43 @@ function moVoiceBind(panel) {
   const st = $("#mov-start", panel); if (st) st.onchange = () => mvSet("start", clamp(+st.value || 0, 0, 3600));
   const vl = $("#mov-vol", panel); if (vl) vl.oninput = () => { mvSet("volume", +vl.value); const l = $("#mov-vol-v", panel); if (l) l.textContent = Math.round(+vl.value * 100) + "%"; };
 }
+// ── record straight into the timeline: 🎙 voice (a sound clip at the playhead) or 🎥 camera (an overlay clip at the playhead) ──
+function quickRecHtml(dis, kind) {
+  const R = E.qrec || {}; const on = R.on && R.kind === kind; const other = R.on && R.kind !== kind;
+  return `<div class="box" style="margin:.5rem 0"><b class="small">${kind === "mic" ? "🎙 Mic से record करके timeline में डालें" : "🎥 Camera से clip record करके timeline में डालें"}</b>
+    <p class="small muted">${kind === "mic" ? "जहाँ playhead है वहीं से आपकी आवाज़ की clip लग जाती है (Audio पट्टी पर) — खींचकर खिसका सकते हैं, volume बदल सकते हैं।" : "Record होते ही clip playhead पर छोटी खिड़की में लगती है — फिर पूरी screen / जगह / size बदल लें।"}</p>
+    <div class="irow" style="gap:.5rem;align-items:center;flex-wrap:wrap"><button class="btn small ${on ? "primary" : ""}" data-qrec="${kind}" ${dis || (other ? "disabled" : "")}>${on ? "⏹ रोकें और लगाएँ" : "🔴 Record शुरू करें"}</button>${on ? `<span class="small" id="qrec-t">● 0:00</span>` : ""}
+      ${kind === "mic" && !on ? `<label class="chk small" title="record के दौरान वीडियो साथ में चले (headphone लगाएँ, नहीं तो उसकी आवाज़ भी record होगी)"><input type="checkbox" id="qrec-play" ${R.play ? "checked" : ""}> साथ में वीडियो चलाओ</label>` : ""}</div>
+    ${on && kind === "cam" ? `<video id="qrec-pv" muted playsinline style="width:100%;max-height:180px;border-radius:8px;margin-top:.4rem;background:#000"></video>` : ""}<div id="lib-progress"></div></div>`;
+}
+function quickRecBind(panel) {
+  const { toast } = E.ctx; const R = (E.qrec = E.qrec || {});
+  const pl = $("#qrec-play", panel); if (pl) pl.onchange = () => { R.play = pl.checked; };
+  const pv = $("#qrec-pv", panel); if (pv && R.stream) { pv.srcObject = R.stream; pv.play().catch(() => {}); }
+  $$("[data-qrec]", panel).forEach((b) => (b.onclick = async () => { const kind = b.dataset.qrec;
+    if (R.on) { R.rec.stop(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) return toast("इस browser में recording नहीं चलती — Chrome / Edge इस्तेमाल करें");
+    try { const stream = await navigator.mediaDevices.getUserMedia(kind === "mic" ? { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } } : { audio: true, video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+      const mime = (kind === "mic" ? ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"] : ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"]).find((m) => MediaRecorder.isTypeSupported(m)) || "";
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); const chunks = []; const at = E.t; const v = $("#pv", E.root);
+      Object.assign(R, { rec, on: true, kind, stream, t0: Date.now() });
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = async () => { stream.getTracks().forEach((t) => t.stop()); clearInterval(R.iv); const secs = (Date.now() - R.t0) / 1000; R.on = false; R.stream = null; if (R.play && v) v.pause();
+        const type = rec.mimeType || mime || (kind === "mic" ? "audio/webm" : "video/webm"); const ext = type.includes("ogg") ? ".ogg" : type.includes("mp4") ? (kind === "mic" ? ".m4a" : ".mp4") : ".webm";
+        const blob = new Blob(chunks, { type }); if (blob.size < 2000 || secs < 0.4) { toast("recording खाली रही — mic / camera की अनुमति जाँचें"); renderPanel(); return; }
+        const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, "");
+        const d = await libUpload(kind === "mic" ? "sfx" : "broll", new File([blob], `${kind === "mic" ? "voice_rec" : "cam_rec"}_${stamp}${ext}`, { type }));
+        if (d?.id) { const fx = E.rs.effects; const st = +outOf(at).toFixed(2);
+          if (!d.meta) d.meta = {}; if (!d.meta.duration) d.meta.duration = +secs.toFixed(2);       // a browser recording carries no length in its header
+          if (kind === "mic") { const it = { _id: "rec_" + uid(), id: d.id, at: st, volume: 1, dur: +secs.toFixed(2), track: 0 }; fx.sfx.push(it); select({ type: "sfx", id: it._id }); }
+          else { const it = { _id: "rec_" + uid(), id: d.id, start: st, end: +Math.min(Math.max(outDur(), st + 1), st + secs).toFixed(2), fit: "pip", pos: "tr", volume: 1, track: 1 }; fx.broll.push(it); select({ type: "broll", id: it._id }); }
+          touch(); renderTimeline(); toast(`${kind === "mic" ? "आवाज़" : "Clip"} ${fmt(secs)} की — ${fmt(st)} पर लग गई (Ctrl+Z से वापस)`, 5000); }
+        renderPanel(); };
+      rec.start(500); R.iv = setInterval(() => { const el = $("#qrec-t", E.root); if (el) el.textContent = `● ${fmt((Date.now() - R.t0) / 1000)}`; }, 500);
+      if (kind === "mic" && R.play && v) v.play().catch(() => {});
+      renderPanel();
+    } catch (err) { toast((kind === "mic" ? "mic" : "camera") + " नहीं खुला: " + (err.message || err) + " — browser में अनुमति दें", 6000); } }));
+}
 const SPK_COLORS = ["#FFFFFF", "#FFD400", "#7CE0FF"];
 // podcast captions: the text colour of whoever speaks at source second t ("" = the style's own colour)
 function spkColorAt(t) { const P = E.rs.effects.speaker; if (!P || P.enabled === false || !Array.isArray(P.caption_colors) || !Array.isArray(P.shots)) return ""; let who = null; for (const sh of P.shots) { if (sh.start > t) break; who = sh.who; } return (who != null && P.caption_colors[who]) || ""; }
@@ -1805,6 +1842,7 @@ function renderPanel() {
       ${t === "stickers" && (E.stkWeb || []).length ? `<div class="box" style="margin:.3rem 0"><b class="small">Tenor results</b> <button class="btn small quiet" id="stk-clear">✕ बंद</button><div class="lib grid" style="margin-top:.3rem">${(E.stkWeb || []).map((x, i) => `<div class="stk-web" data-stki="${i}" style="cursor:pointer" title="${esc(x.title)}"><img src="${esc(x.preview)}" alt="" loading="lazy" style="object-fit:contain;width:72px;height:72px;background:repeating-conic-gradient(#1a2130 0 25%,#222b3b 0 50%) 50%/8px 8px;border-radius:6px"></div>`).join("")}</div></div>` : ""}
       ${subTags.length ? `<div class="seg wrap" style="flex-wrap:wrap;margin:.3rem 0">${subTags.map((tg) => `<button data-ltag="${tg}" class="${(E.libTag || "") === tg ? "on" : ""}">${tg || "सब"}</button>`).join("")}</div>` : ""}
       ${E.libKind === "music" ? musicFilterHtml(MF, fx) : ""}
+      ${t === "audio" && !E.montage ? quickRecHtml(dis, "mic") : ""}${t === "media" && !E.montage ? quickRecHtml(dis, "cam") : ""}
       ${t === "audio" ? audioControls(dis) + PRO.musicFitHtml(dis) + dubBox(dis) : ""}
       ${t === "overlay" && E.libKind === "logo" ? `<div class="box"><b>Watermark</b>${wm.id ? `<p class="small">${esc(libItem(wm.id)?.name || "")}</p>` : `<p class="small muted">logo चुनकर “लगाएँ”</p>`}
         <div class="irow">${field("पारदर्शिता", `<input type="range" id="wm-op" min="0.1" max="1" step="0.05" value="${wm.opacity}" ${dis}>`)}${field("आकार", `<input type="range" id="wm-size" min="0.06" max="0.3" step="0.01" value="${wm.size}" ${dis}>`)}</div>
@@ -2124,6 +2162,7 @@ function bindPanel() {
   on("#mus-clear", "onclick", () => { fx.music.id = ""; touch(); renderPanel(); });
   aimBind(panel);
   if (E.tab === "audio") dubBox(null, panel);
+  if (E.tab === "audio" || E.tab === "media") quickRecBind(panel);
   on("#wm-op", "oninput", (e) => { fx.watermark.opacity = +e.target.value; touch(); });
   on("#wm-size", "oninput", (e) => { fx.watermark.size = +e.target.value; touch(); });
   on("#wm-pos", "onchange", (e) => { const v = e.target.value; fx.watermark.pos = v; if (v === "free" && fx.watermark.x == null) { fx.watermark.x = 0.5; fx.watermark.y = 0.5; fx.watermark.rotate = 0; } touch(); renderPanel(); });
@@ -2276,7 +2315,9 @@ async function libUpload(kind, file) {
   const { toast } = E.ctx; const prog = $("#lib-progress", E.root) || document.createElement("div");
   prog.innerHTML = `<p class="small muted">${file.name} upload हो रहा…</p><div class="progress"><i style="width:30%"></i></div>`;
   try {
-    const r = await fetch(`/api/library?kind=${kind}&filename=${encodeURIComponent(file.name)}`, { method: "PUT", headers: { authorization: "Bearer " + E.ctx.S.token, "content-type": "application/octet-stream" }, body: file });
+    let sc = "ws"; try { sc = localStorage.getItem("vividora_lib_scope") || "ws"; } catch {}
+    const put = (scope) => fetch(`/api/library?kind=${kind}&filename=${encodeURIComponent(file.name)}&scope=${encodeURIComponent(scope)}`, { method: "PUT", headers: { authorization: "Bearer " + E.ctx.S.token, "content-type": "application/octet-stream" }, body: file });
+    let r = await put(sc); if (r.status === 403 && sc !== "ws") r = await put("ws");      // the remembered folder is gone (team removed) → shared
     const data = await r.json(); if (!r.ok) throw new Error(data.error || r.statusText);
     E.lib = E.lib || []; E.lib.unshift(data); toast(`${file.name} जुड़ा`); prog.innerHTML = ""; if (kind === "font") { injectFonts(); renderPanel(); } return data;
   } catch (err) { toast(err.message); }

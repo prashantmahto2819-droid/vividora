@@ -123,6 +123,7 @@ async function load() {
   } else S.project = null;
   if (r.kind === "status") { S.status = await api("GET", "/status"); S.activity = await api("GET", "/activity"); }
   if (r.kind === "users" || (r.kind === "account" && S.user?.role === "admin")) S.users = await api("GET", "/users").catch(() => []);
+  if (r.kind === "users" || r.kind === "library") S.teams = await api("GET", "/teams").catch(() => ({ teams: [], scopes: [{ id: "ws", label: "साझा — सबके लिए" }] }));
   if (r.kind === "users" && S.user?.role === "admin") S.invites = await api("GET", "/invites").catch(() => []);
   if (r.kind === "billing" || r.kind === "account") S.planInfo = await api("GET", "/plan").catch(() => null);
   if (r.kind === "admin" && S.user?.role === "admin") { const [w, a, b] = await Promise.all([api("GET", "/admin/workspaces").catch(() => null), api("GET", "/admin/audit?limit=150").catch(() => []), api("GET", "/admin/backups").catch(() => null)]); S.adminWs = w; S.audit = a; S.backups = b; }
@@ -927,6 +928,11 @@ function usersView() {
       <td><select data-id="${u.id}" class="role" ${u.id === S.user.id ? "disabled" : ""}>${["admin", "editor", "viewer"].map((r) => `<option ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
       <td class="small">${u.last_login_at ? new Date(u.last_login_at).toLocaleString("hi-IN") : "कभी नहीं"}</td>
       <td>${u.twofa ? `<span class="pill" title="2-step verification चालू">🔐</span> ` : ""}${u.twofa && u.id !== S.user.id ? `<button class="btn quiet small tf-reset" data-id="${u.id}" title="user का phone और recovery codes दोनों खो गए हों तब">2FA बंद</button> ` : ""}${u.id !== S.user.id ? `<button class="btn quiet small toggle" data-id="${u.id}" data-active="${u.active}">${u.active ? "बंद करें" : "चालू करें"}</button>` : ""}</td></tr>`).join("")}</table></div>
+    <div class="section" id="teams-sec"><h2>👥 Teams</h2><p class="muted small">Team = users का समूह, जिसका Library में अपना folder होता है: उसमें रखी चीज़ें सिर्फ़ team के लोगों (और leader, admin) को दिखती हैं। हर user का “🔒 मेरा folder” अलग रहता है; “साझा” सबको दिखता है।</p>
+      ${(S.teams?.teams || []).map((t) => `<div class="tl-team" data-team="${t.id}" style="border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;margin-bottom:.5rem"><div class="row between" style="flex-wrap:wrap;gap:.4rem"><b>${esc(t.name)}</b><span class="small muted">leader: ${esc(t.leader || "—")} · ${t.members.length} लोग · ${t.items} items</span>${S.teams?.can_manage ? `<button class="btn quiet small team-del">हटाएँ</button>` : ""}</div>
+        <div class="row" style="flex-wrap:wrap;gap:.3rem .9rem;margin-top:.4rem">${(S.users || []).filter((u) => u.active !== false).map((u) => `<label class="small" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" class="team-mem" value="${u.id}" ${t.members.some((m) => m.id === u.id) ? "checked" : ""}> ${esc(u.name)}</label>`).join("")}</div>
+        ${S.teams?.can_manage ? `<div class="row" style="gap:.5rem;margin-top:.4rem;align-items:center"><span class="small muted">leader</span><select class="team-leader small"><option value="">—</option>${(S.users || []).map((u) => `<option value="${u.id}" ${t.leader_id === u.id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>` : ""}</div>`).join("") || `<p class="small muted">अभी कोई team नहीं।</p>`}
+      ${S.teams?.can_manage ? `<form id="addteam" class="row"><div class="field"><label>नई team का नाम</label><input name="name" required maxlength="60" placeholder="जैसे: Editing team"></div><div class="field"><label>Leader</label><select name="leader"><option value="">—</option>${(S.users || []).map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join("")}</select></div><button class="btn primary">Team बनाएँ</button></form>` : ""}</div>
     <div class="section"><h2>नया user</h2><form id="adduser" class="row">
       <div class="field"><label>नाम</label><input name="name" required></div><div class="field"><label>Email</label><input name="email" type="email" required></div>
       <div class="field"><label>Password (कम से कम 8 अक्षर)</label><input name="password" type="password" minlength="8" required></div>
@@ -937,6 +943,11 @@ function usersView() {
     <div class="section"><h2>अपना password</h2><form id="pw" class="row"><div class="field"><label>मौजूदा password</label><input name="current" type="password" required></div><div class="field"><label>नया password</label><input name="new" type="password" minlength="8" required></div><button class="btn">Password बदलें</button></form></div>`;
 }
 function bindUsers() {
+  const at = $("#addteam"); if (at) at.onsubmit = async (e) => { e.preventDefault(); try { await api("POST", "/teams", { name: at.name.value, leader_id: at.leader.value || null, members: [] }); toast("Team बन गई — अब नीचे लोगों पर tick लगाएँ"); load().then(render); } catch (err) { toast(err.message); } };
+  document.querySelectorAll("[data-team]").forEach((box) => { const id = box.dataset.team; const save = (d) => api("PATCH", `/teams/${id}`, d).then(() => toast("Team बदल दी")).catch((e) => { toast(e.message); load().then(render); });
+    box.querySelectorAll(".team-mem").forEach((cb) => (cb.onchange = () => save({ members: [...box.querySelectorAll(".team-mem:checked")].map((x) => x.value) })));
+    const ld = box.querySelector(".team-leader"); if (ld) ld.onchange = () => save({ leader_id: ld.value || null });
+    const dl = box.querySelector(".team-del"); if (dl) dl.onclick = async () => { if (dl.dataset.sure !== "1") { dl.dataset.sure = "1"; dl.textContent = "पक्का? (items साझा हो जाएँगे)"; return; } await api("DELETE", `/teams/${id}`).catch((e) => toast(e.message)); load().then(render); }; });
   document.querySelectorAll(".role").forEach((s) => (s.onchange = () => api("PATCH", `/users/${s.dataset.id}`, { role: s.value }).then(() => toast("Role बदल दिया")).catch((e) => toast(e.message))));
   document.querySelectorAll(".tf-reset").forEach((b) => (b.onclick = () => { if (!confirm("इस user का 2-step verification बंद करें? उसे दोबारा setup करना होगा।")) return; api("POST", `/users/${b.dataset.id}/2fa-reset`).then(() => { toast("2FA बंद कर दिया"); return load().then(render); }).catch((e) => toast(e.message)); }));
   document.querySelectorAll(".toggle").forEach((b) => (b.onclick = () => api("PATCH", `/users/${b.dataset.id}`, { active: b.dataset.active !== "true" }).then(() => load().then(render))));
@@ -1123,15 +1134,22 @@ const LIBCATS = [
 ];
 const MOODS = ["motivational", "emotional", "lofi", "upbeat", "cinematic", "story", "energetic", "news"];
 function libFilter(x) {
+  if (S.libScope && (x.scope || "ws") !== S.libScope) return false;
   const c = LIBCATS.find((k) => k[0] === (S.libCat || "all"))?.[2]; const q = (S.libQ || "").toLowerCase();
   if (c?.kind && x.kind !== c.kind) return false; if (c?.tag && !(`,${x.tags},`).includes(`,${c.tag},`)) return false; if (c?.source && x.source !== c.source) return false;
   if (S.libMood && !(x.tags || "").includes(S.libMood)) return false;
   return !q || x.name.toLowerCase().includes(q) || (x.tags || "").toLowerCase().includes(q);
 }
+// Library folders: साझा (everyone) · मेरा (only me) · team folders — api/teams_api.py
+function libScopes() { return S.teams?.scopes || [{ id: "ws", label: "साझा — सबके लिए" }]; }
+function libScopeLabel(sc) { return (libScopes().find((x) => x.id === (sc || "ws"))?.label || "साझा").replace(" — सबके लिए", ""); }
+function libUpScope() { const sc = S.libScope || lsGet("vividora_lib_scope") || "ws"; return libScopes().some((x) => x.id === sc) ? sc : "ws"; }
 function libCard(x) {
   const img = ["sticker", "image", "logo", "frame"].includes(x.kind); const vid = x.kind === "broll"; const aud = ["music", "sfx", "voice"].includes(x.kind);
   return `<div class="lcard" data-id="${x.id}">${img ? `<div class="lprev chk"><img src="${x.url}" loading="lazy" alt=""></div>` : vid ? `<div class="lprev"><video src="${x.url}#t=0.5" muted preload="metadata" loop></video></div>` : aud ? `<div class="lprev aud"><button class="btn small" data-play="${x.id}">▶</button><span class="small muted">${x.meta?.duration ? fmt(x.meta.duration) : ""}</span></div>` : `<div class="lprev aud">🎨 .cube</div>`}
     <div class="lbody"><b title="${esc(x.name)}">${esc(x.name)}</b><span class="small muted" title="${esc(x.license || "")}">${esc((x.tags || "").split(",").filter((t) => t && t !== "starter").slice(0, 3).join(" · "))}</span></div>
+    ${(x.scope || "ws") !== "ws" ? `<span class="lscope" title="यह किसे दिखता है">${esc(libScopeLabel(x.scope))}</span>` : ""}
+    ${S.user.role !== "viewer" && x.source !== "starter" && libScopes().length > 1 && (S.user.role === "admin" || x.created_by === S.user.id) ? `<select class="lmove small" data-move="${x.id}" title="दूसरे folder में रखें">${libScopes().map((sc) => `<option value="${esc(sc.id)}" ${(x.scope || "ws") === sc.id ? "selected" : ""}>${esc(sc.label)}</option>`).join("")}</select>` : ""}
     ${S.user.role !== "viewer" ? `<button class="ibtn ldel" data-del="${x.id}" title="हटाएँ">✕</button>` : ""}</div>`;
 }
 // ---------- video compressor (standalone tool) ----------
@@ -1255,6 +1273,8 @@ function libraryView() {
     <div class="libtabs"><button class="${S.libMode !== "web" && S.libMode !== "trending" ? "on" : ""}" data-lm="mine">मेरी library (${all.length})</button><button class="${S.libMode === "web" ? "on" : ""}" data-lm="web">Free online खोजें</button><button class="${S.libMode === "trending" ? "on" : ""}" data-lm="trending">Trending Music</button></div>
     ${S.libMode === "web" ? libWebView() : S.libMode === "trending" ? libTrendingView() : `<div class="libbar"><input id="lib-q" placeholder="खोजें — जैसे fire, subscribe, whoosh, frame" value="${esc(S.libQ || "")}">
       ${canEdit ? `<select id="lib-upkind" title="Upload किस category में हो">${["music", "sfx", "sticker", "image", "broll", "frame", "logo", "lut", "voice"].map((k) => `<option ${S.libUpKind === k ? "selected" : ""}>${k}</option>`).join("")}</select>` : ""}</div>
+    <div class="libcats libscopes"><button class="${!S.libScope ? "on" : ""}" data-lscope="">📚 सब folders</button>${libScopes().map((sc) => `<button class="${S.libScope === sc.id ? "on" : ""}" data-lscope="${esc(sc.id)}">${esc(sc.label)} <i>${all.filter((x) => (x.scope || "ws") === sc.id).length}</i></button>`).join("")}
+      ${canEdit ? `<span class="small muted" style="align-self:center;margin-left:.4rem">Upload जाएगा: <b>${esc(libScopeLabel(libUpScope()))}</b></span>` : ""}</div>
     <div class="libcats">${LIBCATS.map(([k, l]) => `<button class="${(S.libCat || "all") === k ? "on" : ""}" data-cat="${k}">${l} <i>${counts[k]}</i></button>`).join("")}</div>
     ${(S.libCat === "music") ? `<div class="libcats moods">${["", ...MOODS].map((m) => `<button class="${(S.libMood || "") === m ? "on" : ""}" data-mood="${m}">${m || "सभी moods"}</button>`).join("")}</div>` : ""}
     <div class="lgrid">${items.map(libCard).join("") || `<p class="muted">इस खोज से कुछ नहीं मिला।</p>`}</div>`}`;
@@ -1281,9 +1301,10 @@ function bindLibrary() {
   document.querySelectorAll("[data-lm]").forEach((b) => (b.onclick = () => { S.libMode = b.dataset.lm; render(); }));
   document.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { S.libCat = b.dataset.cat; S.libMood = ""; render(); }));
   document.querySelectorAll("[data-mood]").forEach((b) => (b.onclick = () => { S.libMood = b.dataset.mood; render(); }));
+  document.querySelectorAll("[data-lscope]").forEach((b) => (b.onclick = () => { S.libScope = b.dataset.lscope; if (S.libScope) lsSet("vividora_lib_scope", S.libScope); render(); }));
   const q = $("#lib-q"); if (q) q.oninput = () => { S.libQ = q.value; const grid = document.querySelector(".lgrid"); grid.innerHTML = (S.lib || []).filter(libFilter).map(libCard).join("") || `<p class="muted">इस खोज से कुछ नहीं मिला।</p>`; bindLibCards(); };
   const uk = $("#lib-upkind"); if (uk) uk.onchange = () => (S.libUpKind = uk.value);
-  const up = $("#lib-up"); if (up) up.onchange = async () => { const kind = $("#lib-upkind")?.value || "sticker"; for (const f of up.files) { try { const r = await fetch(`/api/library?kind=${kind}&filename=${encodeURIComponent(f.name)}&channel=`, { method: "PUT", headers: { authorization: "Bearer " + S.token, "content-type": "application/octet-stream" }, body: f }); const d = await r.json(); if (!r.ok) throw new Error(d.error); toast(`${f.name} जुड़ गया`); } catch (e) { toast(e.message); } } load().then(render); };
+  const up = $("#lib-up"); if (up) up.onchange = async () => { const kind = $("#lib-upkind")?.value || "sticker"; for (const f of up.files) { try { const r = await fetch(`/api/library?kind=${kind}&filename=${encodeURIComponent(f.name)}&scope=${encodeURIComponent(libUpScope())}&channel=`, { method: "PUT", headers: { authorization: "Bearer " + S.token, "content-type": "application/octet-stream" }, body: f }); const d = await r.json(); if (!r.ok) throw new Error(d.error); toast(`${f.name} जुड़ गया`); } catch (e) { toast(e.message); } } load().then(render); };
   const st = $("#lib-starter"); if (st) st.onclick = async () => { st.disabled = true; const r = await api("POST", "/library/starter"); toast(`${r.added} नए items जुड़े`); load().then(render); };
   const go = $("#lw-go"); if (go) { const run = async () => { S.lwSrc = $("#lw-src").value; S.lwQ = $("#lw-q").value; go.disabled = true; go.textContent = "खोज रहे हैं…"; try { S.libWeb = await api("GET", `/library/search?source=${S.lwSrc}&q=${encodeURIComponent(S.lwQ)}`); } catch (e) { toast(e.message); S.libWeb = []; } render(); }; go.onclick = run; $("#lw-q").onkeydown = (e) => { if (e.key === "Enter") run(); }; }
   document.querySelectorAll("[data-wplay]").forEach((b) => (b.onclick = () => { const x = S.libWeb[+b.dataset.wplay]; if (libAudio) { libAudio.pause(); if (libAudio.dataset.u === x.url) { libAudio = null; return; } } libAudio = new Audio(x.preview || x.url); libAudio.dataset.u = x.url; libAudio.play(); }));
@@ -1296,6 +1317,7 @@ function bindLibrary() {
 }
 function bindLibCards() {
   document.querySelectorAll("[data-play]").forEach((b) => (b.onclick = () => { const x = S.lib.find((y) => y.id === b.dataset.play); if (libAudio) { libAudio.pause(); if (libAudio.dataset.u === x.url) { libAudio = null; b.textContent = "▶"; return; } } libAudio = new Audio(x.url); libAudio.dataset.u = x.url; libAudio.play(); b.textContent = "⏸"; libAudio.onended = () => (b.textContent = "▶"); }));
+  document.querySelectorAll("[data-move]").forEach((sel) => (sel.onchange = async () => { try { const r = await api("PATCH", `/library/${sel.dataset.move}`, { scope: sel.value }); const it = S.lib.find((x) => x.id === sel.dataset.move); if (it) it.scope = r.scope; toast(`“${libScopeLabel(r.scope)}” में रख दिया`); render(); } catch (e) { toast(e.message); render(); } }));
   document.querySelectorAll(".lcard video").forEach((v) => { v.onmouseenter = () => v.play().catch(() => {}); v.onmouseleave = () => v.pause(); });
   document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); if (!confirm("Library से हटाएँ?")) return; await api("DELETE", `/library/${b.dataset.del}`); S.lib = S.lib.filter((x) => x.id !== b.dataset.del); b.closest(".lcard").remove(); }));
 }
