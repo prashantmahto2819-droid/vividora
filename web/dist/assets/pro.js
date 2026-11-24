@@ -279,6 +279,16 @@ export function overlayFrame(ot) {
     const st = el.style; st.left = g.cx.toFixed(1) + "px"; st.top = g.cy.toFixed(1) + "px"; st.width = g.w.toFixed(1) + "px"; st.height = g.h == null ? "auto" : g.h.toFixed(1) + "px";
     st.transform = `translate(-50%,-50%) rotate(${g.rot.toFixed(2)}deg)${g.sx != null && g.sx !== 1 ? ` scaleX(${g.sx.toFixed(3)})` : ""}`; st.opacity = g.op.toFixed(3);
     st.mixBlendMode = CSS_BLEND[b.blend_mode] || KEY_BLEND[b.blend] || "";
+    if (g.fit === "free") { // photo frame — the same numbers the export uses (engine/effects.frame_style)
+      const hh = g.h == null ? el.offsetHeight : g.h; const rad = clamp(+b.radius || 0, 0, 0.5), bd = clamp(+b.border || 0, 0, 0.08), sh = clamp(+b.shadow || 0, 0, 1);
+      st.borderRadius = rad > 0.005 ? (rad * Math.min(g.w, hh)).toFixed(1) + "px" : "0px"; st.boxSizing = "border-box";
+      st.border = bd > 0.001 ? `${Math.max(1, g.w * bd).toFixed(1)}px solid ${b.border_color || "#FFFFFF"}` : "";
+      st.boxShadow = sh > 0.02 ? `${(g.w * 0.03).toFixed(1)}px ${(g.w * 0.03).toFixed(1)}px ${(g.w * 0.05).toFixed(1)}px rgba(0,0,0,${(0.75 * sh).toFixed(2)})` : ""; }
+    const kbImg = el.querySelector("img");
+    if (kbImg) { let tf = ""; if (g.fit === "cover" && b.kb && b.kb !== "none" && !b.layout) { const k = clamp(+b.kb_amount || 0.18, 0.05, 0.5); const p = clamp(t / Math.max(0.1, b.end - b.start), 0, 1);
+        const z = b.kb === "zoom_in" ? 1 + k * p : b.kb === "zoom_out" ? 1 + k * (1 - p) : 1 + k; const m = (z - 1) / 2 * 100; const d = m * (2 * p - 1);
+        const tx = b.kb === "pan_left" ? d : b.kb === "pan_right" ? -d : 0, ty = b.kb === "pan_up" ? d : b.kb === "pan_down" ? -d : 0; tf = `translate(${tx.toFixed(2)}%,${ty.toFixed(2)}%) scale(${z.toFixed(4)})`; }
+      if (kbImg._kb !== tf) { kbImg._kb = tf; kbImg.style.transform = tf; } }
     const mk = maskCss(b, t, g); if (st.webkitMaskImage !== mk) { st.webkitMaskImage = mk; st.maskImage = mk; st.webkitMaskSize = st.maskSize = "100% 100%"; st.webkitMaskRepeat = st.maskRepeat = "no-repeat"; }
     const med = el.querySelector("video,img"); if (med) { const f = clipFilter(b, t); if (med._f !== f) { med._f = f; med.style.filter = f; } }
     const vid = el.querySelector("video");
@@ -501,6 +511,12 @@ export function brollInspector(it, dis) {
     <div class="irow">${H.field("कैसे", `<select data-k="fit" ${dis}>${[["cover", "पूरा frame (cover)"], ["contain", "पूरा दिखे (contain)"], ["pip", "छोटा box (PiP)"], ["free", "free (जगह/size/घुमाव)"]].map(([v, l]) => `<option value="${v}" ${fit === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
       ${fit === "pip" ? H.field("कोना", `<select data-k="pos" ${dis}>${["tr", "tl", "br", "bl"].map((p) => `<option value="${p}" ${(it.pos || "tr") === p ? "selected" : ""}>${{ tr: "ऊपर दाएँ", tl: "ऊपर बाएँ", br: "नीचे दाएँ", bl: "नीचे बाएँ" }[p]}</option>`).join("")}</select>`) : ""}
       ${fit === "free" ? H.field(`size <b>${(+(it.scale ?? 0.4)).toFixed(2)}</b>`, `<input type="range" data-k="scale" min="0.03" max="2.5" step="0.01" value="${it.scale ?? 0.4}" ${dis}>`) : ""}</div>
+    ${fit === "free" ? `<div class="box" style="margin:6px 0;padding:8px 10px"><b class="small">🖼 Photo frame</b>
+      <div class="irow">${H.field("गोल कोने", `<input type="range" data-k="radius" min="0" max="0.5" step="0.02" value="${+it.radius || 0}" ${dis}>`)}${H.field("छाया (shadow)", `<input type="range" data-k="shadow" min="0" max="1" step="0.05" value="${+it.shadow || 0}" ${dis}>`)}</div>
+      <div class="irow">${H.field("border", `<input type="range" data-k="border" min="0" max="0.08" step="0.005" value="${+it.border || 0}" ${dis}>`)}${H.field("border का रंग", `<input type="color" data-k="border_color" value="${esc(it.border_color || "#FFFFFF")}" ${dis}>`)}</div>
+      <p class="small muted">गोल कोने पूरा दाएँ = गोला। mask / keyframe / blend mode लगी clip पर यह frame और animation नहीं चलते।</p></div>` : ""}
+    ${fit === "cover" && item?.kind === "image" && !it.layout ? `<div class="box" style="margin:6px 0;padding:8px 10px"><b class="small">📷 Photo में हलचल (Ken Burns)</b>
+      <div class="irow">${H.field("कैसे", `<select data-k="kb" ${dis}>${[["none", "नहीं (रुकी हुई)"], ["zoom_in", "धीरे zoom in"], ["zoom_out", "धीरे zoom out"], ["pan_left", "बाएँ सरकना ←"], ["pan_right", "दाएँ सरकना →"], ["pan_up", "ऊपर सरकना ↑"], ["pan_down", "नीचे सरकना ↓"]].map(([v, l]) => `<option value="${v}" ${(it.kb || "none") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}${H.field("कितना", `<input type="range" data-k="kb_amount" min="0.05" max="0.5" step="0.01" value="${+it.kb_amount || 0.18}" ${dis}>`)}</div></div>` : ""}
     <div class="box" style="margin:6px 0;padding:8px 10px;border-left:3px solid var(--accent,#7c3aed)"><b class="small">🎬 Smart Layout (render में)</b>
       <div class="irow">${H.field("layout mode", `<select data-k="layout" ${dis}>${[["", "Default (fullscreen)"], ["behind", "🧑 Smart — इंसान सामने, B-roll पीछे"], ["pip", "📺 PiP — छोटी window"], ["split", "⬛⬜ Split screen"], ["overlay", "🌫 Semi-transparent overlay"]].map(([v, l]) => `<option value="${v}" ${(it.layout || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}</div>
       ${(it.layout || "") === "behind" ? `<div class="irow">${H.field(`edge softness <b>${(+(it.edge_feather ?? 0)).toFixed(1)}</b>`, `<input type="range" data-pk="edge_feather" min="0" max="30" step="1" value="${it.edge_feather ?? 0}" ${dis}>`)}${H.field(`shrink <b>${(+(it.edge_shrink ?? 0)).toFixed(1)}</b>`, `<input type="range" data-pk="edge_shrink" min="0" max="20" step="1" value="${it.edge_shrink ?? 0}" ${dis}>`)}</div><p class="small muted">person matte (cutout) ज़रूरी — नहीं है तो auto बनेगा render में। edge feather = धुँधला किनारा।</p>` : ""}

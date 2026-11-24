@@ -534,7 +534,8 @@ def overlay_filter(item: dict, input_index: int, w: int, h: int, in_label: str, 
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = {"tl": "24:24", "tr": f"W-w-24:24", "bl": f"24:H-h-{int(h*0.28)}", "br": f"W-w-24:H-h-{int(h*0.28)}"}.get(item.get("pos", "tr"), "W-w-24:24")
     else:
-        prep = (f"{pre}{src}scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}{key},"
+        fill = ken_burns(item, w, h) or f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+        prep = (f"{pre}{src}{fill}{key},"
                 f"setpts=PTS-STARTPTS+{s:.3f}/TB[ov{idx}]")
         pos = "0:0"
     fade = ""
@@ -550,6 +551,58 @@ def _lerp(a: float, b: float, s: float, e: float) -> str:
     return f"({a:.4f}+({b:.4f}-{a:.4f})*min(1\\,max(0\\,(t-{s:.3f})/{d:.3f})))"
 
 
+def frame_style(item: dict, ow: int, idx: int) -> str:
+    """Photo-frame look of a free picture / sticker, as filters appended to its RGBA chain ('' when none is set):
+    `border` (0–0.08 of its width) + `border_color`, `radius` (0–0.5: rounded corners … circle), `shadow` (0–1 strength).
+    The canvas grows by the shadow's margin; the picture stays centred in it."""
+    def num(k: str, hi: float) -> float:
+        try:
+            return max(0.0, min(hi, float(item.get(k) or 0)))
+        except (TypeError, ValueError):
+            return 0.0
+    border, radius, shadow = num("border", 0.08), num("radius", 0.5), num("shadow", 1.0)
+    out = ""
+    if border > 0.001:
+        bw = max(1, int(round(ow * border)))
+        out += f",drawbox=x=0:y=0:w=iw:h=ih:color={_c(str(item.get('border_color') or '#FFFFFF'))}:t={bw}"
+    if radius > 0.005:
+        r_ = f"({radius:.4f}*min(W\\,H))"
+        inside = f"lte(hypot(max(abs(X-W/2)-(W/2-{r_})\\,0)\\,max(abs(Y-H/2)-(H/2-{r_})\\,0))\\,{r_})"
+        out += f",geq=r='r(X\\,Y)':g='g(X\\,Y)':b='b(X\\,Y)':a='alpha(X\\,Y)*{inside}'"
+    if shadow > 0.02:
+        m, o = max(8, int(ow * 0.09)), max(2, int(ow * 0.03))
+        out += (f",pad=iw+{2 * m}:ih+{2 * m}:{m}:{m}:color=black@0,split[ovsa{idx}][ovsb{idx}];"
+                # the shadow copy: black, soft, pushed down-right by o px (crop + pad moves it; the picture stays where it is)
+                f"[ovsb{idx}]colorchannelmixer=rr=0:gg=0:bb=0:aa={0.75 * shadow:.3f},gblur=sigma={max(1.5, ow * 0.022):.1f},"
+                f"crop=iw-{o}:ih-{o}:0:0,pad=iw+{o}:ih+{o}:{o}:{o}:color=black@0[ovsh{idx}];"
+                f"[ovsh{idx}][ovsa{idx}]overlay=x=0:y=0:format=rgb,format=rgba")
+    return out
+
+
+KEN_BURNS = {"none": "नहीं", "zoom_in": "धीरे zoom in", "zoom_out": "धीरे zoom out", "pan_left": "बाएँ सरकना ←", "pan_right": "दाएँ सरकना →",
+             "pan_up": "ऊपर सरकना ↑", "pan_down": "नीचे सरकना ↓"}
+
+
+def ken_burns(item: dict, w: int, h: int) -> str:
+    """A still photo that fills the frame, slowly moving (zoompan on a 2× picture so the motion is smooth).
+    '' when the item has no `kb` or is not an image."""
+    kb = item.get("kb")
+    if kb not in KEN_BURNS or kb == "none" or item.get("type") != "image":
+        return ""
+    try:
+        k = max(0.05, min(0.5, float(item.get("kb_amount") or 0.18)))
+    except (TypeError, ValueError):
+        k = 0.18
+    n = max(1, int(round((float(item["end"]) - float(item["start"])) * 25)))      # a looped picture comes in at 25 fps
+    p_ = f"min(on/{n}\\,1)"
+    cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+    z = {"zoom_in": f"1+{k:.3f}*{p_}", "zoom_out": f"1+{k:.3f}*(1-{p_})"}.get(kb, f"{1 + k:.3f}")
+    x = {"pan_left": f"(iw-iw/zoom)*(1-{p_})", "pan_right": f"(iw-iw/zoom)*{p_}"}.get(kb, cx)
+    y = {"pan_up": f"(ih-ih/zoom)*(1-{p_})", "pan_down": f"(ih-ih/zoom)*{p_}"}.get(kb, cy)
+    return (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
+            f"zoompan=z='{z}':x='{x}':y='{y}':d=1:s={w}x{h}:fps=25")
+
+
 def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_label: str, idx: int,
                   alpha_index: int | None = None) -> str:
     s, e = float(item["start"]), float(item["end"])
@@ -561,7 +614,7 @@ def _free_overlay(item: dict, idx_in: int, w: int, h: int, in_label: str, out_la
     to = item.get("to") or {}
     x1, y1, sc1 = float(to.get("x", x0)), float(to.get("y", y0)), float(to.get("scale", sc0))
     ow = max(8, int(w * max(sc0, sc1)))
-    prep = (f"{pre}{src}scale={ow}:-2:flags=bicubic,format=rgba{key},setpts=PTS-STARTPTS+{s:.3f}/TB")
+    prep = (f"{pre}{src}scale={ow}:-2:flags=bicubic,format=rgba{key}{frame_style(item, ow, idx)},setpts=PTS-STARTPTS+{s:.3f}/TB")
     anim = item.get("anim") or "none"
     # animated rotation (turns on the clip's own clock: t is already shifted to the output timeline)
     spin = {"spin": f"-2*PI*pow(max(0\\,1-(t-{s:.3f})/0.5)\\,2)", "rotate_in": f"-PI/2*pow(max(0\\,1-(t-{s:.3f})/0.4)\\,2)",

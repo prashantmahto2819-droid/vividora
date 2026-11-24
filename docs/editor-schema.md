@@ -600,3 +600,15 @@ Engine: `effects.vol_expr`, `effects.pitch_speed`, `effects.music_chain`; previe
 were spoken — Devanagari speech and Latin file names are compared) · `order` (left-overs spread in name order) · `none`.
 Nothing is written: the editor (AI Studio → “Podcast की supporting clips”) shows the list and adds `broll` items
 (`_sup`) when the creator presses “लगाओ”. Engine: `engine/supportmatch.py`.
+
+## Photo frame and Ken Burns (`effects.broll[]`)
+
+| fit | field | meaning |
+|---|---|---|
+| `free` | `radius` | 0–0.5 of the short side: rounded corners … circle |
+| `free` | `border`, `border_color` | 0–0.08 of the picture's width, hex colour |
+| `free` | `shadow` | 0–1 strength of a soft drop shadow (down-right) |
+| `cover`, image only | `kb`, `kb_amount` | `zoom_in · zoom_out · pan_left · pan_right · pan_up · pan_down`, 0.05–0.5 (default 0.18) |
+
+Engine: `effects.frame_style`, `effects.ken_burns` (legacy overlay path; the pro compositor ignores them, like `anim`).
+Preview: `pro.js overlayFrame` (CSS radius / border / box-shadow, image transform).
