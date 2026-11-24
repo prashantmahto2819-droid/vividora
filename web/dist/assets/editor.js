@@ -1202,7 +1202,7 @@ async function doSave(ed, loud) {
 }
 function field(label, inner) { return `<div class="ifield"><label>${label}</label>${inner}</div>`; }
 // ── Supporting clips of a talk (podcast): upload them, Vividora finds where each one belongs ──
-const SUP_HOW = { time: ["⏱ आपके लिखे समय पर", "ok"], ai: ["🤖 AI ने बात से मिलाया", "ok"], words: ["🎯 नाम / note के शब्द बोले गए", "ok"], order: ["↔ नाम के क्रम में (अंदाज़ा — जाँच लें)", "warn"], none: ["❓ जगह नहीं मिली — note लिखें या समय डालें", "err"] };
+const SUP_HOW = { time: ["⏱ आपके लिखे समय पर", "ok"], ai: ["🤖 AI ने बात से मिलाया", "ok"], words: ["🎯 नाम / note के शब्द बोले गए", "ok"], look: ["👁 तस्वीर देखकर मिलाया (CLIP — जाँच लें)", "ok"], order: ["↔ नाम के क्रम में (अंदाज़ा — जाँच लें)", "warn"], none: ["❓ जगह नहीं मिली — note लिखें या समय डालें", "err"] };
 function supState() { if (!E.sup) E.sup = { clips: [], res: null, layout: "cover", spread: true, img: 4, vid: 6, busy: false }; E.sup.clips = E.sup.clips.filter((c) => libItem(c.id)); return E.sup; }
 function supHtml(dis) {
   const { esc } = E.ctx; const S = supState(); const pool = (E.lib || []).filter((x) => (x.kind === "broll" || x.kind === "image") && x.source !== "starter" && !S.clips.some((c) => c.id === x.id));

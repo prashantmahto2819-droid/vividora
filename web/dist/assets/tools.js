@@ -9,6 +9,8 @@ function ensureCss() {
   const st = document.createElement("style"); st.id = "tl-css";
   st.textContent = `.tl-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem}@media(max-width:900px){.tl-wrap{grid-template-columns:1fr}}
 .tl-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem}
+.gd-tab{width:100%;border-collapse:collapse;font-size:.8rem;min-width:560px}.gd-tab th,.gd-tab td{text-align:left;padding:.35rem .5rem;border-bottom:1px solid var(--line);vertical-align:top}.gd-tab th{opacity:.65;font-weight:600}
+.pk-help{margin:.1rem 0 .45rem}.pk-help summary{cursor:pointer;opacity:.85}
 .pk-row{padding:.6rem 0;border-top:1px solid var(--line)}.pk-row:first-of-type{border-top:0;padding-top:0}
 .pk-head{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}.pk-head .grow{flex:1}.pk-edit select{flex:1;min-width:180px}.pk-chip{font-size:.72rem;padding:.08rem .5rem;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
 .pk-chip.ok{border-color:rgba(70,200,120,.5);color:#46c878}.pk-chip code{font-size:.72rem}
@@ -155,8 +157,9 @@ export function apiView() {
   const cu = `curl -X POST ${base}/api/v1/text-to-speech \\\n  -H "Authorization: Bearer ${k}" -H "Content-Type: application/json" \\\n  -d '{"text":"नमस्ते दोस्तों","lang":"hi"}'`;
   const tab = /out|vividora/.test(location.hash.split("?")[1] || "") ? "out" : "in";
   return `<div class="pghead"><div><h1>🔌 API & Keys</h1><p class="muted">दो अलग चीज़ें हैं: <b>बाहर की services की keys</b> (Gemini, Pixabay, fal… — जिन्हें Vividora इस्तेमाल करता है) और <b>Vividora की अपनी API key</b> (जिससे आपका दूसरा software Vividora को चलाता है)।</p></div></div>
-  <div class="seg" id="api-tabs" style="margin-bottom:1rem"><button data-apitab="in" class="${tab === "in" ? "on" : ""}">🔑 Services की keys जोड़ें</button><button data-apitab="spend">💰 खर्च</button><button data-apitab="out" class="${tab === "out" ? "on" : ""}">🔌 Vividora की API दें</button></div>
+  <div class="seg" id="api-tabs" style="margin-bottom:1rem"><button data-apitab="in" class="${tab === "in" ? "on" : ""}">🔑 Services की keys जोड़ें</button><button data-apitab="spend">💰 खर्च</button><button data-apitab="guide">📖 Guide — कौन सा switch क्या करता है</button><button data-apitab="out" class="${tab === "out" ? "on" : ""}">🔌 Vividora की API दें</button></div>
   <div id="api-spend" hidden><div id="sp-box"><p class="small muted">लोड हो रहा है…</p></div></div>
+  <div id="api-guide" hidden><div id="gd-box"><p class="small muted">लोड हो रहा है…</p></div></div>
   <div id="api-in" ${tab === "in" ? "" : "hidden"}><div id="pk-list"><p class="small muted">लोड हो रहा है…</p></div></div>
   <div id="api-out" ${tab === "out" ? "" : "hidden"}><p class="muted small" style="margin:0 0 .8rem">अपने दूसरे software (n8n, Zapier, Make, अपनी app, script) से Vividora चलाएँ — Image→3D, Text→Voice, 3D character video, documentary। Key सिर्फ़ आपके workspace तक सीमित है।</p>
   <div class="tl-wrap"><div class="tl-box">
@@ -191,6 +194,16 @@ async function spendLoad() {
         ${s.months.length > 1 ? `<h3 style="margin:1rem 0 .4rem">पिछले महीने</h3>${s.months.map((m) => `<p class="small" style="margin:.15rem 0">${esc(m.period)}: <b>${usd(m.usd)}</b></p>`).join("")}` : ""}</div>
       <div class="tl-box"><h3 style="margin:0 0 .4rem">हाल के काम</h3>${s.recent.length ? s.recent.map((r) => `<div class="pk-row"><div class="pk-head"><span class="small">${esc(r.label)}</span><span class="grow"></span><b class="small">${usd(r.usd)}</b></div><p class="small muted" style="margin:.1rem 0 0">${esc(new Date(r.ts).toLocaleString())} · ${esc(r.what || "")}</p></div>`).join("") : `<p class="small muted">अभी कुछ नहीं।</p>`}</div></div>` : ""}`;
 }
+// 📖 the admin guide (server: adminguide.py — the same text as docs/admin-guide.md)
+async function guideLoad() {
+  const box = $("#gd-box"); if (!box || box.dataset.done) return; let g; try { g = await ctx.api("GET", "/providers/guide"); } catch (e) { box.innerHTML = `<p class="small err">${esc(e.message)}</p>`; return; }
+  box.dataset.done = "1"; let grp = "";
+  box.innerHTML = `<div class="note" style="margin-bottom:.8rem">यह पूरा हिसाब है: <b>कौन सा काम कहाँ चलता है</b>, <b>हर key / switch से क्या बदलता है</b>, और <b>पहली बार कैसे जाँचें</b>। दाम अंदाज़े हैं — असली bill हर service की अपनी site पर। कोई भी cloud service तभी पैसा लेती है जब कोई काम उसे बुलाए; बीच में कुछ चालू नहीं रहता। यही guide फ़ाइल में भी है: <code>docs/admin-guide.md</code>।</div>
+    <div class="tl-box" style="margin-bottom:.8rem"><h3 style="margin:0 0 .5rem">1 · कौन सा काम कहाँ चलता है</h3>${g.tasks.map((t) => `<h4 style="margin:.9rem 0 .3rem">${esc(t.task)}</h4><div style="overflow-x:auto"><table class="gd-tab"><thead><tr><th>कहाँ</th><th>क्या चाहिए</th><th>कौन सा switch / कहाँ चुनें</th><th>दाम</th></tr></thead><tbody>${t.options.map((o) => `<tr><td><b>${esc(o.where)}</b></td><td>${esc(o.need)}</td><td>${esc(o.switch)}</td><td>${esc(o.cost)}</td></tr>`).join("")}</tbody></table></div>`).join("")}</div>
+    <div class="tl-box" style="margin-bottom:.8rem"><h3 style="margin:0 0 .5rem">2 · हर key और switch — क्या करने से क्या होगा</h3>${g.rows.map((r) => `${r.group !== grp ? ((grp = r.group), `<h4 style="margin:1rem 0 .3rem;opacity:.75">${esc(r.group)}</h4>`) : ""}<div class="pk-row"><div class="pk-head"><b>${esc(r.label)}</b><span class="pk-chip">${r.kind === "switch" ? "switch" : r.kind === "number" ? "संख्या" : "key"}</span><span class="small muted">${esc(r.env)}</span></div>${r.states.map((h) => `<p class="small" style="margin:.2rem 0"><b>${esc(h.state)}:</b> ${esc(h.effect)}</p>`).join("")}</div>`).join("")}</div>
+    <div class="tl-box" style="margin-bottom:.8rem"><h3 style="margin:0 0 .3rem">3 · Server की <code>.env</code> फ़ाइल वाले switch</h3><p class="small muted">ये dashboard में नहीं हैं — server पर <code>/srv/studio/vividora/.env</code> में line जोड़कर <code>docker compose --profile tunnel up -d --build</code> चलाना होता है।</p>${g.server.map((x) => `<div class="pk-row"><div class="pk-head"><code>${esc(x.name)}</code></div><p class="small" style="margin:.2rem 0">${esc(x.does)}</p><p class="small muted" style="margin:.1rem 0">${esc(x.note)}</p></div>`).join("")}</div>
+    <div class="tl-box"><h3 style="margin:0 0 .5rem">4 · पहली बार जाँचने का क्रम</h3><ol style="margin:0;padding-left:1.2rem">${g.checklist.map((c) => `<li class="small" style="margin:.3rem 0">${esc(c)}</li>`).join("")}</ol></div>`;
+}
 // outside-service keys (server: provkeys.py) — saved encrypted, used at once, no server restart
 async function provLoad() {
   const box = $("#pk-list"); if (!box) return;
@@ -203,6 +216,7 @@ async function provLoad() {
         <div class="pk-head"><b>${esc(x.label)}</b> ${x.set ? `<span class="pk-chip ok">✓ ${x.choices || x.number ? "set" : "चालू"}${x.shown ? ` · <code>${esc(x.choices ? (x.choices[x.shown] || x.shown).split(" — ")[0] : x.shown)}</code>` : ""}${x.source === "env" ? " · .env से" : x.source === "dashboard" ? " · यहाँ से" : ""}</span>` : `<span class="pk-chip">${x.choices ? "default: यह server" : x.number ? "खाली" : "नहीं डाली"}</span>`}
           ${x.link ? `<a class="small" href="${esc(x.link)}" target="_blank" rel="noopener">key कहाँ मिलेगी ↗</a>` : ""}</div>
         <p class="small muted" style="margin:.15rem 0 .4rem">${esc(x.use)} <span style="opacity:.6">· ${esc(x.env)}</span></p>
+        ${(x.help || []).length ? `<details class="pk-help"><summary class="small">ℹ️ इससे क्या होगा</summary>${x.help.map((h) => `<p class="small" style="margin:.2rem 0"><b>${esc(h.state)}:</b> ${esc(h.effect)}</p>`).join("")}</details>` : ""}
         ${can ? `<div class="pk-edit">${x.choices ? `<select>${Object.entries(x.choices).map(([k, l]) => `<option value="${esc(k)}" ${(x.shown || "local") === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`
           : `<input type="${x.secret ? "password" : x.number ? "number" : "text"}" ${x.number ? `min="${x.number[0]}" max="${x.number[1]}" step="any"` : ""} autocomplete="off" spellcheck="false" placeholder="${esc(x.placeholder || (x.number ? "" : x.set ? "नई key चिपकाएँ (बदलने के लिए)" : "key यहाँ चिपकाएँ"))}" value="${x.number && x.shown ? esc(x.shown) : ""}">`}<button class="btn small primary" data-pksave>Save</button>${x.source === "dashboard" ? `<button class="btn small quiet" data-pkdel title="यहाँ डाली key हटाएँ (.env वाली, अगर है, वापस चलने लगेगी)">हटाएँ</button>` : ""}</div>` : ""}
       </div>`).join("")}</div>`; }).join("");
@@ -229,7 +243,7 @@ export function apiBind(c) {
     } catch (e) { box.innerHTML = `<p class="small err">${esc(e.message)}</p>`; }
   };
   loadList(); provLoad();
-  document.querySelectorAll("[data-apitab]").forEach((b) => (b.onclick = () => { const t = b.dataset.apitab; document.querySelectorAll("[data-apitab]").forEach((x) => x.classList.toggle("on", x === b)); $("#api-in").hidden = t !== "in"; $("#api-out").hidden = t !== "out"; $("#api-spend").hidden = t !== "spend"; if (t === "spend") spendLoad(); }));
+  document.querySelectorAll("[data-apitab]").forEach((b) => (b.onclick = () => { const t = b.dataset.apitab; document.querySelectorAll("[data-apitab]").forEach((x) => x.classList.toggle("on", x === b)); $("#api-in").hidden = t !== "in"; $("#api-out").hidden = t !== "out"; $("#api-spend").hidden = t !== "spend"; $("#api-guide").hidden = t !== "guide"; if (t === "spend") spendLoad(); if (t === "guide") guideLoad(); }));
   const cc = $("#ak-copycurl"); if (cc) cc.onclick = () => copy($("#ak-curl").textContent, "Example copy हो गया");
   const go = $("#ak-go");
   if (go) go.onclick = async () => {

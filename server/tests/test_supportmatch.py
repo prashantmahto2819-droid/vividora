@@ -142,8 +142,44 @@ def test_vision_call() -> None:
     print("PASS vision call: Gemini + Anthropic request shapes, cache, failure is None")
 
 
+def test_clip_look() -> None:
+    """CLIP on this server (engine/clipsee.py): ranking rules with made-up vectors, and its place in the matching order."""
+    import os
+
+    import numpy as np
+
+    from vividora.engine import clipsee
+    os.environ.pop("CLIP_MATCH", None)
+    assert not clipsee.wanted()
+    os.environ["CLIP_MATCH"] = "on"
+    assert clipsee.wanted()
+    os.environ.pop("CLIP_MATCH")
+    rng = np.random.default_rng(0)
+    lines = rng.normal(size=(8, 32)).astype(np.float32)
+    lines /= np.linalg.norm(lines, axis=1, keepdims=True)
+    hill = lines[5] * 0.9 + rng.normal(size=32).astype(np.float32) * 0.05          # a picture that is line 5
+    hill /= np.linalg.norm(hill)
+    vague = lines.mean(axis=0)                                                    # looks a little like every line
+    vague /= np.linalg.norm(vague)
+    got = clipsee.rank({"hill": hill, "vague": vague}, lines, min_sim=0.18)
+    assert got["hill"][0][0] == 5 and got["hill"][0][1] > 0.8, got
+    assert "vague" not in got, got                                                # nothing stands out → no placement
+    v2 = clipsee.unpack(clipsee.pack(hill))
+    assert abs(float(v2 @ hill) - 1) < 1e-3                                       # stored in the Library item and read back
+    segs = [{"start": i * 5.0, "end": i * 5.0 + 4.5, "text": t} for i, t in enumerate(
+        ["नमस्ते दोस्तों", "आज मौसम अच्छा है", "मैं सुबह जल्दी उठा", "फिर चाय पी", "रास्ता लंबा था", "ऊपर से नज़ारा कमाल था", "थोड़ा आराम किया", "फिर लौट आए"])]
+    clips = [{"id": "hill", "name": "IMG_0001.jpg", "kind": "image"}, {"id": "tea", "name": "चाय.jpg", "kind": "image"},
+             {"id": "x", "name": "IMG_0002.jpg", "kind": "image"}]
+    res = {r["id"]: r for r in sm.match(segs, clips, look={"hill": [(5, 0.31)], "tea": [(0, 0.3)]}, spread=False)}
+    assert res["hill"]["how"] == "look" and res["hill"]["i"] == 5 and res["hill"]["start"] == 25.0, res["hill"]
+    assert res["tea"]["how"] == "words" and res["tea"]["i"] == 3, res["tea"]         # spoken words win over the look
+    assert res["x"]["start"] is None
+    print("PASS CLIP look: a clear match is placed, a vague picture is not, words come first, vectors survive storage")
+
+
 if __name__ == "__main__":
     test_vision_call()
     test_look_inside()
+    test_clip_look()
     main()
     print("ALL PASS")

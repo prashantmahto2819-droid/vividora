@@ -180,7 +180,8 @@ def describe(clips: list[dict], ask_images, *, batch: int = 6) -> dict:
 
 
 def match(segments: list[dict], clips: list[dict], *, cuts: list[dict] | None = None, duration: float | None = None,
-          min_gap: float = 2.5, image_seconds: float = 4.0, video_seconds: float = 6.0, spread: bool = True, ask=None) -> list[dict]:
+          min_gap: float = 2.5, image_seconds: float = 4.0, video_seconds: float = 6.0, spread: bool = True, ask=None,
+          look: dict | None = None) -> list[dict]:
     """clips: [{id, name, tags?, note?, kind ("image"/"video"), duration?}] →
     [{id, start, end, i (line index or None), line, score, how}] in the order of `clips`; an unplaced clip has start None."""
     gone = [(float(c["start"]), float(c["end"])) for c in cuts or [] if c.get("enabled", True)]
@@ -281,6 +282,18 @@ def match(segments: list[dict], clips: list[dict], *, cuts: list[dict] | None = 
             t = slot_in(ln)
             if t is not None:
                 put(k, t, "words", ln, sc)
+
+    # 3b. what the picture looks like (engine/clipsee.py, optional): {clip id: [(segment index, score), …]} best first
+    by_i = {ln["i"]: ln for ln in lines}
+    for k, c in enumerate(clips):
+        if res[k]["start"] is not None:
+            continue
+        for i, sc in (look or {}).get(c.get("id")) or []:
+            ln = by_i.get(i)
+            t = slot_in(ln) if ln else None
+            if t is not None:
+                put(k, t, "look", ln, float(sc))
+                break
 
     # 4. the rest, in the order of their names, over the parts that are still free
     left = [k for k in sorted(range(len(clips)), key=lambda k: _natural(clips[k].get("name"))) if res[k]["start"] is None]

@@ -37,3 +37,12 @@ RUN if [ "$WITH_WHISPERX" = "1" ]; then \
       && pip install --no-cache-dir whisperx \
       && python -c "import whisperx, faster_whisper; print('whisperx ok')"; \
     fi
+
+# Optional: OpenCLIP (multilingual) — matches supporting clips to spoken lines by looking at them, on this server.
+# WITH_OPENCLIP=1 in .env; shares PyTorch with WhisperX. See docs/openclip.md
+ARG WITH_OPENCLIP=0
+RUN if [ "$WITH_OPENCLIP" = "1" ]; then \
+      pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+      && pip install --no-cache-dir open_clip_torch sentencepiece \
+      && python -c "import open_clip; print('open_clip ok')"; \
+    fi

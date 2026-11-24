@@ -192,17 +192,45 @@ async def support_match(request: Request, user: dict):
             seen_new = len(found)
         for c in clips:
             c["seen"] = str((rows[c["id"]].get("meta") or {}).get("ai_seen") or "")
+    # optional: CLIP on this server looks at the clips too (places what words and the LLM could not)
+    look = None
+    from ..engine import clipsee
+    if clipsee.wanted() and clipsee.available():
+        def see() -> dict:
+            import numpy as np
+            rows_ = {c["id"]: db.get("library", c["id"]) for c in clips}
+            vecs, tag = {}, clipsee.model_name()
+            for c in clips:
+                m = rows_[c["id"]].get("meta") or {}
+                if (m.get("clip_vec") or {}).get("model") == tag:
+                    vecs[c["id"]] = clipsee.unpack(m["clip_vec"]["v"])
+                    continue
+                fr = supportmatch.frames_of(storage.abs_path(rows_[c["id"]]["path"]), c["kind"], c["duration"], max_side=336)
+                if not fr:
+                    continue
+                v = clipsee.embed_images(fr).mean(axis=0)
+                v = v / (float(np.linalg.norm(v)) or 1.0)
+                vecs[c["id"]] = v
+                with db.tx() as cx:
+                    db.update(cx, "library", c["id"], {"meta": {**m, "clip_vec": {"model": tag, "v": clipsee.pack(v)}}})
+            idx = [i for i, s_ in enumerate(segs) if (s_.get("text") or "").strip()]
+            return clipsee.rank(vecs, clipsee.embed_texts([segs[i]["text"] for i in idx])) if vecs and idx else {}, idx
+        try:
+            ranked, idx = await run_in_threadpool(see)
+            look = {cid: [(idx[i], sc) for i, sc in lst] for cid, lst in ranked.items()}
+        except Exception as e:  # noqa: BLE001 — optional: words / AI still place the clips
+            log.warning("CLIP matching skipped: %s", str(e)[:200])
     edl = p.get("edl") or {}
     dur = float((p.get("meta") or {}).get("duration") or edl.get("duration") or 0) or None
     ask = llm.ask_json if (d.get("use_ai", True) and llm.available()) else None
     num = lambda k, dv, lo, hi: max(lo, min(hi, float(d.get(k) or dv)))  # noqa: E731
     res = await run_in_threadpool(lambda: supportmatch.match(
         segs, clips, cuts=edl.get("cuts") or [], duration=dur, spread=bool(d.get("spread", True)),
-        image_seconds=num("image_seconds", 4, 1.5, 15), video_seconds=num("video_seconds", 6, 1.5, 30), ask=ask))
+        image_seconds=num("image_seconds", 4, 1.5, 15), video_seconds=num("video_seconds", 6, 1.5, 30), ask=ask, look=look))
     names = {c["id"]: c for c in clips}
     return ok({"placements": [{**r, "name": names[r["id"]]["name"], "kind": names[r["id"]]["kind"], "seen": names[r["id"]].get("seen", "")} for r in res],
                "seen_new": seen_new,
-               "ai": any(r["how"] == "ai" for r in res), "ai_on": bool(ask), "placed": sum(1 for r in res if r["start"] is not None), "total": len(res)})
+               "ai": any(r["how"] == "ai" for r in res), "ai_on": bool(ask), "clip_on": look is not None, "placed": sum(1 for r in res if r["start"] is not None), "total": len(res)})
 
 
 @require("editor")

@@ -79,6 +79,9 @@ CATALOG += [
     {"env": "WORD_ALIGN", "group": "run", "label": "शब्दों का सटीक समय (WhisperX)", "secret": False,
      "choices": {"off": "बंद (Whisper का अपना समय)", "whisperx": "WhisperX — हर शब्द आवाज़ से मिलाकर (worker में whisperx install होना चाहिए)"},
      "use": "karaoke captions और text से कट ज़्यादा सटीक। install न हो तो कुछ नहीं बदलता। देखें docs/whisperx.md", "link": ""},
+    {"env": "CLIP_MATCH", "group": "run", "label": "Clips को तस्वीर देखकर मिलाना (OpenCLIP, इसी server पर)", "secret": False,
+     "choices": {"off": "बंद", "on": "चालू — बिना बाहर के AI के (worker नहीं, API image में open_clip install होना चाहिए)"},
+     "use": "Supporting clips को बात से मिलाने में मदद; Gemini की जगह नहीं लेता, उसके बाद चलता है। देखें docs/openclip.md", "link": ""},
     {"env": "RUNPOD_WHISPER_ENDPOINT", "group": "run", "label": "RunPod Whisper endpoint ID", "secret": False,
      "use": "RunPod → Serverless → “Faster Whisper” endpoint की ID (Min workers = 0 रखें)", "link": "https://www.runpod.io/console/serverless"},
 ]
@@ -207,10 +210,11 @@ def status() -> list[dict]:
     except Exception:  # noqa: BLE001
         pass
     out = []
+    from .adminguide import HELP
     for c in CATALOG:
         env = c["env"]
         v = stored.get(env) or _base.get(env) or ""
-        out.append({**c, "group_label": GROUPS[c["group"]], "set": bool(v),
+        out.append({**c, "group_label": GROUPS[c["group"]], "set": bool(v), "help": [{"state": s_, "effect": e_} for s_, e_ in HELP.get(env, [])],
                     "source": "dashboard" if stored.get(env) else ("env" if v else ""),
                     "shown": (v if not c["secret"] else _mask(v)) if v else "",
                     "updated_at": meta.get(env) if stored.get(env) else None})

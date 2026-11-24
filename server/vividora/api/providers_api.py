@@ -70,7 +70,15 @@ async def spend_summary(request: Request, user: dict):
     return ok({**s, "can_edit": _operator(user)})
 
 
-routes = [
+@require("editor")
+async def guide(request: Request, user: dict):
+    """The admin guide (adminguide.py): which job runs where, what every key / switch does, the test order. No secrets in it."""
+    from .. import adminguide
+    return ok(adminguide.data())
+
+
+routes = [Route("/providers/guide", guide),
+          
     Route("/spend", spend_summary),
     Route("/providers", list_providers),
     Route("/providers/{env}", put_provider, methods=["PUT"]),

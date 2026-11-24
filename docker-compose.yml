@@ -7,6 +7,7 @@ services:
       context: ./server
       args:
         WITH_WHISPERX: ${WITH_WHISPERX:-0}      # 1 = also install WhisperX (exact word times, +2 GB) — docs/whisperx.md
+        WITH_OPENCLIP: ${WITH_OPENCLIP:-0}      # 1 = also install OpenCLIP (match clips by looking, on this server) — docs/openclip.md
     image: vividora/server
     restart: always
     env_file: .env
