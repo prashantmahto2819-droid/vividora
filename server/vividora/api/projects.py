@@ -671,6 +671,53 @@ async def montage_render(request: Request, user: dict):
 
 
 @require("editor")
+async def transcript_import(request: Request, user: dict):
+    """A subtitle file made elsewhere becomes the transcript — no speech recognition (engine/srtimport.py).
+    Body: {text: "<SRT or VTT>", language?}. Before the video is prepared the words are kept and used as soon as it is;
+    afterwards they replace the transcript at once (cuts, overlays and everything else stay as they are)."""
+    from ..engine import autocut, retranscribe, srtimport
+    p = own_project(request, user)
+    d = await body(request)
+    text = str(d.get("text") or "")
+    if len(text) > 3_000_000:
+        raise ApiError(413, "फ़ाइल बहुत बड़ी है (3 MB तक)")
+    meta = {**(p.get("meta") or {})}
+    dur = float(meta.get("duration") or 0) or None
+    try:
+        tr = srtimport.parse(text, dur)
+    except ValueError as e:
+        raise ApiError(422, str(e))
+    lang = str(d.get("language") or p.get("language") or "hi")[:8]
+    if lang and lang != "auto":
+        tr["language"] = lang
+    nw = sum(len(s_["words"]) for s_ in tr["segments"])
+    busy = [j for j in db.rows(db.conn().execute("SELECT * FROM jobs WHERE project_id = ? AND kind = 'transcribe' AND status IN ('queued', 'running')", (p["id"],)))]
+    with db.tx() as c:
+        if not dur:
+            # still uploading / being prepared: the prepare step picks the words up (service.after_job, transcript_preset)
+            meta["transcript_preset"] = tr
+            db.update(c, "projects", p["id"], {"meta": meta, "settings": {**(p.get("settings") or {}), "skip_transcript": True}, "updated_at": db.now()})
+            return ok({"segments": len(tr["segments"]), "words": nw, "when": "after_prepare"})
+        for j in busy:                       # the file replaces what speech recognition would have made
+            service.cancel_job(c, j, note="SRT से transcript लिया")
+        tr = service.finish_transcript(tr, {})
+        tr["imported"] = "srt"
+        cur = p.get("transcript") or None
+        tr = retranscribe.bump(tr, cur if not (cur or {}).get("skipped") else None, {"full": True, "at": db.now()})
+        meta.pop("transcript_skipped", None)
+        meta.pop("transcript_preset", None)
+        changes = {"transcript": tr, "meta": meta, "updated_at": db.now(),
+                   "status_note": f"SRT से transcript लग गया ✓ ({nw} शब्द) — captions और text-edit उपलब्ध"}
+        if not p.get("edl"):
+            changes["edl"] = autocut.build_edl({"segments": []}, dur)
+        db.update(c, "projects", p["id"], changes)
+        if busy or p.get("status") in ("transcribing", "cutting"):
+            service.set_status(c, p["id"], "review_cuts", changes["status_note"])
+        service.log(c, user["workspace_id"], "transcript.import", user_id=user["id"], project_id=p["id"], detail={"words": nw})
+    return ok({"segments": len(tr["segments"]), "words": nw, "when": "now"})
+
+
+@require("editor")
 async def shorts_plan(request: Request, user: dict):
     p = own_project(request, user)
     data = await body(request)
@@ -926,6 +973,7 @@ routes = [
     Route("/projects/{project_id}/approve", approve, methods=["POST"]),
     Route("/projects/{project_id}/jobs/{job_id}/cancel", job_cancel, methods=["POST"]),
     Route("/projects/{project_id}/jobs/{job_id}/pause", job_pause, methods=["POST"]),
+    Route("/projects/{project_id}/transcript/import", transcript_import, methods=["POST"]),
     Route("/projects/{project_id}/shorts/plan", shorts_plan, methods=["POST"]),
     Route("/projects/{project_id}/montage", montage_render, methods=["POST"]),
     Route("/projects/{project_id}/montage/to-editor", montage_to_editor, methods=["POST"]),

@@ -149,3 +149,10 @@ cloud voice key (fal.ai / ElevenLabs) is present.
 Voice `fal_cb_myvoice` (beta): the creator's own voice. The newest Library sound whose name or tag contains `myvoice`
 (`api/library.my_voice_sample`) is cut to 20 s, sent to Chatterbox as the reference (`voice` = data URI, `custom_audio_language`).
 Without a sample the request is refused with the upload hint — it never falls back to another voice.
+
+### Transcript from a subtitle file
+
+`POST /api/projects/{id}/transcript/import` `{text: "<SRT or WebVTT>", language?}` → `{segments, words, when: "now" | "after_prepare"}`.
+`engine/srtimport.py` turns every cue into a segment (word times share the cue by word length). Before the video is prepared the
+words wait in `meta.transcript_preset` and no transcribe job is made; afterwards they replace the transcript at once (a running
+transcribe job is cancelled; cuts and effects are untouched).

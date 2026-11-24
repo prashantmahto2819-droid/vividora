@@ -574,6 +574,7 @@ function newView() {
       <div class="chips" style="display:flex;gap:.5rem;flex-wrap:wrap">
         <label class="chip on" style="flex:1;min-width:240px"><input type="radio" name="transcript_mode" value="make" checked> <b>Transcript बनाएँ</b><br><span class="small muted">captions, text से edit, AI title/description, Shorts — सब इसी से बनते हैं</span></label>
         <label class="chip" style="flex:1;min-width:240px"><input type="radio" name="transcript_mode" value="skip"> <b>Transcript छोड़ें</b><br><span class="small muted">सिर्फ़ visual/beat edit — चुप्पी और scene से कट, बिना captions। बाद में एक click से transcript बन सकता है</span></label>
+        <label class="chip" style="flex:1;min-width:240px"><input type="radio" name="transcript_mode" value="srt"> <b>मेरे पास SRT है</b><br><span class="small muted">वीडियो कहीं और edit हो चुकी है और उसकी subtitle फ़ाइल (.srt / .vtt) है — वही transcript बनेगी, कोई इंतज़ार या खर्च नहीं</span><br><input type="file" id="up-srt" accept=".srt,.vtt,text/plain,text/vtt" style="margin-top:.3rem;max-width:100%"></label>
       </div></div>
     <div class="field" id="theme-row"><label>🎨 Theme (optional) <span class="small muted">— रंग, captions, text, transitions, effects, music का mood एक साथ; autopilot इसे लगाएगा</span></label><select name="theme_id" id="up-theme"><option value="">— कोई theme नहीं (channel defaults) —</option></select></div>
     <div id="up-progress"></div>
@@ -597,6 +598,7 @@ function bindNew() {
   let ptype = "talking_head";
   const moBox = $("#mo-new"), moFiles = []; let moSong = null;
   api("GET", "/presets/themes").then((r) => { const opts = (r.themes || []).map((t) => `<option value="${t.id}">${t.emoji || ""} ${esc(t.label)}${t.saved ? " ⭐" : ""}</option>`).join(""); for (const id of ["#up-theme", "#mo-theme"]) { const el = $(id); if (el) el.innerHTML += opts; } }).catch(() => {});
+  { const us = document.querySelector("#up-srt"); if (us) us.onchange = () => { const r = document.querySelector("input[name=transcript_mode][value=srt]"); if (r && us.files.length) { r.checked = true; r.onchange && r.onchange(); } }; }
   document.querySelectorAll("input[name=transcript_mode]").forEach((i) => (i.onchange = () => document.querySelectorAll("#tr-row .chip").forEach((c) => c.classList.toggle("on", c.contains(i) && i.checked))));
   document.querySelectorAll("input[name=ptype]").forEach((i) => (i.onchange = () => { ptype = i.value; document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.contains(i))); const mont = ptype === "montage";
     drop.style.display = mont ? "none" : ""; moBox.hidden = !mont; $("#ap-row").style.display = mont ? "none" : "flex"; $("#tr-row").style.display = mont ? "none" : ""; $("#start").textContent = mont ? "Montage बनाएँ" : "Upload शुरू करें"; $("#start").disabled = mont ? false : !chosen;
@@ -632,7 +634,11 @@ function bindNew() {
     if (!chosen) return;
     $("#start").disabled = true;
     try {
-      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, skip_transcript: f.transcript_mode.value === "skip", theme_id: $("#up-theme")?.value || "", channel_id: S.channel });
+      const srtFile = f.transcript_mode.value === "srt" ? $("#up-srt")?.files?.[0] : null;
+      if (f.transcript_mode.value === "srt" && !srtFile) { toast("पहले SRT / VTT फ़ाइल चुनें (या “Transcript बनाएँ” चुनें)"); $("#start").disabled = false; return; }
+      const srtText = srtFile ? await srtFile.text() : "";
+      const p = await api("POST", "/projects", { title: f.title.value, language: f.language.value, autopilot: f.autopilot.checked, skip_transcript: f.transcript_mode.value !== "make", theme_id: $("#up-theme")?.value || "", channel_id: S.channel });
+      if (srtText) { try { const r = await api("POST", `/projects/${p.id}/transcript/import`, { text: srtText, language: f.language.value }); toast(`SRT पढ़ ली ✓ ${r.words} शब्द — upload पूरा होते ही captions तैयार`); } catch (e) { toast("SRT नहीं पढ़ी जा सकी: " + e.message + " — वीडियो बिना transcript के खुलेगी, editor के Captions tab से दोबारा डाल सकते हैं", 8000); } }
       const ideaId = (location.hash.match(/idea=([0-9a-f]+)/) || [])[1]; if (ideaId) api("PATCH", `/ideas/${ideaId}`, { project_id: p.id, status: "recorded" }).catch(() => {});
       const ctl = uploadControl();
       const prog = (label) => (done, total, info) => { const box = $("#up-progress"); if (!box) return;
