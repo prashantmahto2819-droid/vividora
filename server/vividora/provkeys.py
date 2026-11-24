@@ -66,7 +66,7 @@ CATALOG += [
     {"env": "TRANSCRIBE_AUTO_MIN", "group": "run", "label": "Auto: कितने मिनट से लंबी recording cloud पर जाए", "secret": False, "number": [1, 240],
      "use": "खाली = 8 मिनट", "link": "", "placeholder": "8"},
     {"env": "SPEND_CAP_USD", "group": "run", "label": "महीने की खर्च-सीमा (USD)", "secret": False, "number": [0, 100000],
-     "use": "इतना खर्च होते ही paid काम (cloud transcript, AI video, ElevenLabs) रुक जाते हैं। खाली = कोई सीमा नहीं, 0 = सब paid बंद", "link": "", "placeholder": "10"},
+     "use": "इतना खर्च होते ही सारे paid काम (cloud transcript, fal.ai / RunPod / ElevenLabs की आवाज़ें, AI music, AI video) रुक जाते हैं। खाली = कोई सीमा नहीं, 0 = सब paid बंद", "link": "", "placeholder": "10"},
     {"env": "RUNPOD_API_KEY", "group": "run", "label": "RunPod API key", "secret": True,
      "use": "एक key से: RunPod की आवाज़ें (MiniMax HD, Chatterbox Turbo) और AI video (p-video) — कुछ set up नहीं करना, सिर्फ़ नतीजे का पैसा; "
             "और आपका अपना Whisper endpoint (नीचे)", "link": "https://www.runpod.io/console/user/settings"},
