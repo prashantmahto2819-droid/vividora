@@ -87,6 +87,19 @@ VOICE_PRESETS: list[dict] = [
      "fal_model": "fal-ai/kokoro/hindi", "fal_voice": "hm_psi"},
     {"id": "fal_kokoro_omega", "label": "Omega — Hindi, तेज़ और सस्ती (पुरुष, fal.ai)", "lang": "hi", "gender": "m", "engine": "fal", "cloud": True,
      "fal_model": "fal-ai/kokoro/hindi", "fal_voice": "hm_omega"},
+    # ---- RunPod public endpoints (RUNPOD_API_KEY; paid per result, nothing to set up) ----
+    {"id": "rp_mm_wise", "label": "MiniMax HD — समझदार, साफ़ (महिला, RunPod)", "lang": "hi", "gender": "f", "engine": "runpod", "cloud": True,
+     "rp_model": "minimax-speech-02-hd", "rp_voice": "Wise_Woman"},
+    {"id": "rp_mm_deep", "label": "MiniMax HD — गहरी आवाज़ (पुरुष, RunPod)", "lang": "hi", "gender": "m", "engine": "runpod", "cloud": True,
+     "rp_model": "minimax-speech-02-hd", "rp_voice": "Deep_Voice_Man"},
+    {"id": "rp_mm_calm", "label": "MiniMax HD — शांत (महिला, RunPod)", "lang": "hi", "gender": "f", "engine": "runpod", "cloud": True,
+     "rp_model": "minimax-speech-02-hd", "rp_voice": "Calm_Woman"},
+    {"id": "rp_mm_happy", "label": "MiniMax HD — ख़ुशमिज़ाज (RunPod)", "lang": "hi", "gender": "m", "engine": "runpod", "cloud": True,
+     "rp_model": "minimax-speech-02-hd", "rp_voice": "Friendly_Person", "rp_emotion": "happy"},
+    {"id": "rp_cb_lucy", "label": "Chatterbox Turbo — Lucy, English (RunPod)", "lang": "en", "gender": "f", "engine": "runpod", "cloud": True,
+     "rp_model": "chatterbox-turbo", "rp_voice": "lucy"},
+    {"id": "rp_cb_ethan", "label": "Chatterbox Turbo — Ethan, English (RunPod)", "lang": "en", "gender": "m", "engine": "runpod", "cloud": True,
+     "rp_model": "chatterbox-turbo", "rp_voice": "ethan"},
     # ---- ElevenLabs Cloud voices (require ELEVENLABS_API_KEY) ----
     {"id": "el_rachel", "label": "Rachel — ElevenLabs, शांत professional (महिला)", "lang": "en", "gender": "f",
      "engine": "elevenlabs", "elevenlabs_voice_id": "21m00Tcm4TlvDq8ikWAM", "cloud": True,
@@ -145,7 +158,7 @@ def is_premium(voice: dict | None) -> bool:
     if not voice:
         return False
     engine = voice.get("engine", "")
-    if engine in ("elevenlabs", "google_cloud", "google", "gcloud", "fal"):
+    if engine in ("elevenlabs", "google_cloud", "google", "gcloud", "fal", "runpod"):
         return True
     return engine == "parler" or bool(voice.get("custom"))
 
@@ -160,6 +173,8 @@ def available_voices() -> list[dict]:
             if engine == "elevenlabs" and not os.getenv("ELEVENLABS_API_KEY", ""):
                 continue
             if engine == "fal" and not os.getenv("FAL_KEY", ""):
+                continue
+            if engine == "runpod" and not os.getenv("RUNPOD_API_KEY", ""):
                 continue
             if engine in ("google_cloud",) and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""):
                 continue
@@ -338,6 +353,50 @@ class ElevenLabsBackend:
         return out
 
 
+class RunpodBackend:
+    """Voices on RunPod's public endpoints (RUNPOD_API_KEY): MiniMax Speech 02 HD (many languages, emotions; priced per
+    1000 characters) and Chatterbox Turbo (English; priced per second of audio). The preset says which: `rp_model`,
+    `rp_voice`, optional `rp_emotion` (MiniMax: happy | sad | neutral | angry | fearful | surprised)."""
+    name = "runpod"
+    native_speed = False
+
+    def synth(self, text: str, voice: dict, lang: str, speed: float, out: Path) -> Path:
+        from . import meter, runpod
+        if not runpod.ready():
+            raise TTSMissing("RunPod की key नहीं है — Settings → API & Keys में RUNPOD_API_KEY डालें।")
+        model = str(voice.get("rp_model") or "minimax-speech-02-hd")
+        chatter = "chatterbox" in model
+        kind = "runpod_tts_sec" if chatter else "runpod_tts"
+        limit = 500 if chatter else 2000
+        parts: list[str] = []
+        for s_ in split_sentences(text, limit):
+            if parts and len(parts[-1]) + 1 + len(s_) <= limit:
+                parts[-1] += " " + s_
+            else:
+                parts.append(s_)
+        wavs = []
+        for i, part in enumerate(parts):
+            meter.check(kind)
+            if chatter:
+                inp = {"prompt": part, "voice": voice.get("rp_voice") or "lucy", "format": "wav"}
+            else:
+                inp = {"prompt": part, "voice_id": voice.get("rp_voice") or "Wise_Woman", "speed": 1, "emotion": voice.get("rp_emotion") or "neutral"}
+            res = runpod.run(model, inp, max_wait=300)
+            url = res.get("audio_url") or res.get("result")
+            raw = out.with_name(f"{out.stem}_rp{i}.bin")
+            runpod.download(str(url or ""), raw)
+            wav = out.with_name(f"{out.stem}_rp{i}.wav")
+            _ff(["-i", str(raw), "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(wav)])
+            raw.unlink(missing_ok=True)
+            units = wav_seconds(wav) if chatter else len(part) / 1000.0
+            meter.add(kind, part[:60], units, usd=runpod.cost_of(res))      # RunPod states the price of each answer
+            wavs.append(wav)
+        pcm = b"".join(read_pcm(w)[0] for w in wavs)
+        for w in wavs:
+            w.unlink(missing_ok=True)
+        return write_wav(out, pcm, 24000)
+
+
 MYVOICE_HINT = ("अपनी आवाज़ का नमूना नहीं मिला — Library → Sounds में अपनी साफ़ आवाज़ की 10–20 सेकंड की recording upload करें "
                 "और उसका नाम या tag “myvoice” रखें।")
 
@@ -494,6 +553,8 @@ def backend_for(engine: str):
         return ElevenLabsBackend()
     if engine == "fal":
         return FalBackend()
+    if engine == "runpod":
+        return RunpodBackend()
     if engine in ("google_cloud", "google", "gcloud"):
         return GoogleCloudTTSBackend()
     if engine == "voicestudio":
@@ -511,6 +572,10 @@ def check_ready(engine: str) -> None:
     if isinstance(b, ElevenLabsBackend):
         if not os.getenv("ELEVENLABS_API_KEY", ""):
             raise TTSMissing("ELEVENLABS_API_KEY सेट नहीं है — .env में ElevenLabs API key डालें।")
+        return
+    if isinstance(b, RunpodBackend):
+        if not os.getenv("RUNPOD_API_KEY", ""):
+            raise TTSMissing("RunPod की key नहीं है — Settings → API & Keys में RUNPOD_API_KEY डालें।")
         return
     if isinstance(b, FalBackend):
         if not os.getenv("FAL_KEY", ""):
@@ -905,7 +970,7 @@ def handle_job(client, job: dict, work: Path, on_progress: ProgressFn | None = N
     up = client.upload(job["id"], final, "dub", lang)
     v = p.get("voice") or {}
     meta = {"mode": p.get("mode"), "language": lang, "source_language": p.get("source_language"),
-            "voice": {k: v.get(k) for k in ("id", "label", "engine", "description", "kokoro_voice", "fal_model", "fal_voice")
+            "voice": {k: v.get(k) for k in ("id", "label", "engine", "description", "kokoro_voice", "fal_model", "fal_voice", "rp_model", "rp_voice")
                       if v.get(k) and not str(v.get(k)).startswith("data:")},
             "engine": r["engine"], "speed": p.get("speed", 1.0), "pitch": p.get("pitch", 0), "duration": r["duration"],
             "drift_max": r["drift_max"], "cached": r.get("cached", 0), "sig": p.get("sig"), "segments": r["segments"],

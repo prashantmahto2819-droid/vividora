@@ -68,7 +68,11 @@ CATALOG += [
     {"env": "SPEND_CAP_USD", "group": "run", "label": "महीने की खर्च-सीमा (USD)", "secret": False, "number": [0, 100000],
      "use": "इतना खर्च होते ही paid काम (cloud transcript, AI video, ElevenLabs) रुक जाते हैं। खाली = कोई सीमा नहीं, 0 = सब paid बंद", "link": "", "placeholder": "10"},
     {"env": "RUNPOD_API_KEY", "group": "run", "label": "RunPod API key", "secret": True,
-     "use": "RunPod serverless (transcript, 3D rigging)", "link": "https://www.runpod.io/console/user/settings"},
+     "use": "एक key से: RunPod की आवाज़ें (MiniMax HD, Chatterbox Turbo) और AI video (p-video) — कुछ set up नहीं करना, सिर्फ़ नतीजे का पैसा; "
+            "और आपका अपना Whisper endpoint (नीचे)", "link": "https://www.runpod.io/console/user/settings"},
+    {"env": "AI_VIDEO_PROVIDER", "group": "run", "label": "AI video clips कहाँ बनें", "secret": False,
+     "choices": {"auto": "Auto — fal.ai हो तो वही, नहीं तो RunPod", "fal": "fal.ai (AI तस्वीर को हिलाता है)", "runpod": "RunPod p-video (बात से सीधा clip, ~$0.02/सेकंड)"},
+     "use": "दोनों keys हों तब चुनें; जिसकी key नहीं उसका विकल्प काम नहीं करेगा", "link": ""},
     {"env": "RUNPOD_WHISPER_ENDPOINT", "group": "run", "label": "RunPod Whisper endpoint ID", "secret": False,
      "use": "RunPod → Serverless → “Faster Whisper” endpoint की ID (Min workers = 0 रखें)", "link": "https://www.runpod.io/console/serverless"},
 ]
@@ -81,7 +85,7 @@ _SETTINGS = {"PUBLIC_URL": "public_url", "YT_CLIENT_ID": "yt_client_id", "YT_CLI
              "TIKTOK_CLIENT_KEY": "tiktok_client_key", "TIKTOK_CLIENT_SECRET": "tiktok_client_secret"}
 # what a worker process uses itself (AI calls made while a job runs)
 WORKER_ENVS = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "FAL_KEY", "ELEVENLABS_API_KEY",
-               "TRANSCRIBE_ENGINE", "TRANSCRIBE_AUTO_MIN", "RUNPOD_API_KEY", "RUNPOD_WHISPER_ENDPOINT")
+               "TRANSCRIBE_ENGINE", "TRANSCRIBE_AUTO_MIN", "RUNPOD_API_KEY", "RUNPOD_WHISPER_ENDPOINT", "AI_VIDEO_PROVIDER")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS provider_keys (
   env TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT);"""

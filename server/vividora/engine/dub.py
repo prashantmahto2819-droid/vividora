@@ -63,9 +63,9 @@ def resolve_voice(voice_id: str | None, description: str | None, lang: str) -> d
         v = next(x for x in VOICE_PRESETS if x["lang"] == lang)
     _VOICE_KEYS = ("id", "label", "engine", "gender", "description", "kokoro_voice", "kokoro_lang",
                     "elevenlabs_voice_id", "elevenlabs_settings", "google_voice_name", "google_language_code",
-                    "fal_model", "fal_voice", "fal_exaggeration", "fal_clone")
+                    "fal_model", "fal_voice", "fal_exaggeration", "fal_clone", "rp_model", "rp_voice", "rp_emotion")
     out = {k: v.get(k) for k in _VOICE_KEYS if v.get(k)}
-    if desc and v.get("engine") not in ("elevenlabs", "google_cloud", "fal"):
+    if desc and v.get("engine") not in ("elevenlabs", "google_cloud", "fal", "runpod"):
         # a custom description always goes to Parler (Kokoro/cloud have fixed voices)
         out.update(engine="parler", description=desc, id="custom", label="अपनी आवाज़ (description)")
         out.pop("kokoro_voice", None)

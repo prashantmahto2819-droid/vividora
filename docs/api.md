@@ -156,3 +156,13 @@ Without a sample the request is refused with the upload hint — it never falls 
 `engine/srtimport.py` turns every cue into a segment (word times share the cue by word length). Before the video is prepared the
 words wait in `meta.transcript_preset` and no transcribe job is made; afterwards they replace the transcript at once (a running
 transcribe job is cancelled; cuts and effects are untouched).
+
+### RunPod public endpoints
+
+`engine/runpod.py` (`RUNPOD_API_KEY`; `POST {base}/{model}/run`, `GET …/status/{id}`; `RUNPOD_API_BASE` to point elsewhere).
+* Voices (`tts.RunpodBackend`): `rp_mm_wise|deep|calm|happy` → `minimax-speech-02-hd` `{prompt, voice_id, speed, emotion}`
+  ($0.05 / 1000 characters), `rp_cb_lucy|ethan` → `chatterbox-turbo` `{prompt, voice, format}` ($0.001 / audio second).
+* AI video: `AI_VIDEO_PROVIDER=auto|fal|runpod`; RunPod uses `p-video` `{prompt, duration, resolution, fps, aspect_ratio}`
+  (text → video in the AI picture's shape, $0.02 / second at 720p; `RUNPOD_VIDEO_DRAFT=1` = 75 % cheaper previews).
+* Every request passes the spending limit; the answer's own `output.cost` is what gets recorded (`runpod_tts`, `runpod_tts_sec`, `runpod_video`).
+* Transcript on RunPod stays the creator's own "Faster Whisper" serverless endpoint (`RUNPOD_WHISPER_ENDPOINT`) — RunPod has no public Whisper endpoint.

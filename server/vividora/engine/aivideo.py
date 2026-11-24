@@ -24,7 +24,13 @@ MAX_BYTES = 80 * 1024 * 1024
 
 
 def provider() -> str | None:
-    return "fal" if os.getenv("FAL_KEY") else None
+    """fal (animates the AI picture) or runpod (p-video makes the clip from the description). AI_VIDEO_PROVIDER picks one
+    when both keys are there; default: fal."""
+    want = (os.getenv("AI_VIDEO_PROVIDER") or "auto").strip().lower()
+    have = {"fal": bool(os.getenv("FAL_KEY")), "runpod": bool(os.getenv("RUNPOD_API_KEY"))}
+    if want in have:
+        return want if have[want] else None
+    return "fal" if have["fal"] else "runpod" if have["runpod"] else None
 
 
 def max_clips() -> int:
@@ -41,7 +47,41 @@ def estimate_usd(clips: int) -> float | None:
         secs = float(os.getenv("AI_VIDEO_SECONDS") or 5)
     except ValueError:
         return None
+    if provider() == "runpod":
+        from . import meter
+        price = meter.price("runpod_video") * (0.25 if _rp_draft() else 1.0)
     return round(price * secs * max(0, clips), 2) if price > 0 else None
+
+
+def _rp_draft() -> bool:
+    return (os.getenv("RUNPOD_VIDEO_DRAFT") or "").strip().lower() in ("1", "true", "yes")
+
+
+def _runpod_clip(image: Path, prompt: str, dest: Path) -> Path:
+    """RunPod public endpoint p-video: the clip is made from the description, in the picture's shape (wide / tall / square).
+    (Its `image` input wants a public link; the AI picture stays on this server, so only its shape is used.)"""
+    from . import meter, runpod
+    meter.check("runpod_video")
+    try:
+        secs = int(max(1, min(10, round(float(os.getenv("AI_VIDEO_SECONDS") or 5)))))
+    except ValueError:
+        secs = 5
+    ar = "16:9"
+    try:
+        from PIL import Image
+        with Image.open(image) as im:
+            r = im.width / max(1, im.height)
+        ar = "9:16" if r < 0.8 else "1:1" if r < 1.2 else "16:9"
+    except Exception:  # noqa: BLE001 — the shape is a nicety
+        pass
+    inp = {"prompt": prompt[:500], "duration": secs, "resolution": "720p", "fps": 24, "aspect_ratio": ar, "save_audio": False}
+    if _rp_draft():
+        inp["draft"] = True
+    out = runpod.run(os.getenv("RUNPOD_VIDEO_MODEL") or "p-video", inp, max_wait=600)
+    runpod.download(str(out.get("result") or out.get("video_url") or ""), dest, MAX_BYTES)
+    meter.add("runpod_video", prompt[:80], secs, usd=runpod.cost_of(out) if runpod.cost_of(out) is not None
+              else meter.price("runpod_video") * secs * (0.25 if _rp_draft() else 1.0))
+    return dest
 
 
 def _call(method: str, url: str, body: dict | None = None, timeout: int = 60) -> dict:
@@ -55,6 +95,8 @@ def animate(image: Path, prompt: str, dest: Path, *, call=None, download=None, p
     """Image → MP4 at dest. Raises RuntimeError on any failure or timeout."""
     if not provider():
         raise RuntimeError("AI video provider not configured")
+    if provider() == "runpod":
+        return _runpod_clip(image, prompt, dest)
     from . import meter
     meter.check("ai_video")
     call = call or _call
